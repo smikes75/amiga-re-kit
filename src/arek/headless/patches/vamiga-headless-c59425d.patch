@@ -1,0 +1,131 @@
+diff --git a/Core/Components/Agnus/Agnus.cpp b/Core/Components/Agnus/Agnus.cpp
+index 9010871..80915cc 100644
+--- a/Core/Components/Agnus/Agnus.cpp
++++ b/Core/Components/Agnus/Agnus.cpp
+@@ -109,6 +109,13 @@ Agnus::operator << (SerResetter &worker)
+     // Remember some events
+     auto insEvent = id[SLOT_INS];
+ 
++    // Turrican-projekt patch: RetroShell wakeups (the `wait` command) must
++    // survive a soft reset. Games that execute the 68000 RESET instruction
++    // (Turrican II does after "press fire") would otherwise wipe the pending
++    // wakeup and the script would never resume.
++    Cycle rshTrigger[3] = { trigger[SLOT_RSH0], trigger[SLOT_RSH1], trigger[SLOT_RSH2] };
++    EventID rshId[3] = { id[SLOT_RSH0], id[SLOT_RSH1], id[SLOT_RSH2] };
++
+     serialize(worker);
+ 
+     // Start with a long frame
+@@ -139,6 +146,11 @@ Agnus::operator << (SerResetter &worker)
+     scheduleFirstBplEvent();
+     scheduleFirstDasEvent();
+     if (insEvent) scheduleRel <SLOT_INS> (0, insEvent);
++    if (!isHardResetter(worker)) {
++        if (rshTrigger[0] != NEVER) scheduleAbs <SLOT_RSH0> (rshTrigger[0], rshId[0]);
++        if (rshTrigger[1] != NEVER) scheduleAbs <SLOT_RSH1> (rshTrigger[1], rshId[1]);
++        if (rshTrigger[2] != NEVER) scheduleAbs <SLOT_RSH2> (rshTrigger[2], rshId[2]);
++    }
+ }
+ 
+ i64
+diff --git a/Core/Headless.cpp b/Core/Headless.cpp
+index 8c50351..b0cce0d 100644
+--- a/Core/Headless.cpp
++++ b/Core/Headless.cpp
+@@ -136,6 +136,7 @@ Headless::runScript(const fs::path &path)
+ {
+     // Create an emulator instance
+     VAmiga vamiga;
++    amiga = &vamiga;
+ 
+     // Plug in DiagRom
+     vamiga.mem.loadRom(diagROM13, sizeofDiagRom13);
+@@ -183,6 +184,26 @@ Headless::process(Message msg)
+             wakeUp();
+             break;
+ 
++        case Msg::BREAKPOINT_REACHED:
++        case Msg::WATCHPOINT_REACHED:
++        case Msg::CATCHPOINT_REACHED:
++
++            // Turrican-projekt patch: when the emulator stops at a guard,
++            // run the RetroShell script named by VAHL_ONSTOP (dump regs,
++            // memory, ...). Commands are processed while paused.
++            if (const char *onstop = getenv("VAHL_ONSTOP")) {
++                std::cout << "ONSTOP " << MsgEnum::key(msg.type)
++                          << " pc=" << std::hex << (u32)msg.value
++                          << " aux=" << (u32)(msg.value >> 32) << std::dec << std::endl;
++                try {
++                    amiga->retroShell.abortScript();
++                    amiga->retroShell.execScript(fs::path(onstop));
++                } catch (std::exception &e) {
++                    std::cout << "ONSTOP error: " << e.what() << std::endl;
++                }
++            }
++            break;
++
+         default:
+             break;
+     }
+diff --git a/Core/Headless.h b/Core/Headless.h
+index c767a95..2fa1939 100644
+--- a/Core/Headless.h
++++ b/Core/Headless.h
+@@ -24,6 +24,10 @@ void process(const void *listener, Message msg);
+ 
+ class Headless : Wakeable {
+ 
++    // Turrican-projekt patch: emulator instance (set in runScript)
++    class VAmiga *amiga = nullptr;
++
++
+     static const char *selfTestScript[];
+     static const char *smokeTestScript[];
+     
+diff --git a/Core/Misc/RetroShell/Console.cpp b/Core/Misc/RetroShell/Console.cpp
+index fccdc49..ba6484c 100644
+--- a/Core/Misc/RetroShell/Console.cpp
++++ b/Core/Misc/RetroShell/Console.cpp
+@@ -1190,7 +1190,12 @@ Console::initCommonCommands(RSCommand &root)
+             .func   = [this] (std::ostream &os, const Arguments &args, const std::vector<isize> &values) {
+                 
+                 auto seconds = parseNum(args.at("seconds"));
+-                shell.scheduleWakeup(SEC(seconds));
++                // Turrican-projekt patch: optional unit "frames" (PAL frames)
++                if (args.contains("unit") && args.at("unit") == "frames") {
++                    shell.scheduleWakeup(seconds * DMA_CYCLES(PAL::HPOS_CNT * PAL::VPOS_CNT_LF));
++                } else {
++                    shell.scheduleWakeup(SEC(seconds));
++                }
+                 throw ScriptInterruption();
+             }
+         });
+diff --git a/Core/VAmiga.cpp b/Core/VAmiga.cpp
+index 74c9d2a..7a234ec 100644
+--- a/Core/VAmiga.cpp
++++ b/Core/VAmiga.cpp
+@@ -1753,6 +1753,12 @@ RetroShellAPI::execScript(const fs::path &path)
+     retroShell->asyncExecScript(path);
+ }
+ 
++void
++RetroShellAPI::abortScript()
++{
++    retroShell->abortScript();
++}
++
+ void
+ RetroShellAPI::execScript(std::stringstream &ss)
+ {
+diff --git a/Core/VAmiga.h b/Core/VAmiga.h
+index 5edfd7c..d50b842 100644
+--- a/Core/VAmiga.h
++++ b/Core/VAmiga.h
+@@ -1563,6 +1563,7 @@ public:
+      *  to an error, MSG\_SCRIPT\_ABORT is sent.
+      */
+     void execScript(const fs::path &path);
++    void abortScript();   // Turrican-projekt patch: drop pending script lines
+     void execScript(std::stringstream &ss);
+     void execScript(const std::ifstream &fs);
+     void execScript(const string &contents);

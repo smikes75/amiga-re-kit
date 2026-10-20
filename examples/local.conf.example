@@ -1,0 +1,8 @@
+# amiga-re-kit project configuration. Copy to local.conf (git-ignored).
+# Relative paths resolve against the directory of this file.
+MACHINE = A500_OCS_1MB            # vAmiga regression profile (A500_OCS_1MB, A500_ECS_1MB, A1200_2MB, ...)
+ROM     = assets/rom/kick13.rom   # your own Kickstart image
+ADF1    = assets/adf/disk1.adf    # your own disk images
+ADF2    = assets/adf/disk2.adf
+VAHL    = bin/VAHeadless          # patched headless vAmiga, see docs/HEADLESS.md
+OBJDUMP = m68k-elf-objdump        # optional (brew install m68k-elf-binutils) for `arek xref`

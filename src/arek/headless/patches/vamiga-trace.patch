@@ -1,0 +1,36 @@
+diff --git a/Core/Components/CPU/CPU.cpp b/Core/Components/CPU/CPU.cpp
+index 3550f1d4a..b25d397b6 100644
+--- a/Core/Components/CPU/CPU.cpp
++++ b/Core/Components/CPU/CPU.cpp
+@@ -289,6 +289,31 @@ Moira::didReachSoftstop(u32 addr)
+ void
+ Moira::didReachBreakpoint(u32 addr)
+ {
++    // VAHL_TRACE=<soubor>: kazdy zasah breakpointu zapise zaznam (hlavicka
++    // VTR1 + registry + chip RAM) a emulace bezi dal bez zastaveni. Zadny
++    // zapis do stavu emulatoru, jen cteni (spypeek).
++    static FILE *trace = nullptr;
++    static bool probed = false;
++    static u32 hits = 0;
++    if (!probed) {
++        probed = true;
++        if (const char *path = getenv("VAHL_TRACE")) trace = fopen(path, "wb");
++    }
++    if (trace) {
++        u32 len = 524288;
++        if (const char *s = getenv("VAHL_TRACE_LEN")) len = u32(strtoul(s, nullptr, 0));
++        u32 head[24] = {
++            0x31525456, addr, hits++, u32(agnus.pos.frame), u32(agnus.pos.v),
++            u32(agnus.pos.h), u32(getSR()) };
++        for (int i = 0; i < 16; i++) head[7 + i] = reg.r[i];
++        head[23] = len;
++        fwrite(head, 4, 24, trace);
++        std::vector<u8> buf(len);
++        for (u32 i = 0; i < len; i++) buf[i] = mem.spypeek8 <Accessor::CPU> (i);
++        fwrite(buf.data(), 1, len, trace);
++        fflush(trace);
++        return;
++    }
+     amiga.setFlag(RL::BREAKPOINT_REACHED);
+ }
+ 

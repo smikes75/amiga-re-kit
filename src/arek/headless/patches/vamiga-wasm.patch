@@ -1,0 +1,80 @@
+diff --git a/Core/Components/Amiga.cpp b/Core/Components/Amiga.cpp
+index badc349..2b521d2 100644
+--- a/Core/Components/Amiga.cpp
++++ b/Core/Components/Amiga.cpp
+@@ -1016,6 +1016,22 @@ Amiga::update(CmdQueue &queue)
+     remoteManager.update();
+ }
+ 
++void
++Amiga::computeUntilLine(isize line)
++{
++    // Turrican-projekt (wasm): jako computeFrame, ale konci na zacatku radku `line`
++    // (vzorkovani RAM v okamziku copper preruseni hry). Konec snimku loop take ukonci.
++    while (agnus.pos.v < line) {
++
++        cpu.execute();
++        if (flags) {
++            // konec snimku (radek nedosazen): priznak spotrebovat jako computeFrame
++            if (flags & RL::SYNC_THREAD) { clearFlag(RL::SYNC_THREAD); break; }
++            break;   // breakpoint apod.: nechat zpracovat computeFrame
++        }
++    }
++}
++
+ void
+ Amiga::computeFrame()
+ {
+diff --git a/Core/Components/Amiga.h b/Core/Components/Amiga.h
+index 7b3c07d..3a55b64 100644
+--- a/Core/Components/Amiga.h
++++ b/Core/Components/Amiga.h
+@@ -409,6 +409,8 @@ public:
+ 
+     // Emulates a frame
+     void computeFrame();
++    // Turrican-projekt (wasm): emuluje az do zacatku rastroveho radku `line` aktualniho snimku
++    void computeUntilLine(isize line);
+ 
+     // Fast-forward the run-ahead instance
+     void fastForward(isize frames);
+diff --git a/Core/Infrastructure/Emulator.h b/Core/Infrastructure/Emulator.h
+index 2d7f22e..18fb6c1 100644
+--- a/Core/Infrastructure/Emulator.h
++++ b/Core/Infrastructure/Emulator.h
+@@ -125,6 +125,17 @@ public:
+     // Methods from Thread
+     //
+ 
++public:
++
++    // Turrican-projekt patch (WebAssembly): one frame synchronously, without
++    // the emulator thread. update() applies queued commands (RetroShell,
++    // config), computeFrame() runs one PAL frame. May throw when the core
++    // stops itself (breakpoint); the caller handles it like vAmigaWeb.
++    void stepFrame() { update(); computeFrame(); }
++    void stepFrameCommandsOnly() { update(); }
++    void stepToLine(isize line) { update(); main.computeUntilLine(line); }
++    void stepFrameRest() { computeFrame(); }
++
+ private:
+ 
+     void update() override;
+diff --git a/Core/Infrastructure/Thread.h b/Core/Infrastructure/Thread.h
+index b67e1a3..1f63023 100644
+--- a/Core/Infrastructure/Thread.h
++++ b/Core/Infrastructure/Thread.h
+@@ -84,7 +84,12 @@ public:
+     const char *objectName() const override { return "Thread"; }
+ 
+     // Checks the launch state
+-    bool isLaunched() const { return thread.joinable(); }
++    bool isLaunched() const { return thread.joinable() || wasmLaunched; }
++
++    // Turrican-projekt patch (WebAssembly): emulator bezi bez vlakna,
++    // snimky pocita volajici (Emulator::stepFrame)
++    bool wasmLaunched = false;
++    void markLaunched() { wasmLaunched = true; }
+ 
+ protected:
+ 

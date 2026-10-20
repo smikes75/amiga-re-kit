@@ -1,0 +1,273 @@
+"""MCP server exposing the kit to an AI assistant (Claude Code, Claude Desktop,
+any MCP client). Run with ``arek-mcp`` (stdio transport).
+
+The server is stateless apart from a cache of files it has loaded; every
+tool takes paths on the local machine. It never fetches anything from the
+network and it never writes outside the paths you give it. Copyrighted
+material (ADF, ROM) stays on your disk - the assistant only sees the
+measurements the tools return.
+
+Claude Code configuration (``.mcp.json`` in a project or ``claude mcp add``)::
+
+    {"mcpServers": {"arek": {"command": "arek-mcp"}}}
+"""
+import json
+import os
+from pathlib import Path
+
+try:                                           # mcp >= 2.0
+    from mcp.server.mcpserver import MCPServer as _Server
+except ImportError:                            # mcp 1.x
+    from mcp.server.fastmcp import FastMCP as _Server
+
+mcp = _Server('arek', instructions=(
+    'Amiga reverse-engineering kit. Workflow: adf_info / adf_map on the disk image -> '
+    'scan_packed to find packed blocks -> unpack -> disassemble / walk from the boot '
+    'code -> hwscan to find the hardware boundary -> recomp to C -> verify against '
+    'headless-emulator captures (shot, bpstate, diff). Every result is a measurement '
+    'of the given bytes; nothing is inferred from game names.'))
+
+_cache = {}
+
+
+def _bytes(path):
+    p = Path(path).expanduser()
+    key = (str(p), p.stat().st_mtime_ns)
+    if key not in _cache:
+        _cache.clear()
+        _cache[key] = p.read_bytes()
+    return _cache[key]
+
+
+def _addr(x):
+    return int(x, 0) if isinstance(x, str) else int(x)
+
+
+# ------------------------------------------------------------------ disk
+@mcp.tool()
+def adf_info(path: str) -> dict:
+    """Inventory of an ADF image: size, sha256, boot block (DOS type, checksum,
+    bootable), mean entropy, empty sector count."""
+    from . import adf
+    return adf.inventory(_bytes(path), Path(path).name)
+
+
+@mcp.tool()
+def adf_map(path: str) -> str:
+    """ASCII entropy map of the disk, one char per sector (. empty, - sparse,
+    c code/data, d dense, # packed). The first picture to look at."""
+    from . import adf
+    data = _bytes(path)
+    adf.check_size(data)
+    return adf.ascii_map(data)
+
+
+@mcp.tool()
+def adf_regions(path: str) -> list:
+    """Contiguous regions of the disk by entropy class with track numbers."""
+    from . import adf
+    return adf.regions(_bytes(path))
+
+
+@mcp.tool()
+def adf_extract(path: str, offset: str, length: str, out: str) -> str:
+    """Copy ``length`` bytes from ``offset`` of the image to file ``out``."""
+    data = _bytes(path)
+    o, n = _addr(offset), _addr(length)
+    Path(out).write_bytes(data[o:o + n])
+    return '%s: %d bytes from %#x' % (out, n, o)
+
+
+# ------------------------------------------------------------------ packers
+@mcp.tool()
+def scan_packed(path: str, deep: bool = False) -> dict:
+    """Find packer signatures (PP20, RNC, ATN!, IMP!, ...) and verified
+    Bytekiller blocks in a file or image. ``deep`` also tries the SWIV
+    word-stream variant (slow)."""
+    from .packers import scan
+    return scan.scan(_bytes(path), deep=deep)
+
+
+@mcp.tool()
+def unpack(path: str, out: str, kind: str = 'auto', offset: str = '0') -> dict:
+    """Unpack a block to ``out``. kind: auto | pp20 | bytekiller | bytekiller_a | t2."""
+    from .packers import bytekiller, pp20, turrican2
+    data = _bytes(path)
+    off = _addr(offset)
+    if kind == 'auto':
+        kind = 'pp20' if data[off:off + 4] == b'PP20' else 'bytekiller'
+    if kind == 'pp20':
+        res, ok = pp20.unpack(data[off:]), True
+    elif kind == 'bytekiller':
+        res, ok = bytekiller.unpack_b(data, off)
+    elif kind == 'bytekiller_a':
+        res, ok = bytekiller.unpack_a(data, off)
+    elif kind == 't2':
+        res, ok = turrican2.unpack_t2(data[off:]), True
+    else:
+        raise ValueError('unknown kind ' + kind)
+    Path(out).write_bytes(res)
+    return {'out': out, 'bytes': len(res), 'checksum_ok': ok, 'kind': kind}
+
+
+# ------------------------------------------------------------------ hunk
+@mcp.tool()
+def hunk_info(path: str) -> dict:
+    """Hunk table (kind, size) of an AmigaDOS executable without relocating."""
+    from . import hunk
+    return hunk.info(_bytes(path))
+
+
+@mcp.tool()
+def hunk_load(path: str, base: str, out_prefix: str) -> list:
+    """Relocate all hunks contiguously from ``base`` and write
+    ``<out_prefix>_<i>_<addr>.bin`` files."""
+    from . import hunk
+    res = []
+    for i, (b, body) in enumerate(hunk.load(_bytes(path), _addr(base))):
+        p = '%s_%d_%06x.bin' % (out_prefix, i, b)
+        Path(p).write_bytes(body)
+        res.append({'file': p, 'base': b, 'bytes': len(body)})
+    return res
+
+
+# ------------------------------------------------------------------ 68k
+@mcp.tool()
+def disassemble(path: str, base: str, lo: str = None, hi: str = None,
+                limit: int = 400) -> str:
+    """Linear disassembly of [lo, hi) of a binary loaded at ``base``. Stops at
+    the first undecodable word (marked ``??``) - use ``walk`` for code with
+    data in between."""
+    from .m68k import disasm
+    data = _bytes(path)
+    b = _addr(base)
+    rows = disasm.listing(data, b, _addr(lo) if lo else b, _addr(hi) if hi else b + len(data), limit)
+    return disasm.format_listing(rows)
+
+
+@mcp.tool()
+def walk(path: str, base: str, start: str, lo: str = None, hi: str = None) -> dict:
+    """Follow the flow graph from ``start``: reachable instructions per routine
+    (listing) plus explicit frontiers (undecodable words, indirect jumps)."""
+    from .m68k import disasm
+    data = _bytes(path)
+    b = _addr(base)
+    rows, fr = disasm.listing_walk(data, b, _addr(start), _addr(lo) if lo else b,
+                                   _addr(hi) if hi else b + len(data))
+    return {'listing': disasm.format_listing(rows), 'instructions': len(rows),
+            'frontiers': [{'addr': '%06x' % a, 'why': w} for a, w in fr]}
+
+
+@mcp.tool()
+def hwscan(path: str, base: str, roots: list, lo: str = None, hi: str = None,
+           abase: dict = None) -> dict:
+    """Which routines reachable from ``roots`` are pure RAM and which touch
+    custom chips / CIA / ROM - the hardware boundary. ``abase`` maps address
+    registers known at entry to addresses, e.g. {"a5": "0xdff000"}."""
+    from .m68k import hwscan as hs
+    data = _bytes(path)
+    b = _addr(base)
+    ab = {int(k.lower().lstrip('a')): _addr(v) for k, v in (abase or {}).items()}
+    routines = hs.scan(data, b, [_addr(r) for r in roots], _addr(lo) if lo else b,
+                       _addr(hi) if hi else b + len(data), abase=ab)
+    ok = hs.closure(routines)
+    rep = hs.report(routines, ok)
+    rep['text'] = hs.format_report(rep)
+    return rep
+
+
+@mcp.tool()
+def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = None,
+           stubs: list = None, with_main: bool = False) -> dict:
+    """Statically recompile 68k routines to C. ``auto``: entry addresses whose
+    bodies are discovered by walking; ``funcs``: 'START:END[:ENTRY]' linear
+    ranges; ``stubs``: 'An:DISP:NAME' for jsr through jump tables. Raises on
+    anything the decoder does not support - nothing is silently skipped."""
+    from .m68k import recomp as rc
+    for s in stubs or []:
+        rc.add_stub(s)
+    fs = [rc.parse_func_spec(s) for s in funcs or []]
+    src, stats, entries = rc.generate(_bytes(path), _addr(base), fs,
+                                      [_addr(a) for a in auto or []], with_main=with_main)
+    Path(out_c).write_text(src)
+    return {'out': out_c, 'entries': ['%06x' % e for e in entries], 'stats': stats}
+
+
+@mcp.tool()
+def xref(prog_txt: str, syms_json: str = None, callers_of: str = None, top: int = 40) -> dict:
+    """Cross references from an m68k objdump listing: most called routines,
+    most referenced data, or the callers of one address."""
+    from .m68k import xref as xr
+    x = xr.Xref.from_file(prog_txt, syms_json)
+    if callers_of:
+        return {'callers': ['%06x' % c for c in x.callers(_addr(callers_of))]}
+    return {'summary': x.summary(top)}
+
+
+@mcp.tool()
+def copper(path: str, base: str = '0', offset: str = '0', limit: int = 512) -> str:
+    """Disassemble a copper list found at ``offset`` of a RAM dump loaded at
+    ``base`` (MOVE/WAIT/SKIP with custom register names)."""
+    from . import copper as cp
+    data = _bytes(path)
+    o = _addr(offset)
+    return cp.format_listing(cp.disassemble(data[o:], _addr(base) + o, limit))
+
+
+# ------------------------------------------------------------------ emulator
+@mcp.tool()
+def headless_shot(conf: str, prefix: str, seconds: int, events: list = None) -> str:
+    """Boot the ADF from local.conf in the patched headless vAmiga, run
+    ``seconds`` (warp), return the PNG path. ``events``: [[t, "retroshell cmd"]]
+    such as joystick presses."""
+    from .headless import config, shot
+    c = config.load(conf)
+    ev = [(int(t), cmd) for t, cmd in events or []]
+    return shot.shot(c, prefix, seconds, ev)
+
+
+@mcp.tool()
+def headless_bpstate(conf: str, out_dir: str, address: str, end_seconds: int,
+                     skip: int = 0, events: list = None, ram_len: int = 524288) -> dict:
+    """Run to breakpoint ``address`` (the skip+1-th hit) and capture CPU
+    registers, Agnus beam and chip RAM into ``out_dir`` (cpu.json + ram bin)."""
+    from .headless import config, bpstate
+    c = config.load(conf)
+    ev = [(int(t), cmd) for t, cmd in events or []]
+    meta = bpstate.capture(c, out_dir, _addr(address), skip, end_seconds, events=ev, ram_len=ram_len)
+    return {k: v for k, v in meta.items() if k not in ('regions',)}
+
+
+@mcp.tool()
+def diff_captures(dir_a: str, dir_b: str, lo: str = None, hi: str = None) -> dict:
+    """Byte-level differences between two bpstate captures (RAM and registers),
+    optionally restricted to [lo, hi)."""
+    from . import contract
+    x, y = contract.load(dir_a), contract.load(dir_b)
+    ranges = [(_addr(lo), _addr(hi))] if lo and hi else None
+    runs = contract.compare(x['ram'], y['ram'], ranges)
+    return {'runs': [{'start': '%06x' % s, 'end': '%06x' % e, 'expected': a, 'got': b}
+                     for s, e, a, b in runs],
+            'registers': {k: ['%08x' % v[0], '%08x' % v[1]] for k, v in contract.diff_regs(x, y).items()},
+            'text': contract.format_runs(runs)}
+
+
+@mcp.tool()
+def ram_at(path: str, offset: str, length: int = 256, base: str = '0') -> str:
+    """Hex dump of ``length`` bytes at ``offset`` of a RAM dump / file."""
+    data = _bytes(path)
+    o, b = _addr(offset), _addr(base)
+    L = []
+    for i in range(o, min(o + length, len(data)), 16):
+        chunk = data[i:i + 16]
+        L.append('%06x  %-48s %s' % (b + i, ' '.join('%02x' % c for c in chunk),
+                                     ''.join(chr(c) if 32 <= c < 127 else '.' for c in chunk)))
+    return '\n'.join(L)
+
+
+def main():
+    mcp.run(transport='stdio')
+
+
+if __name__ == '__main__':
+    main()

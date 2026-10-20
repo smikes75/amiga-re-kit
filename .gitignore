@@ -1,0 +1,22 @@
+# copyrighted material never enters the repository
+*.adf
+*.rom
+*.ADF
+*.ROM
+roms/
+disks/
+assets/
+local.conf
+
+# build / work products
+build/
+work/
+bin/
+*.raw
+*.o
+*.so
+dist/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.venv/

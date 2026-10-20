@@ -1,0 +1,49 @@
+diff --git a/Core/Components/Memory/Memory.cpp b/Core/Components/Memory/Memory.cpp
+--- a/Core/Components/Memory/Memory.cpp
++++ b/Core/Components/Memory/Memory.cpp
+@@ -2648,6 +2648,19 @@
+ }
+ 
++// SWIV-projekt patch: zaznam vsech zapisu do custom registru i s PC.
++// Jedine hrdlo, kterym projdou zapisy z CPU i z Agnusu (copper), takze
++// staci hook tady. Buffer je kruhovy a plni se jen kdyz regTraceOn.
++namespace vamiga {
++bool regTraceOn = false;
++u32  regTraceCount = 0;
++RegTraceEntry regTrace[REG_TRACE_MAX];
++}
++
+ template <Accessor s> void
+ Memory::pokeCustom16(u32 addr, u16 value)
+ {
++    if (regTraceOn && regTraceCount < REG_TRACE_MAX) {
++        auto &e = regTrace[regTraceCount++];
++        e.reg = (u16)(addr & 0x1FE);
++        e.value = value;
++        e.pc = cpu.getPC0();
++        e.agnus = (s == Accessor::AGNUS) ? 1 : 0;
++        e.vpos = (u16)agnus.pos.v;
++        e.hpos = (u16)agnus.pos.h;
++    }
+     if ((addr & 0xFFF) == 0x30) {
+diff --git a/Core/Components/Memory/Memory.h b/Core/Components/Memory/Memory.h
+--- a/Core/Components/Memory/Memory.h
++++ b/Core/Components/Memory/Memory.h
+@@ -20,6 +20,20 @@
+ namespace vamiga {
+ 
++// SWIV-projekt patch: viz Memory.cpp
++#define REG_TRACE_MAX 200000
++struct RegTraceEntry {
++    u16 reg;      // offset registru (0x000..0x1FE)
++    u16 value;    // zapsana hodnota
++    u32 pc;       // PC instrukce, ktera zapis provedla
++    u8  agnus;    // 1 = zapis provedl Agnus (copper), 0 = CPU
++    u16 vpos;     // rastrova pozice v okamziku zapisu
++    u16 hpos;
++};
++extern bool regTraceOn;
++extern u32  regTraceCount;
++extern RegTraceEntry regTrace[REG_TRACE_MAX];
++
+ class Memory : public SubComponent, public Inspectable<MemInfo, MemStats> {

@@ -1,0 +1,125 @@
+"""Capture CPU registers, beam position and RAM at a breakpoint.
+
+This is the measuring instrument of the whole method: run the original in
+the headless vAmiga, stop at an address (the N-th time it is hit), dump the
+registers, Agnus clock and chip RAM (plus optional extra regions). Two such
+captures - before and after a routine - give the exact effect of that routine
+on memory, which is what a recompiled or re-implemented version is compared
+against (``arek.contract``).
+
+Requires the patched VAHeadless (``patches/vamiga-headless.patch``): the
+``VAHL_ONSTOP`` environment variable names a RetroShell script that runs when
+the emulator stops on a breakpoint.
+"""
+import hashlib
+import json
+import os
+import re
+import tempfile
+from pathlib import Path
+
+from . import config, shot
+
+
+def state(conf, events, addr, npass, t_end, t_set=0, ram_len=524288, keep=None,
+          setup=(), after_break=(), ram_regions=(), screenshot=False, adf=None):
+    """Run to breakpoint ``addr`` (skipping ``npass`` hits) and capture.
+
+    Returns ``(state_dict or None, log_text)``. ``state_dict`` has ``d``,
+    ``a``, ``pc``, ``ccr``, ``beam``, ``ram`` (bytes from 0), ``regions``.
+    """
+    adf = adf or conf.get('ADF1')
+    config.require(conf, 'ROM', 'VAHL')
+    tmp = keep or tempfile.mkdtemp(prefix='arek-bp')
+    os.makedirs(tmp, exist_ok=True)
+    dump = os.path.join(tmp, 'ram_%x_%d.bin' % (addr, npass))
+    onstop = os.path.join(tmp, 'onstop_%x_%d.retrosh' % (addr, npass))
+    lines = ['try debugger', 'r cpu', '? agnus', '? agnus beam',
+             'commander', 'mem save bin %s 0 %d' % (dump, ram_len)]
+    regions = []
+    for base, length in ram_regions:
+        filename = os.path.join(tmp, 'ram_%x_%d_%x.bin' % (addr, npass, base))
+        lines.append('mem save bin %s $%x %d' % (filename, base, length))
+        regions.append({'base': base, 'length': length, 'file': filename})
+    lines.append('screenshot save ' + os.path.join(tmp, 'stable.png') if screenshot else 'shutdown')
+    Path(onstop).write_text('\n'.join(lines) + '\n')
+    ev = list(events) + [(t_set, 'debugger'),
+                         (t_set, 'break at $%x %d' % (addr, npass)),
+                         (t_set, 'commander')]
+    ev += [(t_set, command) for command in after_break]
+    script = shot.build_script(conf, adf, ev, t_end, os.path.join(tmp, 'unused.png'), setup)
+    Path(tmp, 'capture_%x_%d.retrosh' % (addr, npass)).write_text(script)
+    if os.path.exists(dump):
+        os.unlink(dump)
+    out = shot.run_script(conf, script, capture=True, env={'VAHL_ONSTOP': onstop}, timeout=900)
+    if not os.path.exists(dump):
+        return None, out
+    st = parse_regs(out)
+    st['beam'] = parse_beam(out)
+    st['ram'] = Path(dump).read_bytes()
+    st['regions'] = regions
+    return st, out
+
+
+def parse_regs(out):
+    """D0-D7, A0-A7, PC and CCR from ``r cpu`` (vAmiga 5.0 format)::
+
+        D0 - D3 : 0x00000001 0x00000027 ...
+        Flags   : ttSm-<0>---Xnzvc      (upper case = set)
+    """
+    st = {'d': [None] * 8, 'a': [None] * 8, 'pc': None, 'ccr': None}
+    for kind in ('D', 'A'):
+        for m in re.finditer(kind + r'(\d) - ' + kind + r'(\d)\s*:\s*((?:0x[0-9A-Fa-f]{8}\s*)+)', out):
+            vals = re.findall(r'0x([0-9A-Fa-f]{8})', m.group(3))
+            for i, v in enumerate(vals):
+                st['d' if kind == 'D' else 'a'][int(m.group(1)) + i] = int(v, 16)
+    m = re.search(r'PC\s*:\s*0x([0-9A-Fa-f]{8})', out)
+    if m:
+        st['pc'] = int(m.group(1), 16)
+    m = re.search(r'Flags\s*:\s*(\S+)', out)
+    if m:
+        f = m.group(1)[-5:]
+        st['ccr'] = {k.lower(): int(c.isupper()) for k, c in zip('XNZVC', f)}
+    return st
+
+
+def parse_beam(out):
+    patterns = {'clock': r'Clock\s*:\s*(\d+)',
+                'frame': r'Frame\s*:\s*(\d+) \((?:PAL|NTSC)\)',
+                'position': r'Position\s*:\s*\((\d+),(\d+)\)'}
+    result = {}
+    for key, pattern in patterns.items():
+        match = re.search(pattern, out)
+        if not match:
+            raise ValueError('Missing Agnus field: ' + key)
+        result[key] = [int(v) for v in match.groups()] if key == 'position' else int(match[1])
+    return result
+
+
+def capture(conf, folder, addr, npass, t_end, events=(), t_set=0, ram_len=524288,
+            regions=(), setup=(), adf=None):
+    """``state`` + write ``cpu.json``, ``capture.log`` and the RAM dumps into
+    a fresh ``folder``. Returns the metadata dict."""
+    folder = Path(folder).resolve()
+    if folder.exists():
+        raise FileExistsError('choose a new output directory for each capture: %s' % folder)
+    folder.mkdir(parents=True)
+    st, log = state(conf, list(events), addr, npass, t_end, t_set=t_set, ram_len=ram_len,
+                    keep=str(folder), ram_regions=regions, setup=setup, adf=adf)
+    (folder / 'capture.log').write_text(log)
+    if st is None or st['pc'] != addr:
+        raise RuntimeError('breakpoint not captured; see %s' % (folder / 'capture.log'))
+    meta = {k: v for k, v in st.items() if k != 'ram'}
+    adf = adf or conf.get('ADF1')
+    meta.update(machine=conf.get('MACHINE', 'A500_OCS_1MB'), events=list(events),
+                breakpoint=addr, skip=npass, set_at=t_set, end=t_end,
+                ram_base=0, ram_bytes=len(st['ram']),
+                ram_sha256=hashlib.sha256(st['ram']).hexdigest(),
+                assets={k: hashlib.sha256(Path(p).read_bytes()).hexdigest()
+                        for k, p in (('VAHL', conf['VAHL']), ('ROM', conf['ROM']), ('ADF', adf))})
+    for region in meta['regions']:
+        p = Path(region['file'])
+        region['sha256'] = hashlib.sha256(p.read_bytes()).hexdigest()
+        region['file'] = p.name
+    (folder / 'cpu.json').write_text(json.dumps(meta, indent=2) + '\n')
+    return meta
