@@ -3,7 +3,7 @@ import json
 import struct
 
 from arek import adf, cli
-from arek.packers import bytekiller, pp20
+from arek.packers import atomik, bytekiller, pp20
 
 
 def _disk(rnd):
@@ -12,6 +12,8 @@ def _disk(rnd):
     struct.pack_into('>I', d, 4, adf.bootblock_checksum(d[:1024]))
     blk = bytekiller.pack_b_literal(rnd(300))
     d[8000:8000 + len(blk)] = blk
+    at = atomik.pack(b'atomik payload ' * 20)
+    d[20000:20000 + len(at)] = at
     return bytes(d)
 
 
@@ -26,6 +28,10 @@ def test_cli_roundtrip(tmp_path, capsys, rnd, code):
     pp.write_bytes(pp20.pack_literal(b'hello amiga'))
     assert cli.main(['pp20', str(pp), '-o', str(tmp_path / 'p.out')]) == 0
     assert (tmp_path / 'p.out').read_bytes() == b'hello amiga'
+    at = tmp_path / 'a.atn'
+    at.write_bytes(b'\0' * 100 + atomik.pack(b'atomik block in an image' * 4))
+    assert cli.main(['atn', str(at), '-o', str(tmp_path / 'a.out'), '--offset', '100']) == 0
+    assert (tmp_path / 'a.out').read_bytes() == b'atomik block in an image' * 4
     base, data = code
     cb = tmp_path / 'c.bin'
     cb.write_bytes(data)
@@ -59,6 +65,11 @@ def test_mcp_tools(tmp_path, rnd, code):
         r = await mcp_server.mcp.call_tool('unpack', {'path': str(disk), 'out': str(tmp_path / 'u.bin'),
                                                       'offset': '8000'})
         assert (tmp_path / 'u.bin').stat().st_size == 300
+        r = await mcp_server.mcp.call_tool('unpack', {'path': str(disk), 'out': str(tmp_path / 'a.bin'),
+                                                      'offset': '20000'})
+        assert (tmp_path / 'a.bin').read_bytes() == b'atomik payload ' * 20
+        txt = (r.content[0].text if hasattr(r, 'content') else str(r))
+        assert 'atn' in txt
         r = await mcp_server.mcp.call_tool('walk', {'path': str(cb), 'base': hex(base), 'start': hex(base + 0x0e)})
         txt = r.content[0].text if hasattr(r, 'content') else str(r)
         assert 'bsr $1004' in txt

@@ -7,7 +7,7 @@ captures - before and after a routine - give the exact effect of that routine
 on memory, which is what a recompiled or re-implemented version is compared
 against (``arek.contract``).
 
-Requires the patched VAHeadless (``patches/vamiga-headless.patch``): the
+Requires the patched VAHeadless (``patches/vamiga-headless-<commit>.patch``): the
 ``VAHL_ONSTOP`` environment variable names a RetroShell script that runs when
 the emulator stops on a breakpoint.
 """

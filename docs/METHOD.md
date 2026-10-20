@@ -34,11 +34,16 @@ The boot block (first two sectors) is code; `arek dis disk.adf --base 0
 reads (`trackdisk` `DoIO`, or a custom MFM reader writing `DSKPT/DSKLEN`) to
 the next stage, dump it with `arek adf track`, repeat.
 
+If the boot block is `DOS` and the signatures sit 24 bytes into their
+sectors, the game keeps AmigaDOS files (OFS data blocks): `arek adf ls` lists
+them, `arek adf cat` reassembles one with every block verified, and only the
+reassembled file is a packer's input.
+
 `arek scan` finds packers. A *signature* (PP20, RNC, ATN!, IMP!, …) is a hint;
 a *verified* Bytekiller block (header plausible, XOR checksum zero, full
 unpack succeeds) is evidence. When neither fires, the game has its own
 packer — read the decrunch routine (it is always short, always near the
-loader) and re-implement it. `arek.packers` holds three such
+loader) and re-implement it. `arek.packers` holds four such
 re-implementations; the Bytekiller one is worth reading as a template:
 backwards bit stream, sentinel bit, checksum — thirty lines.
 

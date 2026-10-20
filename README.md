@@ -46,9 +46,12 @@ arek scan      disk.adf                # packer signatures, verified Bytekiller 
 
 # 2. unpack what the loader unpacks
 arek adf track  disk.adf -n 1 -o trk1.bin
+arek adf ls     disk.adf                              # AmigaDOS files, if the disk has a filesystem
+arek adf cat    disk.adf -p LEVELS/L1 -o l1.atn       # one file, data blocks verified
 arek pp20       file.pp -o file.bin    # PowerPacker 2.0
 arek bytekiller trk1.bin --offset 0x200 -o main.bin
 arek t2         INTR -o intr.bin       # Turrican II three-stage
+arek atn        BLOCK -o out.bin --offset 0x1234   # Atomik (ATN!), block inside an image
 arek hunk info  prog && arek hunk load prog --base 0x20000 -o h   # AmigaDOS executables
 
 # 3. read the code - flow graph, not linear
@@ -75,9 +78,11 @@ asks for (see `examples/profile.example.json`).
 | module | what it does | origin |
 |---|---|---|
 | `arek.adf` | geometry, boot block checksum, entropy map / regions, inventory | new |
+| `arek.amigados` | AmigaDOS OFS/FFS reader (directories, files, extension blocks, checksums) + synthetic image builder for tests | new |
 | `arek.packers.pp20` | PowerPacker 2.0 decruncher (+ literal-only encoder for tests) | Turrican II / Superfrog |
 | `arek.packers.bytekiller` | Bytekiller format B (XOR checksum) and the SWIV word-stream format A | S.W.I.V. |
 | `arek.packers.turrican2` | Huffman → backwards LZ → RLE three-stage decruncher | Turrican II |
+| `arek.packers.atomik` | Atomik (`ATN!`) decruncher with exact block extent (+ greedy LZ test encoder) | Superfrog |
 | `arek.packers.scan` | brute-force scan: signatures (PP20, RNC, ATN!, IMP!, …) + verified blocks | S.W.I.V. |
 | `arek.hunk` | bounded HUNK reader: CODE/DATA/BSS, RELOC32, split streams; `build()` for probes | Superfrog |
 | `arek.copper` | copper list disassembler with custom register names | S.W.I.V. |
@@ -106,7 +111,7 @@ Claude Code (`.mcp.json` in your project, or `claude mcp add arek -- arek-mcp`):
 {"mcpServers": {"arek": {"command": "arek-mcp"}}}
 ```
 
-The server exposes 18 tools (`adf_info`, `adf_map`, `scan_packed`, `unpack`,
+The server exposes 20 tools (`adf_info`, `adf_map`, `adf_ls`, `adf_file`, `scan_packed`, `unpack`,
 `hunk_load`, `disassemble`, `walk`, `hwscan`, `recomp`, `xref`, `copper`,
 `headless_shot`, `headless_bpstate`, `diff_captures`, `ram_at`, …). All of them
 take paths on the local machine; the server never fetches anything, never

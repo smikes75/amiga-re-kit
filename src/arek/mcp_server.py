@@ -70,6 +70,38 @@ def adf_regions(path: str) -> list:
 
 
 @mcp.tool()
+def adf_ls(path: str, lenient: bool = False) -> dict:
+    """Files of an AmigaDOS (OFS/FFS) disk image: path, size, header block,
+    checksum state. Fails with a precise reason when the disk is not AmigaDOS
+    (most games boot their own trackloader instead)."""
+    from . import amigados
+    data = _bytes(path)
+    dt = amigados.dostype(data)
+    if dt is None:
+        raise ValueError('no DOS boot block: not an AmigaDOS disk')
+    r = amigados.root(data, strict=not lenient)
+    return {'filesystem': dt['fs'], 'intl': dt['intl'], 'volume': r['name'], 'root_block': r['block'],
+            'root_checksum_ok': r['checksum_ok'], 'entries': amigados.listing(data, strict=not lenient)}
+
+
+@mcp.tool()
+def adf_file(path: str, name: str, out: str, lenient: bool = False) -> dict:
+    """Reassemble one AmigaDOS file (``name`` = path inside the volume,
+    case-insensitive) and write it to ``out``. Data blocks are verified
+    (type, owner, sequence, checksum); ``lenient`` reports problems in
+    ``warnings`` instead of failing and takes raw sectors as they are."""
+    from . import amigados
+    data = _bytes(path)
+    e = amigados.find(data, name, strict=not lenient)
+    if e is None:
+        raise ValueError('no such file: ' + name)
+    warn = []
+    body = amigados.read_file(data, e, strict=not lenient, warnings=warn)
+    Path(out).write_bytes(body)
+    return {'out': out, 'bytes': len(body), 'header_block': e['block'], 'warnings': warn}
+
+
+@mcp.tool()
 def adf_extract(path: str, offset: str, length: str, out: str) -> str:
     """Copy ``length`` bytes from ``offset`` of the image to file ``out``."""
     data = _bytes(path)
@@ -82,7 +114,7 @@ def adf_extract(path: str, offset: str, length: str, out: str) -> str:
 @mcp.tool()
 def scan_packed(path: str, deep: bool = False) -> dict:
     """Find packer signatures (PP20, RNC, ATN!, IMP!, ...) and verified
-    Bytekiller blocks in a file or image. ``deep`` also tries the SWIV
+    Atomik and Bytekiller blocks in a file or image. ``deep`` also tries the SWIV
     word-stream variant (slow)."""
     from .packers import scan
     return scan.scan(_bytes(path), deep=deep)
@@ -90,14 +122,17 @@ def scan_packed(path: str, deep: bool = False) -> dict:
 
 @mcp.tool()
 def unpack(path: str, out: str, kind: str = 'auto', offset: str = '0') -> dict:
-    """Unpack a block to ``out``. kind: auto | pp20 | bytekiller | bytekiller_a | t2."""
-    from .packers import bytekiller, pp20, turrican2
+    """Unpack a block to ``out``. kind: auto | pp20 | atn | bytekiller | bytekiller_a | t2."""
+    from .packers import atomik, bytekiller, pp20, turrican2
     data = _bytes(path)
     off = _addr(offset)
     if kind == 'auto':
-        kind = 'pp20' if data[off:off + 4] == b'PP20' else 'bytekiller'
+        magic = data[off:off + 4]
+        kind = 'pp20' if magic == b'PP20' else 'atn' if magic == b'ATN!' else 'bytekiller'
     if kind == 'pp20':
         res, ok = pp20.unpack(data[off:]), True
+    elif kind == 'atn':
+        res, ok = atomik.unpack(data[off:]), True
     elif kind == 'bytekiller':
         res, ok = bytekiller.unpack_b(data, off)
     elif kind == 'bytekiller_a':

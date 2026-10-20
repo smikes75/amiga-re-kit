@@ -172,3 +172,54 @@ def test_audit_profile(code, tmp_path):
     assert m['graph']['semantic_parity'] == 'not_measured'
     assert rep['limitations']
     json.dumps(rep)                                      # must stay JSON-serialisable
+
+
+# --- audit.graph() edge cases on hand-written opcodes (from the Turrican II
+# project's synthetic unit tests; no game data)
+def test_audit_graph_return_does_not_decode_data():
+    for opcode in ('4e75', '4e73'):                      # rts, rte
+        r = audit.graph(bytes.fromhex(opcode + 'ffff'), 0x100, [0x100])
+        assert r['unique_instructions'] == 1 and not r['frontiers']
+
+
+def test_audit_graph_loop_deduplicates():
+    r = audit.graph(bytes.fromhex('60fe'), 0, [0])        # bra.s *
+    assert r['unique_instructions'] == 1
+
+
+def test_audit_graph_indirect_call_is_a_frontier():
+    r = audit.graph(bytes.fromhex('4e904e75'), 0, [0])    # jsr (a0); rts
+    assert r['unique_instructions'] == 2
+    assert r['frontiers'][0]['reason'] == 'unresolved_jsr'
+
+
+@pytest.mark.parametrize('data, roots, reason', [
+    (b'\x4e', [0], 'decode_error'),
+    (bytes.fromhex('6002'), [0], 'outside_module'),
+    (bytes.fromhex('4e75'), [1], 'unaligned_target'),
+])
+def test_audit_graph_boundaries(data, roots, reason):
+    r = audit.graph(data, 0, roots)
+    assert r['frontiers'][0]['reason'].startswith(reason)
+
+
+def test_audit_graph_direct_call_and_both_branch_paths():
+    r = audit.graph(bytes.fromhex('66044e75ffff4e75'), 0, [0])   # bne.s +4; rts; data; rts
+    assert r['instruction_addresses'] == ['0x0', '0x2', '0x6']
+    r = audit.graph(bytes.fromhex('61044e75ffff4e75'), 0, [0])   # bsr.s +4; rts; data; rts
+    assert r['unique_instructions'] == 3 and not r['frontiers']
+
+
+def test_audit_graph_overlapping_decode_is_reported():
+    r = audit.graph(bytes.fromhex('303c4e754e75'), 0, [0, 2])    # move.w #$4e75,d0 overlaps root 2
+    assert any(x['reason'] == 'overlapping_decode' for x in r['frontiers'])
+
+
+def test_audit_missing_and_unclassified_modules(tmp_path):
+    (tmp_path / 'other.bin').write_bytes(b'\x00')
+    p = {'name': 'fixture', 'inventory_glob': '*.bin', 'modules': {'missing.bin': {'role': 'code'}}}
+    a = audit.audit(p, tmp_path)
+    assert a == audit.audit(p, tmp_path)                         # deterministic
+    assert a['modules'][0]['status'] == 'missing'
+    assert a['modules'][1]['role'] == 'unclassified'
+    assert a['modules'][1]['graph']['status'] == 'not_scanned'

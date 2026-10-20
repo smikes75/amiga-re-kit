@@ -4,8 +4,10 @@ Three kinds of evidence, reported separately so nothing is over-claimed:
 
 * **signatures** - magic words of packers the Amiga scene used (PP20, RNC,
   ATN!, IMP!, XPKF, CrM!, S404, TPWM, PX20), plus HUNK headers and DOS boot
-  blocks. A signature is a *hint*; the kit can unpack only PP20 and the
-  Bytekiller family itself.
+  blocks. A signature is a *hint*; the kit itself can unpack PP20, Atomik
+  (ATN!) and the Bytekiller family.
+* **atomik** - every ``ATN!`` signature is checked by a full unpack; the
+  block length is in its header, so a verified hit has an exact extent.
 * **bytekiller_b** - the format has no magic, but it has an 8-byte header and
   an XOR checksum over the whole stream that must come out 0; a header that
   passes the checksum and then unpacks without error is a very strong hit.
@@ -15,14 +17,15 @@ Three kinds of evidence, reported separately so nothing is over-claimed:
 """
 import struct
 
-from . import bytekiller, pp20
+from . import atomik, bytekiller, pp20
+from .. import amigados
 
 SIGNATURES = {
     b'PP20': 'PowerPacker 2.0 (unpack: arek pp20)',
     b'PX20': 'PowerPacker 2.0, encrypted (no unpacker here)',
     b'RNC\x01': 'Rob Northen Compression method 1 (no unpacker here)',
     b'RNC\x02': 'Rob Northen Compression method 2 (no unpacker here)',
-    b'ATN!': 'Atomik packer (no unpacker here)',
+    b'ATN!': 'Atomik packer (unpack: arek atn)',
     b'IMP!': 'Imploder (no unpacker here)',
     b'XPKF': 'XPK container (no unpacker here)',
     b'CrM!': 'Crunch Mania (no unpacker here)',
@@ -140,10 +143,37 @@ def pp20_blocks(data):
     return out
 
 
+def atomik_blocks(data, align=2, max_output=4 << 20):
+    """Every ``ATN!`` signature with its header sizes, verified by a full
+    unpack. ``end`` is the first offset after the block (header + stream +
+    46-byte trailer), so verified blocks can be cut out of an image."""
+    out = []
+    dos = amigados.dostype(data) is not None and len(data) % amigados.BSIZE == 0
+    for h in signatures(data, align):
+        if h['magic'] != 'ATN!':
+            continue
+        off = h['offset']
+        rec = {'offset': off}
+        if dos and off % amigados.BSIZE == 24:
+            rec['hint'] = ('24 bytes into a sector of a DOS disk: an OFS data block, the stream '
+                           'continues in other blocks - list the files (arek adf ls) and unpack the file')
+        hdr = atomik.header(data[off:off + 12])
+        rec.update(unpacked=hdr['unpacked'], packed=hdr['packed'], end=off + hdr['length'])
+        try:
+            res = atomik.unpack(data[off:], max_output=max_output)
+            rec['verified'] = len(res) == hdr['unpacked']
+        except ValueError as e:
+            rec['verified'] = False
+            rec['error'] = str(e)
+        out.append(rec)
+    return out
+
+
 def scan(data, deep=False, align=2):
     rep = {'size': len(data),
            'signatures': signatures(data, align),
            'pp20': pp20_blocks(data),
+           'atomik': atomik_blocks(data, align),
            'bytekiller_b': bytekiller_b(data, align)}
     if deep:
         rep['bytekiller_a'] = bytekiller_a(data, align)
@@ -163,6 +193,14 @@ def format_report(rep):
         L.append('bytekiller A blocks (full unpack ok): %d' % len(rep['bytekiller_a']))
         for h in rep['bytekiller_a']:
             L.append('  %08x  packed %6d -> unpacked %6d' % (h['offset'], h['packed'], h['unpacked']))
+    at = rep.get('atomik', [])
+    L.append('atomik (ATN!) blocks: %d, verified %d' % (len(at), sum(1 for h in at if h['verified'])))
+    for h in at:
+        L.append('  %08x  packed %6d -> unpacked %6d  end %08x  %s' % (
+            h['offset'], h['packed'], h['unpacked'], h['end'],
+            'ok' if h['verified'] else 'FAILED: ' + h.get('error', '')))
+        if 'hint' in h:
+            L.append('            ' + h['hint'])
     for h in rep['pp20']:
         if 'unpacked' in h:
             L.append('pp20 file: unpacked %d, verified=%s' % (h['unpacked'], h.get('verified')))

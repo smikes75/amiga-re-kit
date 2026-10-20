@@ -3,8 +3,9 @@
 An ADF is a raw dump of a double-density 3.5" disk: 80 cylinders x 2 heads x
 11 sectors x 512 bytes = 901 120 bytes. Nothing else is assumed - most games
 here do not use the AmigaDOS filesystem at all (they boot their own trackloader
-from the boot block), so the kit never tries to "mount" the image. What it can
-do without any guess:
+from the boot block), so this module never tries to "mount" the image; for
+the games that do keep AmigaDOS files, ``arek.amigados`` reads OFS/FFS. What
+this module can do without any guess:
 
 * check the size and the boot block (DOS type, checksum, whether it is bootable)
 * slice by track / sector (what a trackloader reads with ``trackdisk`` style

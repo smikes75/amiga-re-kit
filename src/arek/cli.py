@@ -1,10 +1,12 @@
 """``arek`` command line: one entry point for every tool in the kit.
 
     arek adf info|map|regions|track|sector  IMAGE ...
+    arek adf ls|cat|extract  IMAGE [-p PATH] [-o OUT] [--lenient]   (AmigaDOS OFS/FFS)
     arek scan        FILE [--deep]
     arek pp20        FILE -o OUT
     arek bytekiller  FILE -o OUT [--format b|a] [--offset N]
     arek t2          FILE -o OUT
+    arek atn         FILE -o OUT [--offset N]
     arek hunk        info|load  FILE ...
     arek dis         FILE --base B [--lo --hi | --walk START] [--syms J]
     arek walk        FILE --base B --start S [--lo --hi]
@@ -58,6 +60,41 @@ def cmd_adf(a):
         wr(a.out, adf.track(data, a.n))
     elif a.what == 'sector':
         wr(a.out, adf.sector(data, a.n))
+    elif a.what == 'ls':
+        from . import amigados
+        print(amigados.format_listing(data, amigados.listing(data, strict=not a.lenient)))
+    elif a.what == 'cat':
+        from . import amigados
+        if not a.path:
+            sys.exit('arek adf cat: -p PATH is required')
+        e = amigados.find(data, a.path, strict=not a.lenient)
+        if e is None:
+            sys.exit('no such file: ' + a.path)
+        warn = []
+        wr(a.out, amigados.read_file(data, e, strict=not a.lenient, warnings=warn))
+        for w in warn:
+            print('warning: %s: %s' % (e['path'], w), file=sys.stderr)
+    elif a.what == 'extract':
+        from . import amigados
+        root = Path(a.out if a.out != 'out.bin' else 'files').resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        for e in amigados.walk(data, strict=not a.lenient):
+            if e['type'] != 'file':
+                continue
+            # names come from the image: confine every destination to ``root``
+            parts = e['path'].split('/')
+            if any(x in ('', '.', '..') or set(x) & set('\\:\0') for x in parts):
+                print('skipping unsafe name %r (header block %d)' % (e['path'], e['block']), file=sys.stderr)
+                continue
+            dst = root.joinpath(*parts)
+            if not dst.resolve().is_relative_to(root):
+                print('skipping %r: outside the output directory' % e['path'], file=sys.stderr)
+                continue
+            warn = []
+            body = amigados.read_file(data, e, strict=not a.lenient, warnings=warn)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(body)
+            print('%7d  %s%s' % (len(body), dst, ('  WARNING: ' + '; '.join(warn)) if warn else ''))
 
 
 # ----------------------------------------------------------------- packers
@@ -87,6 +124,11 @@ def cmd_bytekiller(a):
 def cmd_t2(a):
     from .packers import turrican2
     wr(a.out, turrican2.unpack_t2(rd(a.file)))
+
+
+def cmd_atn(a):
+    from .packers import atomik
+    wr(a.out, atomik.unpack(rd(a.file)[a.offset:]))
 
 
 # ----------------------------------------------------------------- hunk
@@ -246,10 +288,12 @@ def build_parser():
     sp = p.add_subparsers(dest='cmd', required=True)
 
     s = sp.add_parser('adf', help='disk image: info, entropy map, regions, slicing')
-    s.add_argument('what', choices=['info', 'map', 'regions', 'track', 'sector'])
+    s.add_argument('what', choices=['info', 'map', 'regions', 'track', 'sector', 'ls', 'cat', 'extract'])
     s.add_argument('image')
     s.add_argument('-n', type=int, default=0, help='track / sector number')
-    s.add_argument('-o', '--out', default='out.bin')
+    s.add_argument('-o', '--out', default='out.bin', help='output file (cat) or directory (extract)')
+    s.add_argument('-p', '--path', help='file path inside the AmigaDOS volume (cat)')
+    s.add_argument('--lenient', action='store_true', help='report checksum / header problems instead of failing')
     s.set_defaults(fn=cmd_adf)
 
     s = sp.add_parser('scan', help='find packed blocks and packer signatures')
@@ -274,6 +318,12 @@ def build_parser():
     s.add_argument('file')
     s.add_argument('-o', '--out', required=True)
     s.set_defaults(fn=cmd_t2)
+
+    s = sp.add_parser('atn', help='unpack an Atomik (ATN!) block')
+    s.add_argument('file')
+    s.add_argument('-o', '--out', required=True)
+    s.add_argument('--offset', type=A, default=0, help='block offset inside an image')
+    s.set_defaults(fn=cmd_atn)
 
     s = sp.add_parser('hunk', help='HUNK executables: info or relocate+dump')
     s.add_argument('what', choices=['info', 'load'])
