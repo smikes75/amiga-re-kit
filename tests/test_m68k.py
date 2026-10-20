@@ -223,3 +223,26 @@ def test_audit_missing_and_unclassified_modules(tmp_path):
     assert a['modules'][0]['status'] == 'missing'
     assert a['modules'][1]['role'] == 'unclassified'
     assert a['modules'][1]['graph']['status'] == 'not_scanned'
+
+
+def test_hwscan_chip_size_parameter(code):
+    assert hwscan.classify_addr(0x100000) == 'ram'                       # 2 MB machine (default)
+    assert hwscan.classify_addr(0x100000, chip=0x80000) == 'other'       # A500 with 512 KB chip
+    assert hwscan.classify_addr(0x7fffe, chip=0x80000) == 'ram'
+    assert hwscan.classify_addr(0xdff000, chip=0x80000) == 'custom'
+    base, data = code
+    rt = hwscan.scan(data, base, [base + 0x04], base, base + len(data), chip=0x80000)
+    assert rt[base + 0x04].abs_hw == {} or 'other' not in rt[base + 0x04].abs_hw   # lea $2000 is RAM either way
+
+
+def test_xref_cli_callees(tmp_path, capsys):
+    from arek import cli
+    prog = tmp_path / 'prog.txt'
+    prog.write_text(OBJDUMP)
+    x = xref.Xref(OBJDUMP)
+    pairs = x.callees_in(0, 1 << 24)
+    assert pairs
+    assert cli.main(['xref', str(prog), '--callees', '0', hex(1 << 24)]) == 0
+    out = capsys.readouterr().out
+    for src, t in pairs:
+        assert '%06x -> %06x' % (src, t) in out

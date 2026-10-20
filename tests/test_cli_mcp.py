@@ -74,3 +74,17 @@ def test_mcp_tools(tmp_path, rnd, code):
         txt = r.content[0].text if hasattr(r, 'content') else str(r)
         assert 'bsr $1004' in txt
     asyncio.run(go())
+
+
+def test_version_and_module_entry_point():
+    import re
+    import subprocess
+    import sys
+    from pathlib import Path
+    import arek
+    assert re.fullmatch(r'\d+\.\d+\.\d+', arek.__version__)
+    pyproject = (Path(arek.__file__).parents[2] / 'pyproject.toml').read_text()
+    assert 'dynamic = ["version"]' in pyproject and 'attr = "arek.__version__"' in pyproject
+    assert not re.search(r'^version = "', pyproject, re.M)       # no static copy: arek.__version__ is the source
+    r = subprocess.run([sys.executable, '-m', 'arek', '--help'], capture_output=True, text=True)
+    assert r.returncode == 0 and 'arek' in r.stdout

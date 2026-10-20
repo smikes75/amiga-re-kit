@@ -195,16 +195,18 @@ def walk(path: str, base: str, start: str, lo: str = None, hi: str = None) -> di
 
 @mcp.tool()
 def hwscan(path: str, base: str, roots: list, lo: str = None, hi: str = None,
-           abase: dict = None) -> dict:
+           abase: dict = None, chip: str = None) -> dict:
     """Which routines reachable from ``roots`` are pure RAM and which touch
     custom chips / CIA / ROM - the hardware boundary. ``abase`` maps address
-    registers known at entry to addresses, e.g. {"a5": "0xdff000"}."""
+    registers known at entry to addresses, e.g. {"a5": "0xdff000"}. ``chip`` =
+    chip RAM size of the machine (default 2 MB)."""
     from .m68k import hwscan as hs
     data = _bytes(path)
     b = _addr(base)
     ab = {int(k.lower().lstrip('a')): _addr(v) for k, v in (abase or {}).items()}
     routines = hs.scan(data, b, [_addr(r) for r in roots], _addr(lo) if lo else b,
-                       _addr(hi) if hi else b + len(data), abase=ab)
+                       _addr(hi) if hi else b + len(data), abase=ab,
+                       chip=_addr(chip) if chip else hs.CHIP_MAX)
     ok = hs.closure(routines)
     rep = hs.report(routines, ok)
     rep['text'] = hs.format_report(rep)
@@ -229,13 +231,18 @@ def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = No
 
 
 @mcp.tool()
-def xref(prog_txt: str, syms_json: str = None, callers_of: str = None, top: int = 40) -> dict:
+def xref(prog_txt: str, syms_json: str = None, callers_of: str = None, top: int = 40,
+         callees_in: list = None) -> dict:
     """Cross references from an m68k objdump listing: most called routines,
-    most referenced data, or the callers of one address."""
+    most referenced data, the callers of one address, or (``callees_in`` =
+    [lo, hi]) what the code in that range calls or points at."""
     from .m68k import xref as xr
     x = xr.Xref.from_file(prog_txt, syms_json)
     if callers_of:
         return {'callers': ['%06x' % c for c in x.callers(_addr(callers_of))]}
+    if callees_in:
+        lo, hi = _addr(callees_in[0]), _addr(callees_in[1])
+        return {'callees': [{'from': '%06x' % s, 'to': '%06x' % t, 'name': x.nm(t)} for s, t in x.callees_in(lo, hi)]}
     return {'summary': x.summary(top)}
 
 

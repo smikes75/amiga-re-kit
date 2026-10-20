@@ -21,10 +21,17 @@ import collections
 from . import decoder
 
 
-def classify_addr(a):
+CHIP_MAX = 0x200000                    # largest chip RAM an OCS/ECS Agnus addresses
+
+
+def classify_addr(a, chip=CHIP_MAX):
+    """``chip`` = chip RAM size of the machine; an address between it and
+    2 MB is not RAM on that machine and counts as 'other'."""
     a &= 0xffffff
-    if a < 0x200000:
-        return 'ram'                       # chip RAM (up to 2 MB)
+    if a < chip:
+        return 'ram'                       # chip RAM
+    if a < CHIP_MAX:
+        return 'other'                     # chip address space, no RAM there
     if 0xc00000 <= a < 0xd80000:
         return 'ram'                       # slow RAM
     if 0xdf0000 <= a <= 0xdfffff:
@@ -134,7 +141,7 @@ def resolve_bases(ins, abase, ram):
     return consts
 
 
-def scan_routine(data, base, start, lo, hi, abase, ram=None):
+def scan_routine(data, base, start, lo, hi, abase, ram=None, chip=CHIP_MAX):
     """``abase`` = global convention for address registers, e.g. ``{6: 0xdff000}``."""
     r = Routine(start)
     consts = resolve_bases(body(data, base, start, lo, hi), abase, ram)
@@ -155,7 +162,7 @@ def scan_routine(data, base, start, lo, hi, abase, ram=None):
         r.ins[a] = i
         for e in eas(i):
             if e.mode in (70, 71):
-                k = classify_addr(e.absval)
+                k = classify_addr(e.absval, chip)
                 if k != 'ram':
                     r.abs_hw[k] += 1
             elif e.mode in (2, 5, 6):
@@ -163,7 +170,7 @@ def scan_routine(data, base, start, lo, hi, abase, ram=None):
                 if v is None:
                     r.unknown_base[e.areg] += 1
                 else:
-                    k = classify_addr(v + (e.disp or 0))
+                    k = classify_addr(v + (e.disp or 0), chip)
                     if k != 'ram':
                         r.areg_hw[k] += 1
         if i.kind == 'bsr':
@@ -195,7 +202,7 @@ def measured_bases(entry, addr, abase):
     return out
 
 
-def scan(data, base, roots, lo, hi, abase=None, ram=None, entry=None):
+def scan(data, base, roots, lo, hi, abase=None, ram=None, entry=None, chip=CHIP_MAX):
     """Return {start: Routine} for everything reachable from ``roots``."""
     abase = abase or {}
     routines, work = {}, list(roots)
@@ -203,7 +210,7 @@ def scan(data, base, roots, lo, hi, abase=None, ram=None, entry=None):
         s = work.pop()
         if s in routines or not (lo <= s < hi):
             continue
-        r = scan_routine(data, base, s, lo, hi, measured_bases(entry, s, abase), ram)
+        r = scan_routine(data, base, s, lo, hi, measured_bases(entry, s, abase), ram, chip)
         routines[s] = r
         work.extend(r.calls)
     return routines

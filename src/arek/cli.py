@@ -10,9 +10,9 @@
     arek hunk        info|load  FILE ...
     arek dis         FILE --base B [--lo --hi | --walk START] [--syms J]
     arek walk        FILE --base B --start S [--lo --hi]
-    arek hwscan      FILE --base B --roots A.. [--abase An=ADDR] [--json]
+    arek hwscan      FILE --base B --roots A.. [--abase An=ADDR] [--chip SIZE] [--json]
     arek audit       PROFILE.json [--root DIR]
-    arek xref        PROG.txt [--syms J] [--callers A] [--range LO HI]
+    arek xref        PROG.txt [--syms J] [--callers A] [--callees LO HI] [--range LO HI]
     arek recomp      FILE --base B [--func S:E[:ENTRY]] [--auto A] [--stub An:D:NAME] -o OUT.c
     arek copper      FILE [--base B]
     arek shot        PREFIX T.. [--at T CMD] [--adf N]
@@ -185,7 +185,7 @@ def cmd_hwscan(a):
     for s in a.abase or []:
         reg, val = s.split('=')
         abase[int(reg.lower().lstrip('a'))] = A(val)
-    routines = hwscan.scan(data, a.base, a.roots, lo, hi, abase=abase)
+    routines = hwscan.scan(data, a.base, a.roots, lo, hi, abase=abase, chip=a.chip)
     ok = hwscan.closure(routines)
     rep = hwscan.report(routines, ok, per_frame=a.per_frame or ())
     print(json.dumps(rep, indent=2) if a.json else hwscan.format_report(rep))
@@ -203,6 +203,9 @@ def cmd_xref(a):
     if a.callers is not None:
         for c in x.callers(a.callers):
             print('%06x' % c)
+    elif a.callees:
+        for src, t in x.callees_in(a.callees[0], a.callees[1]):
+            print('%06x -> %06x %s' % (src, t, x.nm(t)))
     elif a.range:
         for line in xref.disrange(Path(a.prog).read_text(), a.range[0], a.range[1]):
             print(line)
@@ -358,6 +361,7 @@ def build_parser():
     s.add_argument('--hi', type=A)
     s.add_argument('--abase', nargs='*', metavar='An=ADDR', help='known address-register bases at entry')
     s.add_argument('--per-frame', type=A, nargs='*', help='per-frame routines to tag')
+    s.add_argument('--chip', type=A, default=0x200000, help='chip RAM size of the machine (default 2 MB); addresses between it and 2 MB count as other')
     s.add_argument('--json', action='store_true')
     s.set_defaults(fn=cmd_hwscan)
 
@@ -370,6 +374,7 @@ def build_parser():
     s.add_argument('prog')
     s.add_argument('--syms')
     s.add_argument('--callers', type=A)
+    s.add_argument('--callees', type=A, nargs=2, metavar=('LO', 'HI'), help='what the code in [LO,HI) calls or points at')
     s.add_argument('--range', type=A, nargs=2)
     s.add_argument('--top', type=int, default=40)
     s.set_defaults(fn=cmd_xref)
