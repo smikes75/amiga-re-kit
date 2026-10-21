@@ -1,0 +1,89 @@
+diff --git a/Core/Components/CPU/CPU.cpp b/Core/Components/CPU/CPU.cpp
+index 4689c18..72ed6a5 100644
+--- a/Core/Components/CPU/CPU.cpp
++++ b/Core/Components/CPU/CPU.cpp
+@@ -286,15 +286,72 @@ Moira::didReachSoftstop(u32 addr)
+     amiga.setFlag(RL::SOFTSTOP_REACHED);
+ }
+ 
++// VAHL_TRACE=<soubor>: kazdy zasah breakpointu (VTR1/VTR2) nebo watchpointu (VTW2) zapise zaznam
++// (hlavicka + registry + rozsahy RAM podle VAHL_TRACE_RANGES) a emulace bezi dal bez zastaveni.
++// VTW2 ma za 24 longy hlavicky jeste PC instrukce, ktera na adresu sahla. Jen cteni (spypeek).
++static FILE *vahl_trace = nullptr;
++static bool vahl_probed = false;
++static u32 vahl_hits = 0;
++static std::vector<std::pair<u32, u32>> vahl_ranges;
++static bool vahl_trace_open()
++{
++    if (!vahl_probed) {
++        vahl_probed = true;
++        if (const char *path = getenv("VAHL_TRACE")) vahl_trace = fopen(path, "wb");
++        if (const char *r = getenv("VAHL_TRACE_RANGES")) {
++            const char *q = r;
++            while (*q) {
++                char *end = nullptr;
++                u32 start = u32(strtoul(q, &end, 16));
++                if (!end || *end != ':') break;
++                u32 len = u32(strtoul(end + 1, &end, 16));
++                vahl_ranges.push_back({start, len});
++                if (!end || *end != ',') break;
++                q = end + 1;
++            }
++        }
++    }
++    return vahl_trace != nullptr;
++}
+ void
+ Moira::didReachBreakpoint(u32 addr)
+ {
++    if (vahl_trace_open()) { vahl_trace_write(addr, 0, 0); return; }
+     amiga.setFlag(RL::BREAKPOINT_REACHED);
+ }
+ 
++void
++Moira::vahl_trace_write(u32 addr, u32 pc, u32 watch)
++{
++    u32 len = 524288;
++    if (const char *s = getenv("VAHL_TRACE_LEN")) len = u32(strtoul(s, nullptr, 0));
++    u32 head[25] = {
++        watch ? 0x32575456u : (vahl_ranges.empty() ? 0x31525456u : 0x32525456u), addr, vahl_hits++, u32(agnus.pos.frame), u32(agnus.pos.v),
++        u32(agnus.pos.h), u32(getSR()) };
++    for (int i = 0; i < 16; i++) head[7 + i] = reg.r[i];
++    head[23] = vahl_ranges.empty() ? len : u32(vahl_ranges.size());
++    head[24] = pc;
++    fwrite(head, 4, watch ? 25 : 24, vahl_trace);
++    if (vahl_ranges.empty()) {
++        std::vector<u8> buf(len);
++        for (u32 i = 0; i < len; i++) buf[i] = mem.spypeek8 <Accessor::CPU> (i);
++        fwrite(buf.data(), 1, len, vahl_trace);
++    } else {
++        for (auto &rg : vahl_ranges) {
++            u32 hdr[2] = { rg.first, rg.second };
++            fwrite(hdr, 4, 2, vahl_trace);
++            std::vector<u8> buf(rg.second);
++            for (u32 i = 0; i < rg.second; i++) buf[i] = mem.spypeek8 <Accessor::CPU> (rg.first + i);
++            fwrite(buf.data(), 1, rg.second, vahl_trace);
++        }
++    }
++    fflush(vahl_trace);
++}
++
+ void
+ Moira::didReachWatchpoint(u32 addr)
+ {
++    if (vahl_trace_open()) { vahl_trace_write(addr, reg.pc0, 1); return; }
+     amiga.setFlag(RL::WATCHPOINT_REACHED);
+ }
+ 
+diff --git a/Core/Components/CPU/Moira/Moira.h b/Core/Components/CPU/Moira/Moira.h
+index 3cefd73..1e8fc28 100644
+--- a/Core/Components/CPU/Moira/Moira.h
++++ b/Core/Components/CPU/Moira/Moira.h
+@@ -531,6 +531,7 @@ protected:
+     
+     // Called when a breakpoint is hit
+     void didReachBreakpoint(u32 addr);
++    void vahl_trace_write(u32 addr, u32 pc, u32 watch);
+     
+     // Called when a watchpoint is hit
+     void didReachWatchpoint(u32 addr);

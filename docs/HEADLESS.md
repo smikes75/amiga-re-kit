@@ -32,6 +32,24 @@ Two patch variants are included:
 | `vamiga-headless-c59425d.patch` | c59425d (5.0b2, Sep 2026) | fixed 313-line PAL frame |
 | `vamiga-headless-899da5d.patch` | 899da5d (Oct 2026) | follows the current beam format (`Beam::cyclesPerFrames`) — use this one |
 
+**Do not measure disk loaders with c59425d.** A VAHeadless built from c59425d
+loses the first sector of every track on the disk-DMA path a custom
+trackloader uses: the MFM burst runs sector 10 straight into sector 1 with
+sector 0 and the track gap missing (measured in the Alien Breed project:
+the game's own OFS loader fails with error 26 on root block 880, sector 0 of
+track 80; reads of sector 1 succeed; the same disk and loader work on
+899da5d). The ROM `trackdisk.device` path was not affected in that test.
+Which upstream commit between the two fixed it is not known. Use 899da5d.
+
+Optional patches on top of the headless one:
+
+| patch | base | adds |
+|---|---|---|
+| `vamiga-trace.patch` | c59425d | `VAHL_TRACE`: every breakpoint hit writes a VTR1 record (registers, beam, chip RAM) and the run continues |
+| `vamiga-trace-ranges-899da5d.patch` | 899da5d | the same, plus `VAHL_TRACE_RANGES=start:len,...` (VTR2: only chosen ranges, incl. slow RAM, custom registers, CIA) and watchpoints (VTW2: + PC of the accessing instruction) |
+| `vamiga-regtrace.patch` | c59425d | ring buffer of every custom register write (WASM builds) |
+| `vamiga-wasm.patch` | c59425d | WebAssembly build without the emulation thread |
+
 Other masters may need the three hunks transplanted by hand; they are small.
 
 ## What the patch changes (three places)
@@ -101,6 +119,27 @@ writes `cap/draw_in/capture_21234_0.retrosh` (the script), `onstop_*.retrosh`
 The asset hashes tie the capture to the exact ROM, disk and emulator
 binary — a capture made with a different build is a different measurement
 and `arek diff` will tell you so by the differences it finds.
+
+## Continuous trace
+
+`bpstate` stops once per run. To follow the original over many frames, build
+VAHeadless with a trace patch and let every breakpoint hit write a record
+while the emulation runs on (`arek.headless.trace`, `arek trace`, MCP
+`trace_records`):
+
+```sh
+arek trace run build/l1.vtr --arm 196 --end 199 --break 0xc01106 \
+    --range 0:80000 c00000:80000 dff000:200 bfe000:1000 \
+    --at 14 "mouse1 press left"
+arek trace show build/l1.vtr --field px=0xc0599e:h --field cam=0xc031fc:h
+```
+
+`--arm` is the second at which `debugger` / `break at $ADDR 0` / `watch at
+$ADDR 0` / `commander` are issued; before that the run is untouched. Without
+`--range` each record carries the whole chip RAM (VTR1, `VAHL_TRACE_LEN`
+bytes). Records are read-only snapshots (`spypeek`): a trace never changes
+the run it records, so its frames line up with a plain `arek shot` of the
+same script.
 
 ## Known caveat: `mem save bin` and chip bus timing
 

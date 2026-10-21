@@ -1,13 +1,14 @@
 """Text disassembly straight from the strict decoder (no objdump needed).
 
-Two modes: linear (``listing``) which stops at the first undecodable word and
-says so, and flow-graph (``listing_walk``) which only lists reachable
+Two modes: linear (``listing``), which marks every undecodable word and goes
+on with the next one (``dcw=True`` writes it as ``dc.w $xxxx ; reason`` so the
+listing reassembles), and flow-graph (``listing_walk``) which only lists reachable
 instructions - the honest view when data sits between routines.
 """
 from . import decoder
 
 
-def listing(data, base, lo, hi, limit=None):
+def listing(data, base, lo, hi, limit=None, dcw=False):
     """Linear decode of [lo, hi). Returns list of (addr, bytes_hex, text)."""
     out, addr = [], lo
     end = min(hi, base + len(data))
@@ -16,7 +17,8 @@ def listing(data, base, lo, hi, limit=None):
             i = decoder.decode(data, base, addr)
         except (decoder.Unsupported, Exception) as e:   # struct.error at image end
             w = data[addr - base:addr - base + 2].hex()
-            out.append((addr, w, '?? %s (%s)' % (w, str(e).split(' @')[0])))
+            why = str(e).split(' @')[0]
+            out.append((addr, w, ('dc.w $%s ; %s' if dcw else '?? %s (%s)') % (w, why)))
             addr += 2
             continue
         raw = data[addr - base:i.end - base].hex()

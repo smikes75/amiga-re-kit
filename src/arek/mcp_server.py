@@ -43,6 +43,16 @@ def _addr(x):
     return int(x, 0) if isinstance(x, str) else int(x)
 
 
+# ------------------------------------------------------------------ kit
+@mcp.tool()
+def kit_info() -> dict:
+    """Version of the kit and SHA-256 of its decoder and recompiler sources -
+    record it with every measurement (an editable install can carry
+    unreleased changes)."""
+    from . import identity
+    return identity()
+
+
 # ------------------------------------------------------------------ disk
 @mcp.tool()
 def adf_info(path: str) -> dict:
@@ -305,6 +315,22 @@ def ram_at(path: str, offset: str, length: int = 256, base: str = '0') -> str:
         L.append('%06x  %-48s %s' % (b + i, ' '.join('%02x' % c for c in chunk),
                                      ''.join(chr(c) if 32 <= c < 127 else '.' for c in chunk)))
     return '\n'.join(L)
+
+
+# ------------------------------------------------------------------ trace
+@mcp.tool()
+def trace_records(path: str, fields: dict = None, start: int = 0, limit: int = 100) -> dict:
+    """Records of a continuous trace written by the patched VAHeadless
+    (VTR1/VTR2/VTW2, see arek.headless.trace): hit, frame, beam, kind, pc,
+    registers, captured ranges, plus ``fields`` = {name: "ADDR:FMT"} read
+    big-endian from the captured RAM (fmt: B, b, H, h, I, i)."""
+    from .headless import trace
+    f = {}
+    for name, spec in (fields or {}).items():
+        addr, _, fmt = str(spec).partition(':')
+        f[name] = (_addr(addr), fmt or 'H')
+    rows = trace.summary(path, f)
+    return {'total': len(rows), 'start': start, 'records': rows[start:start + limit]}
 
 
 def main():

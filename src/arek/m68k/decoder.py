@@ -258,6 +258,15 @@ def decode(data, base, addr):
             name = {0x4200: 'clr', 0x4400: 'neg', 0x4600: 'not', 0x4000: 'negx'}[op & 0xff00]
             e = ea(sz2)
             return Insn(addr, r.pc, name, sz=sz2, ea=e, text='%s.%s %s' % (name, SZNAME[sz2], e.text))
+        if (op & 0xfff8) == 0x4e50:                 # LINK An,#d16
+            d = r.w()
+            d = d - 0x10000 if d & 0x8000 else d
+            return Insn(addr, r.pc, 'link', an=reg, disp=d, text='link a%d,#%d' % (reg, d))
+        if (op & 0xfff8) == 0x4e58:                 # UNLK An
+            return Insn(addr, r.pc, 'unlk', an=reg, text='unlk a%d' % reg)
+        if (op & 0xffc0) == 0x4840 and (mode in (2, 5, 6) or (mode == 7 and reg <= 3)):   # PEA <control ea>
+            e = ea(SZ_L)
+            return Insn(addr, r.pc, 'pea', ea=e, text='pea %s' % e.text)
         raise Unsupported('0100 op %04x @%x' % (op, addr))
     # --- 0101: ADDQ/SUBQ/Scc/DBcc
     if hi == 5:
@@ -322,13 +331,25 @@ def decode(data, base, addr):
             raise Unsupported('%s @%x' % ('divs' if hi == 8 else 'muls', addr))
         direction = (op >> 8) & 1
         if hi == 0xb and direction:                  # EOR (nebo CMPM)
-            if mode == 1:
-                raise Unsupported('cmpm @%x' % addr)
+            if mode == 1:                            # CMPM (Ay)+,(Ax)+
+                src, dst = ea(sz2, 3, reg), ea(sz2, 3, dreg)
+                return Insn(addr, r.pc, 'cmpm', sz=sz2, src=src, dst=dst,
+                            text='cmpm.%s %s,%s' % (SZNAME[sz2], src.text, dst.text))
             e = ea(sz2)
             return Insn(addr, r.pc, 'eor', sz=sz2, reg=dreg, ea=e,
                         text='eor.%s d%d,%s' % (SZNAME[sz2], dreg, e.text))
-        if hi in (8, 0xc) and direction and mode in (0, 1) and hi == 0xc:
-            raise Unsupported('exg/abcd @%x' % addr)
+        if hi in (8, 0xc) and direction and mode in (0, 1):
+            if sz2 == 0:                             # ABCD / SBCD  Dy,Dx  or  -(Ay),-(Ax)
+                nm = 'abcd' if hi == 0xc else 'sbcd'
+                txt = ('-(a%d),-(a%d)' if mode else 'd%d,d%d') % (reg, dreg)
+                return Insn(addr, r.pc, 'bcd', sub=(hi == 8), rx=dreg, ry=reg, mem=bool(mode),
+                            text='%s %s' % (nm, txt))
+            om = (op >> 3) & 0x1f
+            if hi == 0xc and om in (0x08, 0x09, 0x11):   # EXG Dx,Dy / Ax,Ay / Dx,Ay
+                kx, ky = {0x08: ('d', 'd'), 0x09: ('a', 'a'), 0x11: ('d', 'a')}[om]
+                return Insn(addr, r.pc, 'exg', rx=dreg, ry=reg, kx=kx, ky=ky,
+                            text='exg %s%d,%s%d' % (kx, dreg, ky, reg))
+            raise Unsupported('%s @%x' % ('pack/unpk (68020)' if hi == 8 else 'exg %04x' % op, addr))
         if hi in (9, 0xd) and direction and mode in (0, 1) and sz2 != 3:
             return Insn(addr, r.pc, 'addx', sz=sz2, sub=(hi == 9), rx=dreg, ry=reg,
                         mem=(mode == 1),
@@ -343,8 +364,17 @@ def decode(data, base, addr):
                                        else ('%s,d%d' % (e.text, dreg))))
     # --- 1110: posuny a rotace
     if hi == 0xe:
-        if sz2 == 3:
-            raise Unsupported('posun v pameti %04x @%x' % (op, addr))
+        if sz2 == 3:                                 # memory form: <ea> by one bit, word
+            if op & 0x0800:
+                raise Unsupported('bit field (68020) %04x @%x' % (op, addr))
+            if mode < 2 or (mode == 7 and reg > 1):
+                raise Unsupported('memory shift needs a memory alterable ea %04x @%x' % (op, addr))
+            typ = (op >> 9) & 3
+            left = bool(op & 0x0100)
+            name = ['as', 'ls', 'rox', 'ro'][typ] + ('l' if left else 'r')
+            e = ea(SZ_W)
+            return Insn(addr, r.pc, 'shift', name=name, sz=SZ_W, mem=True, ea=e, cnt='1',
+                        text='%s.w %s' % (name, e.text))
         typ = (op >> 3) & 3
         left = bool(op & 0x0100)
         name = ['as', 'ls', 'rox', 'ro'][typ] + ('l' if left else 'r')

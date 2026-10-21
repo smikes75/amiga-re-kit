@@ -60,6 +60,7 @@ arek walk   main.bin --base 0x20700 --start 0x20700    # call tree + frontiers
 arek hwscan main.bin --base 0x20700 --roots 0x20700    # the hardware boundary
 arek copper ram.bin --base 0x0 --limit 200             # a copper list from a RAM dump
 arek xref   prog.txt --syms syms.json                  # from an objdump listing
+arek dis    main.bin --base 0x20700 --dcw              # linear, undecodable words as dc.w
 
 # 4. translate and verify
 arek recomp  main.bin --base 0x20700 --auto 0x21234 --main -o draw.c
@@ -67,6 +68,9 @@ arek bpstate --address 0x21234 --end 20 --out cap/before
 arek bpstate --address 0x21300 --end 20 --out cap/after
 arek diff    cap/before cap/after --range 0x60000 0x70000
 arek shot    build/shots/title 5 10 --at 3 "joystick 1 press fire"
+arek trace   run build/l1.vtr --arm 196 --end 199 --break 0xc01106 --range 0:80000 c00000:80000
+arek trace   show build/l1.vtr --field px=0xc0599e:h  # one row per hit, emulation never stopped
+arek --version                                         # version + decoder/recompiler hashes
 ```
 
 Every command prints what it measured and nothing else. `arek audit
@@ -86,13 +90,14 @@ asks for (see `examples/profile.example.json`).
 | `arek.packers.scan` | brute-force scan: signatures (PP20, RNC, ATN!, IMP!, …) + verified blocks | S.W.I.V. |
 | `arek.hunk` | bounded HUNK reader: CODE/DATA/BSS, RELOC32, split streams; `build()` for probes | Superfrog |
 | `arek.copper` | copper list disassembler with custom register names | S.W.I.V. |
-| `arek.m68k.decoder` | strict 68000 decoder: raises `Unsupported` instead of guessing | Superfrog (fixed ADDA/SUBA/CMPA) |
+| `arek.m68k.decoder` | strict 68000 decoder: raises `Unsupported` instead of guessing | Superfrog (fixed ADDA/SUBA/CMPA); LINK/UNLK/PEA/EXG from Alien Breed; memory shifts, CMPM, ABCD/SBCD new |
 | `arek.m68k.disasm` | linear and flow-walk listings straight from the decoder | new |
 | `arek.m68k.hwscan` | which routines are pure RAM and which touch custom chips / CIA / ROM | Turrican II |
 | `arek.m68k.recomp` | static 68k → C recompiler with a verification driver (`MEM[]`, write log, minimal blitter model) | Superfrog |
 | `arek.m68k.xref` | call / data cross references from `m68k-elf-objdump` text | Superfrog |
 | `arek.m68k.audit` | profile-driven inventory + conservative reachability, JSON in / JSON out | Superfrog |
 | `arek.headless` | `local.conf`, RetroShell scripts, screenshots, breakpoint captures | Turrican II / Superfrog |
+| `arek.headless.trace` | continuous trace reader/driver: VTR1 (chip RAM), VTR2 (chosen ranges), VTW2 (watchpoint + PC) | Turrican II / Alien Breed |
 | `arek.contract` | byte-level comparison of captures, register diffs, "untouched" assertions | Superfrog |
 | `arek.cli` / `arek.mcp_server` | the command line and the MCP server | new |
 
@@ -111,9 +116,11 @@ Claude Code (`.mcp.json` in your project, or `claude mcp add arek -- arek-mcp`):
 {"mcpServers": {"arek": {"command": "arek-mcp"}}}
 ```
 
-The server exposes 20 tools (`adf_info`, `adf_map`, `adf_ls`, `adf_file`, `scan_packed`, `unpack`,
+The server exposes 22 tools (`kit_info`, `adf_info`, `adf_map`, `adf_ls`, `adf_file`, `scan_packed`, `unpack`,
 `hunk_load`, `disassemble`, `walk`, `hwscan`, `recomp`, `xref`, `copper`,
-`headless_shot`, `headless_bpstate`, `diff_captures`, `ram_at`, …). All of them
+`headless_shot`, `headless_bpstate`, `trace_records`, `diff_captures`, `ram_at`, …).
+`kit_info` returns the version and the SHA-256 of the decoder and recompiler;
+record it with every measurement. All of them
 take paths on the local machine; the server never fetches anything, never
 writes outside the paths it is given, and only returns measurements — the
 assistant sees entropy maps, listings and diffs, not your disk image.

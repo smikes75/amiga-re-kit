@@ -30,7 +30,29 @@ def dec(hexwords, base=0x1000):
     ('48e7fffe', 'movem.l -(a7)', 'movem'),
     ('0c400001', 'cmpi.w #1,d0', 'alui'),
     ('e248', 'lsr.w 1,d0', 'shift'),
+    ('e2ed002e', 'lsr.w (46,a5)', 'shift'),       # memory form (one bit, word)
+    ('e1d0', 'asl.w (a0)', 'shift'),
+    ('e0d0', 'asr.w (a0)', 'shift'),
+    ('e3d8', 'lsl.w (a0)+', 'shift'),
+    ('e5e0', 'roxl.w -(a0)', 'shift'),
+    ('e4d0', 'roxr.w (a0)', 'shift'),
+    ('e7f900dff000', 'rol.w $dff000.l', 'shift'),
+    ('e6f81000', 'ror.w $1000.w', 'shift'),
     ('c0c1', 'mulu d1,d0', 'mulu'),
+    ('4e56fff8', 'link a6,#-8', 'link'),
+    ('4e5e', 'unlk a6', 'unlk'),
+    ('4850', 'pea (a0)', 'pea'),
+    ('487a0010', 'pea $1012(pc)', 'pea'),
+    ('48780400', 'pea $400.w', 'pea'),
+    ('b308', 'cmpm.b (a0)+,(a1)+', 'cmpm'),
+    ('b549', 'cmpm.w (a1)+,(a2)+', 'cmpm'),
+    ('c340', 'exg d1,d0', 'exg'),
+    ('c348', 'exg a1,a0', 'exg'),
+    ('c188', 'exg d0,a0', 'exg'),
+    ('c101', 'abcd d1,d0', 'bcd'),
+    ('c308', 'abcd -(a0),-(a1)', 'bcd'),
+    ('8300', 'sbcd d0,d1', 'bcd'),
+    ('8109', 'sbcd -(a1),-(a0)', 'bcd'),
 ])
 def test_decoder_table(hx, text, kind):
     i = dec(hx)
@@ -42,6 +64,10 @@ def test_decoder_is_strict():
         dec('81c1')                                  # divs: not modelled -> explicit
     with pytest.raises(decoder.Unsupported):
         dec('ffff')
+    for hx in ('e1c0', 'e1fc0001', 'e1fa0000', 'e8c0',
+               '8340', '4848', '4858', '4860', '487c0000', 'c1c8'):   # pack, bkpt, pea (a0)+/-(a0)/#, bad exg   # memory shift of dn / #imm / (pc); 68020 bit field
+        with pytest.raises(decoder.Unsupported):
+            dec(hx)
 
 
 def test_walk_skips_data_between_routines(code):
@@ -246,3 +272,125 @@ def test_xref_cli_callees(tmp_path, capsys):
     out = capsys.readouterr().out
     for src, t in pairs:
         assert '%06x -> %06x' % (src, t) in out
+
+
+def test_walk_through_memory_shift():
+    data = bytes.fromhex('e2ed002e4e75')                 # lsr.w (46,a5); rts
+    ins, calls, bad, ind = decoder.walk(data, 0, 0, 0, len(data))
+    assert sorted(ins) == [0, 4] and not bad and not ind
+    assert ins[0].text == 'lsr.w (46,a5)' and ins[4].text == 'rts'
+
+
+def test_recomp_memory_shift_runs(tmp_path):
+    base = 0x1000
+    data = bytes.fromhex('e1d0 e2ed002e 4e75'.replace(' ', ''))   # asl.w (a0); lsr.w (46,a5); rts
+    src, stats, entries = recomp.generate(data, base, auto=[base], with_main=True)
+    assert 'f_shift(m, "asl"' in src and 'f_shift(m, "lsr"' in src
+    cc = shutil.which('cc') or shutil.which('gcc') or shutil.which('clang')
+    if not cc:
+        pytest.skip('no C compiler')
+    c = tmp_path / 'r.c'
+    c.write_text(src)
+    exe = tmp_path / 'r'
+    subprocess.run([cc, '-O1', '-o', str(exe), str(c)], check=True)
+    memsz = int(__import__('re').search(r'#define MEMSZ\s+(\S+)', src).group(1).rstrip('uUlL'), 0)
+    ram = bytearray(memsz)
+    struct.pack_into('>H', ram, 0x2000, 0x4001)            # asl.w (a0)      -> 0x8002
+    struct.pack_into('>H', ram, 0x2000 + 46, 0x0008)       # lsr.w (46,a5)   -> 0x0004
+    (tmp_path / 'ram.bin').write_bytes(ram)
+    regs = ' '.join(['0'] * 8 + ['2000', '0', '0', '0', '0', '2000', '0', '%x' % (memsz - 0x100)])
+    (tmp_path / 'regs.txt').write_text(regs + '\n0 0 0 0 0\nf_%06x\n' % base)
+    out, log = tmp_path / 'out.bin', tmp_path / 'log.txt'
+    subprocess.run([str(exe), str(tmp_path / 'ram.bin'), str(tmp_path / 'regs.txt'), str(out), str(log)], check=True)
+    mem = out.read_bytes()
+    assert struct.unpack_from('>H', mem, 0x2000)[0] == 0x8002
+    assert struct.unpack_from('>H', mem, 0x2000 + 46)[0] == 0x0004
+    assert 'w 2000' in log.read_text() and 'w 202e' in log.read_text()
+
+
+def _run_c(tmp_path, src, base, entry, ram_init, regs, flags='0 0 0 0 0'):
+    """Compile generated C, run ``entry`` on a RAM image, return the RAM after."""
+    cc = shutil.which('cc') or shutil.which('gcc') or shutil.which('clang')
+    if not cc:
+        pytest.skip('no C compiler')
+    c, exe = tmp_path / 'r.c', tmp_path / 'r'
+    c.write_text(src)
+    subprocess.run([cc, '-O1', '-o', str(exe), str(c)], check=True)
+    memsz = int(__import__('re').search(r'#define MEMSZ\s+(\S+)', src).group(1).rstrip('uUlL'), 0)
+    ram = bytearray(memsz)
+    for a, b in ram_init.items():
+        ram[a:a + len(b)] = b
+    (tmp_path / 'ram.bin').write_bytes(ram)
+    r = dict(regs)
+    r.setdefault('a7', memsz - 0x100)
+    line = ' '.join('%x' % r.get(n, 0) for n in ['d%d' % i for i in range(8)] + ['a%d' % i for i in range(8)])
+    (tmp_path / 'regs.txt').write_text(line + '\n%s\nf_%06x\n' % (flags, entry))
+    out, log = tmp_path / 'out.bin', tmp_path / 'log.txt'
+    subprocess.run([str(exe), str(tmp_path / 'ram.bin'), str(tmp_path / 'regs.txt'), str(out), str(log)], check=True)
+    return out.read_bytes()
+
+
+def test_recomp_link_pea_exg_cmpm_bcd_run(tmp_path):
+    base = 0x1000
+    prog = bytes.fromhex(
+        '4e56fff8'      # link a6,#-8
+        '4850'          # pea (a0)
+        'c340'          # exg d1,d0           d0=$38 d1=$45
+        'c101'          # abcd d1,d0          d0=$83
+        '8300'          # sbcd d0,d1          d1=$45-$83 = $62, X=1
+        'b308'          # cmpm.b (a0)+,(a1)+  $11 vs $11 -> Z
+        '57f8400c'      # seq $400c.w
+        'c308'          # abcd -(a0),-(a1)    $11+$11+X = $23 at $3000
+        '241f'          # move.l (a7)+,d2     the pea'd address
+        '4e5e'          # unlk a6
+        '21c04000' '21c24004' '21ce4008' '21c14010'
+        '4e75')
+    src, stats, entries = recomp.generate(prog, base, auto=[base], with_main=True)
+    assert src.startswith('/* generated by amiga-re-kit ')
+    for k in ('link', 'unlk', 'pea', 'exg', 'cmpm', 'bcd'):
+        assert stats[k] >= 1, k
+    mem = _run_c(tmp_path, src, base, base, {0x2000: b'\x11', 0x3000: b'\x11'},
+                 {'d0': 0x45, 'd1': 0x38, 'a0': 0x2000, 'a1': 0x3000, 'a6': 0x1234})
+    L = lambda a: struct.unpack_from('>I', mem, a)[0]
+    assert L(0x4000) == 0x83 and L(0x4010) == 0x62
+    assert L(0x4004) == 0x2000 and L(0x4008) == 0x1234
+    assert mem[0x400c] == 0xff and mem[0x3000] == 0x23
+
+
+def test_disasm_dcw_listing():
+    from arek.m68k import disasm
+    data = bytes.fromhex('4e71ffff4e75')
+    rows = disasm.listing(data, 0, 0, len(data), dcw=True)
+    assert [r[2] for r in rows] == ['nop', rows[1][2], 'rts']
+    assert rows[1][2].startswith('dc.w $ffff ; ')
+    assert disasm.listing(data, 0, 0, len(data))[1][2].startswith('?? ffff')
+
+
+def test_recomp_cli_refusal_is_short(tmp_path, capsys):
+    from arek import cli
+    f = tmp_path / 'p.bin'
+    f.write_bytes(bytes.fromhex('4e71 4afc 4e75'.replace(' ', '')))      # nop; illegal; rts
+    rc = cli.main(['recomp', str(f), '--base', '0x1000', '--auto', '0x1000', '-o', str(tmp_path / 'o.c')])
+    err = capsys.readouterr().err
+    assert rc == 2 and err.startswith('arek recomp: refused:') and 'Traceback' not in err
+    assert not (tmp_path / 'o.c').exists()
+
+
+def test_identity_and_version(capsys):
+    import arek
+    from arek import cli
+    ident = arek.identity()
+    assert ident['version'] == arek.__version__ and len(ident['decoder_sha256']) == 64
+    with pytest.raises(SystemExit):
+        cli.main(['--version'])
+    out = capsys.readouterr().out
+    assert arek.__version__ in out and ident['decoder_sha256'][:12] in out
+
+
+def test_audit_reports_kit_identity(code, tmp_path):
+    base, data = code
+    (tmp_path / 'main.bin').write_bytes(data)
+    p = {'name': 't', 'inventory_glob': '*.bin',
+         'modules': {'main.bin': {'role': 'main', 'base': hex(base), 'roots': [hex(base + 0x0e)]}}}
+    import arek
+    assert audit.audit(p, tmp_path)['kit'] == arek.identity()

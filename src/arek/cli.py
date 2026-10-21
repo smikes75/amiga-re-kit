@@ -8,7 +8,7 @@
     arek t2          FILE -o OUT
     arek atn         FILE -o OUT [--offset N]
     arek hunk        info|load  FILE ...
-    arek dis         FILE --base B [--lo --hi | --walk START] [--syms J]
+    arek dis         FILE --base B [--lo --hi | --walk START] [--syms J] [--dcw]
     arek walk        FILE --base B --start S [--lo --hi]
     arek hwscan      FILE --base B --roots A.. [--abase An=ADDR] [--chip SIZE] [--json]
     arek audit       PROFILE.json [--root DIR]
@@ -17,6 +17,8 @@
     arek copper      FILE [--base B]
     arek shot        PREFIX T.. [--at T CMD] [--adf N]
     arek bpstate     --address A --end T --out DIR [--pass N] [--at T CMD] [--region B:L]
+    arek trace       run OUT --arm T --end T --break A.. [--watch A..] [--range S:L..] [--at T CMD]
+    arek trace       show TRACE [--field NAME=ADDR:FMT ..] [--every N] [--json]
     arek diff        DIR_A DIR_B [--range LO HI]
     arek init        [DIR]
 
@@ -160,7 +162,7 @@ def cmd_dis(a):
         for addr, why in fr:
             print('; frontier %06x: %s' % (addr, why))
     else:
-        rows = disasm.listing(data, a.base, a.lo or a.base, a.hi or a.base + len(data), a.limit)
+        rows = disasm.listing(data, a.base, a.lo or a.base, a.hi or a.base + len(data), a.limit, dcw=a.dcw)
         print(disasm.format_listing(rows, syms))
 
 
@@ -285,9 +287,34 @@ def cmd_init(a):
     print('project skeleton in %s - edit local.conf (ROM, ADF1, VAHL)' % root)
 
 
+def cmd_trace(a):
+    from .headless import trace
+    if a.what == 'run':
+        from .headless import config
+        if a.arm is None or a.end is None or not (a.brk or a.watch):
+            raise ValueError('trace run needs --arm, --end and --break and/or --watch')
+        conf = config.load(a.conf)
+        ranges = [tuple(int(x, 16) for x in r.split(':')) for r in a.ranges]
+        events = [(float(t), cmd) for t, cmd in a.at]
+        n = trace.capture(conf, a.file, events, a.arm, a.end, a.brk, a.watch, ranges or None)
+        print('%s: %d records' % (a.file, n))
+        return
+    fields = {}
+    for f in a.field:
+        name, spec = f.split('=', 1)
+        addr, _, fmt = spec.partition(':')
+        fields[name] = (A(addr), fmt or 'H')
+    rows = trace.summary(a.file, fields)[::max(1, a.every)]
+    print(json.dumps(rows, indent=1) if a.json else trace.format_summary(rows, list(fields)))
+
+
 # ----------------------------------------------------------------- parser
 def build_parser():
     p = argparse.ArgumentParser(prog='arek', description='Amiga reverse-engineering kit')
+    from . import identity
+    ident = identity()
+    p.add_argument('--version', action='version', version='arek %s (decoder %s, recomp %s)' % (
+        ident['version'], ident['decoder_sha256'][:12], ident['recomp_sha256'][:12]))
     sp = p.add_subparsers(dest='cmd', required=True)
 
     s = sp.add_parser('adf', help='disk image: info, entropy map, regions, slicing')
@@ -341,6 +368,7 @@ def build_parser():
     s.add_argument('--lo', type=A)
     s.add_argument('--hi', type=A)
     s.add_argument('--walk', type=A, help='entry address: list only reachable code')
+    s.add_argument('--dcw', action='store_true', help='linear: write undecodable words as dc.w (reassemblable)')
     s.add_argument('--limit', type=int)
     s.add_argument('--syms')
     s.set_defaults(fn=cmd_dis)
@@ -425,6 +453,21 @@ def build_parser():
     s.add_argument('--range', type=A, nargs=2)
     s.set_defaults(fn=cmd_diff)
 
+    s = sp.add_parser('trace', help='continuous trace of the original (patched VAHeadless)')
+    s.add_argument('what', choices=['run', 'show'])
+    s.add_argument('file', help='trace file (written by run, read by show)')
+    s.add_argument('--arm', type=float, help='second at which breakpoints/watchpoints are set')
+    s.add_argument('--end', type=float, help='second at which the run stops')
+    s.add_argument('--break', dest='brk', type=A, nargs='*', default=[])
+    s.add_argument('--watch', type=A, nargs='*', default=[])
+    s.add_argument('--range', dest='ranges', nargs='*', default=[], metavar='START:LEN', help='hex; without it VTR1 = chip RAM')
+    s.add_argument('--at', nargs=2, action='append', default=[], metavar=('T', 'CMD'), help='input event')
+    s.add_argument('--field', nargs='*', default=[], metavar='NAME=ADDR:FMT', help='show: value to read, e.g. px=0xc0599e:h')
+    s.add_argument('--every', type=int, default=1)
+    s.add_argument('--json', action='store_true')
+    s.add_argument('--conf', default='local.conf')
+    s.set_defaults(fn=cmd_trace)
+
     s = sp.add_parser('init', help='create a project skeleton with local.conf')
     s.add_argument('dir', nargs='?', default='.')
     s.set_defaults(fn=cmd_init)
@@ -432,9 +475,13 @@ def build_parser():
 
 
 def main(argv=None):
+    from .m68k.decoder import Unsupported
     a = build_parser().parse_args(argv)
     try:
         a.fn(a)
+    except Unsupported as e:
+        print('arek %s: refused: %s' % (a.cmd, e), file=sys.stderr)
+        return 2
     except (ValueError, RuntimeError, FileNotFoundError, FileExistsError) as e:
         print('arek: %s' % e, file=sys.stderr)
         return 1

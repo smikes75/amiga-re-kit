@@ -96,6 +96,15 @@ RAM dump + write log out*. That is the verification loop:
 
 Nothing "looks right"; it is equal or it is not.
 
+For a whole frame step rather than one routine, record the original with
+`arek trace run` (one record per frame boundary, the chosen RAM ranges in
+each), feed record *N* to the recompiled step and compare its RAM with record
+*N + 1*, frame after frame. A step that matches for hundreds of frames, from
+the trace's first record and in free run, is the evidence that the
+translation is the game (the Alien Breed project does exactly this). Generated
+C carries the kit version and the decoder/recompiler hashes in its first
+line; `arek --version` and the MCP `kit_info` tool print them for the record.
+
 ## 6. Reading the interpreters
 
 Level maps, sprite formats, animation scripts: the same rule. Find the

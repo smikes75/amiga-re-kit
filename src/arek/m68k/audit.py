@@ -118,6 +118,7 @@ def audit(profile, root):
         records.append(record)
     return {'schema': 1, 'profile': profile['name'],
             'decoder_sha256': hashlib.sha256(Path(decoder.__file__).read_bytes()).hexdigest(),
+            'kit': __import__('arek').identity(),
             'profile_sha256': hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest(),
             'limitations': LIMITATIONS,
             'modules': records}
