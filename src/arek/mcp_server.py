@@ -241,7 +241,9 @@ def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = No
     ``timing`` counts 68000 clocks per instruction into CYCLES (or the host's tick_hook).
     ``memsz``: chip RAM bytes (default "0x80000"); ``slow``: slow RAM "BASE:SIZE" in hex,
     e.g. "c00000:80000" (the driver then takes SLOW.bin SLOWOUT.bin as arguments 5 and 6).
-    Raises on anything the decoder does not support - nothing is silently skipped."""
+    Anything the decoder does not support is refused, never skipped: the result is then
+    {"refused": {"message", "frontiers": [{routine, site, kind, insn, operand, target, why}]}}
+    with every place that needs a ``flow`` entry (addresses as hex strings)."""
     from .m68k import recomp as rc
     for s in stubs or []:
         rc.add_stub(s)
@@ -251,10 +253,13 @@ def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = No
     fl = rc.flow_from_specs(data, b, f.get('jtab', []), f.get('indirect', []), f.get('stop', []),
                             f.get('exitat', []), f.get('extern', []), f.get('ret', []),
                             f.get('prefix'), bool(f.get('lib')), f.get('inline', []))
-    src, stats, entries = rc.generate(data, b, fs, [_addr(a) for a in auto or []],
-                                      with_main=with_main, flow=fl, timing=timing,
-                                      memsz=_addr(memsz) if memsz else None,
-                                      slow=tuple(int(x, 16) for x in slow.split(':')) if slow else None)
+    try:
+        src, stats, entries = rc.generate(data, b, fs, [_addr(a) for a in auto or []],
+                                          with_main=with_main, flow=fl, timing=timing,
+                                          memsz=_addr(memsz) if memsz else None,
+                                          slow=tuple(int(x, 16) for x in slow.split(':')) if slow else None)
+    except rc.Unsupported as e:
+        return {'refused': rc.refusal_json(e)}
     Path(out_c).write_text(src)
     return {'out': out_c, 'entries': ['%06x' % e for e in entries], 'stats': stats}
 

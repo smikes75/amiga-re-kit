@@ -263,16 +263,27 @@ def cmd_recomp(a):
     impl = None
     if a.stub_impl:
         impl = 'notes' if a.stub_impl == 'notes' else Path(a.stub_impl).read_text()
-    src, stats, entries = recomp.generate(data, a.base, funcs, a.auto or [],
-                                          a.lo or a.base, a.hi, with_main=a.main, flow=flow,
-                                          stub_impl=impl, timing=a.timing, memsz=a.memsz,
-                                          slow=tuple(_hex(x) for x in a.slow.split(':')) if a.slow else None)
+    if a.refusals and os.path.exists(a.refusals):
+        os.unlink(a.refusals)
+    try:
+        src, stats, entries = recomp.generate(
+            data, a.base, funcs, a.auto or [], a.lo or a.base, a.hi, with_main=a.main, flow=flow,
+            stub_impl=impl, timing=a.timing, memsz=a.memsz,
+            slow=tuple(_hex(x) for x in a.slow.split(':')) if a.slow else None)
+    except recomp.Unsupported as e:
+        if a.refusals:
+            Path(a.refusals).write_text(json.dumps(recomp.refusal_json(e), indent=1) + '\n')
+        if len(e.frontiers) > 1:
+            print('arek recomp: %d frontiers%s' % (len(e.frontiers), ' (all in %s)' % a.refusals if a.refusals
+                                                   else '; --refusals FILE lists them as JSON'), file=sys.stderr)
+        raise
     Path(a.out).write_text(src)
     print('%s: %d entries (%s), %d instruction kinds, %d instructions' %
           (a.out, len(entries), ', '.join('%06x' % e for e in entries), len(stats), sum(stats.values())))
     if a.stats:
         for k, v in sorted(stats.items(), key=lambda kv: -kv[1]):
             print('  %-10s %d' % (k, v))
+
 
 
 def cmd_copper(a):
@@ -541,6 +552,8 @@ def build_parser():
     s.add_argument('--inline', nargs='*', metavar='ROUTINE[,..]:until=HHHH|words=N|longs=N|string',
                    help='the routine reads data stored after its call and returns behind it (hex)')
     s.add_argument('--main', action='store_true', help='append the verification driver main()')
+    s.add_argument('--refusals', metavar='FILE', help='on a refusal write every frontier here as JSON '
+                   '(routine, site, kind, insn, operand, target, why); removed when the run succeeds')
     s.add_argument('--memsz', type=AH, help='chip RAM bytes from 0 (default 0x80000)')
     s.add_argument('--slow', metavar='BASE:SIZE', help='slow RAM, hex, e.g. c00000:80000; the driver '
                    'takes SLOW.bin SLOWOUT.bin as arguments 5 and 6')

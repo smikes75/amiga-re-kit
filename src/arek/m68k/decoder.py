@@ -29,7 +29,29 @@ CC = ['t', 'f', 'hi', 'ls', 'cc', 'cs', 'ne', 'eq',
 
 
 class Unsupported(Exception):
-    pass
+    """Raised instead of guessing. ``frontiers``: every place that stopped a translation
+    (recomp.generate), as dicts - see ``frontier()``. The message stays the first one's text."""
+
+    def __init__(self, msg='', frontiers=()):
+        super().__init__(msg)
+        self.frontiers = list(frontiers)
+
+
+def frontier(routine, site, why):
+    """A walk frontier as data: ``routine`` and ``site`` (addresses), ``kind`` =
+    'undecodable' | 'indirect' | 'data_after_call', for an indirect jump ``insn``
+    ('jsr'/'jmp') and ``operand`` (e.g. '(a0)', '(2,a6,d0.w)'), for data after a call
+    ``target`` (the routine called), and ``why`` (the walker's text)."""
+    f = {'routine': routine, 'site': site, 'why': why}
+    if why.startswith('data after call $'):
+        f['kind'] = 'data_after_call'
+        f['target'] = int(why.split('$')[1].split()[0], 16)
+    elif why.startswith(('jsr ', 'jmp ')):
+        f['kind'] = 'indirect'
+        f['insn'], f['operand'] = why.split(' ', 1)
+    else:
+        f['kind'] = 'undecodable'
+    return f
 
 
 class Reader:

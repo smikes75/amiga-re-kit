@@ -1123,6 +1123,12 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
                 jtabs=jtabs, indirect=ind, prefix=pf, lib=lib, inline=inl)
 
 
+def refusal_json(e):
+    """An Unsupported as JSON-ready data: the message and every frontier, addresses as hex strings."""
+    return {'message': str(e), 'frontiers': [{k: ('%x' % v if k in ('routine', 'site', 'target') else v)
+                                              for k, v in f.items()} for f in e.frontiers]}
+
+
 def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow=NOFLOW,
              stub_impl=None, timing=False, memsz=None, slow=None):
     """Return (c_source, stats, entries). ``funcs`` are (start, end, entry) linear ranges,
@@ -1133,6 +1139,8 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
     stubs that record a hardware note, or C source with their bodies.
     ``timing``: every instruction adds its 68000 clocks (arek.m68k.timing, branch outcome and
     MUL/DIV operands included) through TICK(pc, n) into CYCLES or the host's tick_hook.
+    A refusal raises Unsupported with the first frontier as its text and all of them in
+    ``.frontiers`` (decoder.frontier), so one run lists every place that needs a Flow entry.
     ``memsz``: chip RAM bytes from 0 (default 512 KB); ``slow``: (base, size) of slow RAM, e.g.
     (0xc00000, 0x80000) - the driver then reads/writes it as optional files 5 and 6. Both can
     also be set when compiling (-DMEMSZ=..., -DSLOWBASE=..., -DSLOWSZ=...).
@@ -1142,13 +1150,20 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
     cfg = {}
     if auto:
         tree = call_tree(data, base, list(auto), lo, hi, flow)
+        first, found, seen = None, [], set()
         for e, (ins, calls, bad, ind) in tree.items():
-            if bad:
-                raise Unsupported('routine $%x, %s @%x' % (e, bad[0][1], bad[0][0]))
-            if ind:
+            for site, why in bad + ind:
+                if (site, why) not in seen:
+                    seen.add((site, why))
+                    found.append(decoder.frontier(e, site, why))
+            if bad and first is None:
+                first = 'routine $%x, %s @%x' % (e, bad[0][1], bad[0][0])
+            elif ind and first is None:
                 what = '' if ind[0][1].startswith('data after') else 'indirect jump: '
-                raise Unsupported('routine $%x, %s%s @%x' % (e, what, ind[0][1], ind[0][0]))
+                first = 'routine $%x, %s%s @%x' % (e, what, ind[0][1], ind[0][0])
             cfg[e] = ins
+        if found:
+            raise Unsupported(first, found)
     g = Gen(data, base, list(funcs), cfg, flow, timing)
     src = g.gen()
     if stub_impl is not None and decoder.STUBS:

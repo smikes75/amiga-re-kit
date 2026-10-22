@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 1243 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 1248 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -67,6 +67,7 @@ arek dis    main.bin --base 0x20700 --walk 0x21234 --cycles   # 68000 clock coun
 
 # 4. translate and verify
 arek recomp  main.bin --base 0x20700 --auto 0x21234 --main -o draw.c
+arek recomp  main.bin --base 0x20700 --auto 0x20700 --refusals ref.json -o game.c   # every frontier as JSON
 arek recomp  main.bin --base 0x20700 --auto 0x21234 --timing \
              --jtab 21300:21400:12:4:bra --indirect 21350=21500,21600 --extern 21700=load_file -o game.c
 arek bpstate --address 0x21234 --end 20 --out cap/before
