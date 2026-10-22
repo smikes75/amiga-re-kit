@@ -15,9 +15,11 @@ BASE = 0x1000
 FLAGS = 'xnzvc'
 
 
-def run(tmp_path, hexcode, regs, flags='00000', auto=(BASE,), extra_c='', logs=None, **gen):
+def run(tmp_path, hexcode, regs, flags='00000', auto=(BASE,), extra_c='', logs=None, pre_c='',
+        ram_init=None, **gen):
     """Run ``hexcode`` + rts at BASE (also placed in RAM); return (d, a, flags, RAM).
-    ``gen`` goes to recomp.generate (flow=...), ``extra_c`` is appended to the source,
+    ``gen`` goes to recomp.generate (flow=...), ``extra_c`` is appended to the source and
+    ``pre_c`` put before it (host macros), ``ram_init`` = {address: bytes} written to RAM first,
     the driver's log text is appended to ``logs``."""
     cc = shutil.which('cc') or shutil.which('gcc') or shutil.which('clang')
     if not cc:
@@ -25,10 +27,12 @@ def run(tmp_path, hexcode, regs, flags='00000', auto=(BASE,), extra_c='', logs=N
     prog = bytes.fromhex(hexcode + '4e75')
     src, _, _ = recomp.generate(prog, BASE, auto=list(auto), with_main=True, **gen)
     c, exe = tmp_path / 'r.c', tmp_path / 'r'
-    c.write_text(src + extra_c)
+    c.write_text(pre_c + src + extra_c)
     subprocess.run([cc, '-O1', '-o', str(exe), str(c)], check=True)
     memsz = 0x80000
     ram = bytearray(memsz)
+    for at, b in (ram_init or {}).items():
+        ram[at:at + len(b)] = b
     ram[BASE:BASE + len(prog)] = prog
     (tmp_path / 'ram.bin').write_bytes(ram)
     r = dict(regs)

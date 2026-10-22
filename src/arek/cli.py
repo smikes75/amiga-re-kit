@@ -22,7 +22,8 @@
     arek diff        DIR_A DIR_B [--range LO HI]
     arek init        [DIR]
 
-All addresses accept ``0x`` hex or decimal. No command needs a game to run
+All addresses accept ``0x`` or ``$`` hex, or decimal; the flow specs of ``recomp``
+(``--func``, ``--jtab`` ... ``--inline``) are hex with ``0x`` optional. No command needs a game to run
 the kit's own tests; the ones that drive the emulator need ``local.conf``.
 """
 import argparse
@@ -32,7 +33,21 @@ from pathlib import Path
 
 
 def A(s):
-    return int(s, 0)
+    """A number or address: 0x... or $... hex, otherwise decimal."""
+    s = s.strip()
+    try:
+        return int(s[1:], 16) if s.startswith('$') else int(s, 0)
+    except ValueError:
+        raise argparse.ArgumentTypeError('%r: write hex as 0x%s or $%s' % (s, s, s)) from None
+
+
+def AH(s):
+    """An address where flow specs next to it are bare hex: decimal still works, but a bare
+    number that also reads as hex gets a warning."""
+    v = A(s)
+    if v > 9 and s.strip().isdigit():
+        print('arek: %s read as decimal (0x%x); write 0x%s for hex' % (s, v, s), file=sys.stderr)
+    return v
 
 
 def rd(p):
@@ -429,17 +444,19 @@ def build_parser():
     s.add_argument('--top', type=int, default=40)
     s.set_defaults(fn=cmd_xref)
 
-    s = sp.add_parser('recomp', help='68k -> C static recompilation')
+    s = sp.add_parser('recomp', help='68k -> C static recompilation',
+                      description='--base/--lo/--hi/--auto take 0x or $ hex (or decimal, like every '
+                                  'address option); --func and the flow specs (--jtab ... --inline) '
+                                  'are hex, 0x optional. DISP in --stub is decimal.')
     s.add_argument('file')
-    s.add_argument('--base', type=A, required=True)
+    s.add_argument('--base', type=AH, required=True)
     s.add_argument('--func', nargs='*', metavar='START:END[:ENTRY]')
-    s.add_argument('--auto', type=A, nargs='*', metavar='ENTRY')
+    s.add_argument('--auto', type=AH, nargs='*', metavar='ENTRY')
     s.add_argument('--stub', nargs='*', metavar='An:DISP:NAME')
-    s.add_argument('--lo', type=A)
-    s.add_argument('--hi', type=A)
+    s.add_argument('--lo', type=AH)
+    s.add_argument('--hi', type=AH)
     s.add_argument('--jtab', nargs='*', metavar='SITE[,..]:TABLE:COUNT:STRIDE:bra|ptr[:AN]',
-                   help='jsr/jmp (d8,An,Dn) into a table of bra.w slots or pointers; '
-                        'all flow addresses are hex, as in --func')
+                   help='jsr/jmp (d8,An,Dn) into a table of bra.w slots or pointers')
     s.add_argument('--indirect', nargs='*', metavar='SITE=T1,T2',
                    help='possible targets of jsr/jmp (An), or of a jmp abs the program rewrites')
     s.add_argument('--stop', nargs='*', metavar='ADDR', help='never translate (a branch into data)')

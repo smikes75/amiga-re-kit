@@ -21,28 +21,19 @@ from .timing import cycles, ea_class, ea_time
 
 # ---------------------------------------------------------------- generator
 
-RUNTIME = r'''
-/* Vygenerovano tools/recomp.py - neupravovat rucne. */
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-#define MEMSZ 0x80000u
-uint8_t MEM[MEMSZ];
-uint8_t WRLOG[MEMSZ];
-
-typedef struct { uint32_t d[8], a[8]; int x, n, z, v, c; uint32_t srhi; } M68;
-void exit_point(M68 *m, uint32_t at);   /* a Flow.exits routine was called: the host ends the run */
-
+TIMING_RT = r'''
+#ifndef AREK_TIMING
+#define AREK_TIMING
 /* 68000 clocks of the translated code (generate(timing=True); arek.m68k.timing, no DMA
    contention). Compile with -DTICK_HOOK to route every instruction to the host instead. */
 uint64_t CYCLES = 0;
+#ifndef TICK                    /* a host may define its own TICK(pc, n) before this */
 #ifdef TICK_HOOK
 void tick_hook(M68 *m, uint32_t pc, uint32_t clocks);
 #define TICK(pc, n) tick_hook(m, (pc), (n))
 #else
 #define TICK(pc, n) (CYCLES += (n))
+#endif
 #endif
 static uint32_t mulu_t(uint32_t s) { return 38 + 2 * (uint32_t)__builtin_popcount(s & 0xffff); }
 static uint32_t muls_t(uint32_t s) { uint32_t v = (s & 0xffff) << 1; return 38 + 2 * (uint32_t)__builtin_popcount((v ^ (v >> 1)) & 0xffff); }
@@ -68,6 +59,34 @@ static uint32_t divs_t(uint32_t dividend, uint32_t divisor) {
     for (int i = 0; i < 15; i++) { if (!(aq & 0x8000)) mc++; aq = (aq << 1) & 0xffff; }
     return 2 * mc;
 }
+#endif
+'''
+
+WAIT_RT = r'''
+/* A wait loop "L: tst/btst/cmp/cmpa/cmpi <mem> ; bcc L" polls memory or a hardware register:
+   statically translated, time must move on inside it (an interrupt, the beam) or it never
+   ends. WAIT_LOOP(m, pc, addr) runs on every repeat; pc = L, addr = the polled address.
+   Empty unless the host defines it. */
+#ifndef WAIT_LOOP
+#define WAIT_LOOP(m, pc, addr) ((void)0)
+#endif
+'''
+
+RUNTIME = r'''
+/* Vygenerovano tools/recomp.py - neupravovat rucne. */
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MEMSZ 0x80000u
+uint8_t MEM[MEMSZ];
+uint8_t WRLOG[MEMSZ];
+
+typedef struct { uint32_t d[8], a[8]; int x, n, z, v, c; uint32_t srhi; } M68;
+void exit_point(M68 *m, uint32_t at);   /* a Flow.exits routine was called: the host ends the run */
+
+%%TIMING%%
 
 static void oob(uint32_t a) { fprintf(stderr, "pristup mimo chip RAM: %08x\n", a); exit(3); }
 
@@ -432,6 +451,7 @@ static void push32(M68 *m, uint32_t v) { m->a[7] -= 4; wr32(m->a[7], v); }
 static void unknown_call(uint32_t a) { fprintf(stderr, "unknown routine %06x\n", a); exit(4); }
 static uint32_t INLINE_RET = 0;     /* where a routine with data after its call returned to */
 '''
+RUNTIME = RUNTIME.replace('%%TIMING%%', TIMING_RT + WAIT_RT)
 
 
 class Gen:
@@ -457,6 +477,8 @@ class Gen:
     def gen(self):
         if not self.flow.lib:
             self.emit(RUNTIME)
+        else:                               # guarded: a main translation included before wins
+            self.emit((TIMING_RT if self.timing else '') + WAIT_RT)
         for name in sorted(set(self.flow.externs.values())):
             self.emit('void %s(M68 *m);' % name)
         for entry in self.all_entries():
@@ -764,7 +786,9 @@ class Gen:
         elif k == 'bra':
             L.append(self.br(i.target, start, end, ins))
         elif k == 'bcc':
-            L.append('if (cond(m, %d)) { %s }' % (i.cond, self.br(i.target, start, end, ins)))
+            w = self.wait_loop(i)
+            hook = 'WAIT_LOOP(m, 0x%xu, %s); ' % (i.target, w) if w else ''
+            L.append('if (cond(m, %d)) { %s%s }' % (i.cond, hook, self.br(i.target, start, end, ins)))
         elif k == 'dbcc':
             L.append('if (!cond(m, %d)) { setd(m, %d, 1, (uint16_t)m->d[%d] - 1);'
                      % (i.cond, i.reg, i.reg))
@@ -853,6 +877,24 @@ class Gen:
         else:
             raise Unsupported('generator neumi %s @%x' % (k, i.addr))
         return L
+
+    def wait_loop(self, i):
+        """``L: tst/btst/cmp/cmpa/cmpi <mem> ; bcc L``: the C address of the polled memory
+        (a loop that only waits for it to change), else None."""
+        if not (i.target < i.addr):
+            return None
+        try:
+            p = decode(self.data, self.base, i.target)
+        except Unsupported:
+            return None
+        if p.end != i.addr:
+            return None
+        test = (p.kind in ('tst', 'cmpa') or (p.kind == 'bit' and p.bitop == 0)
+                or (p.kind == 'alu' and p.name == 'cmp') or (p.kind == 'alui' and p.name == 'cmpi'))
+        e = getattr(p, 'ea', None)
+        if not test or e is None or e.kind != 'mem' or e.pre:
+            return None                     # a register, or (An)+ / -(An): not a pure poll
+        return e.addr
 
     def stub_name(self, ea):
         """Neprime volani pres pevnou bazi registru (skokova tabulka zavadece):
@@ -982,8 +1024,8 @@ int main(int argc, char **argv) {
 def parse_func_spec(spec):
     """'START:END[:ENTRY]' (hex) -> (start, end, entry)."""
     p = spec.split(':')
-    s, e = int(p[0], 16), int(p[1], 16)
-    return s, e, int(p[2], 16) if len(p) > 2 else s
+    s, e = _hex(p[0]), _hex(p[1])
+    return s, e, _hex(p[2]) if len(p) > 2 else s
 
 
 def add_stub(spec):

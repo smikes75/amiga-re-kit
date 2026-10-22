@@ -227,8 +227,9 @@ def decode(data, base, addr):
             # btst Dn: any data operand (even #imm); btst #: data but not #imm; the others: data alterable
             need = ('d' if dyn else 'd' if (mode, reg) != (7, 4) else 'da') if bitop == 0 else 'da'
             e = ea(SZ_B if mode != 0 else SZ_L, need=need)
+            bit = ('d%d' % dreg) if dyn else '#%d' % int(src[2:-1], 16)
             return Insn(addr, r.pc, 'bit', bitop=bitop, src=src, ea=e,
-                        text=['btst', 'bchg', 'bclr', 'bset'][bitop])
+                        text='%s %s,%s' % (['btst', 'bchg', 'bclr', 'bset'][bitop], bit, e.text))
         family = (op >> 9) & 7
         name = ['ori', 'andi', 'subi', 'addi', '?', 'eori', 'cmpi', '?'][family]
         if name == '?' or sz2 == 3:
@@ -455,7 +456,7 @@ FLOW_MODES = (70, 71, 72)
 def successors(i):
     """Adresy, kam muze bezet vypocet po instrukci i."""
     k = i.kind
-    if k == 'rts':
+    if k in ('rts', 'rte'):
         return []
     if k == 'bra':
         return [i.target]
