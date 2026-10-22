@@ -237,7 +237,8 @@ def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = No
     bodies are discovered by walking; ``funcs``: 'START:END[:ENTRY]' linear
     ranges; ``stubs``: 'An:DISP:NAME' for jsr through jump tables. ``flow``: what
     the bytes do not say, as lists of the CLI spellings under the keys jtab,
-    indirect, stop, exitat, extern, ret, inline, plus prefix 'NAME:LO:HI' and lib (bool).
+    indirect, stop, exitat, extern, ret, inline, overlay, dynamic, plus prefix 'NAME:LO:HI', lib (bool)
+    and module 'BASE[:KEY]' (an overlay module).
     ``timing`` counts 68000 clocks per instruction into CYCLES (or the host's tick_hook).
     ``memsz``: chip RAM bytes (default "0x80000"); ``slow``: slow RAM "BASE:SIZE" in hex,
     e.g. "c00000:80000" (the driver then takes SLOW.bin SLOWOUT.bin as arguments 5 and 6).
@@ -252,7 +253,8 @@ def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = No
     f = flow or {}
     fl = rc.flow_from_specs(data, b, f.get('jtab', []), f.get('indirect', []), f.get('stop', []),
                             f.get('exitat', []), f.get('extern', []), f.get('ret', []),
-                            f.get('prefix'), bool(f.get('lib')), f.get('inline', []))
+                            f.get('prefix'), bool(f.get('lib')), f.get('inline', []), f.get('overlay', []),
+                            f.get('dynamic', []), f.get('module'))
     try:
         src, stats, entries = rc.generate(data, b, fs, [_addr(a) for a in auto or []],
                                           with_main=with_main, flow=fl, timing=timing,

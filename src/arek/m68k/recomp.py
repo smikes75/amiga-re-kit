@@ -480,6 +480,21 @@ static int cond(M68 *m, int c) {
 static void push32(M68 *m, uint32_t v) { m->a[7] -= 4; wr32(m->a[7], v); }
 static void unknown_call(uint32_t a) { fprintf(stderr, "unknown routine %06x\n", a); exit(4); }
 static uint32_t INLINE_RET = 0;     /* where a routine with data after its call returned to */
+
+/* Overlays: code the program loads at run time into a fixed area. Each translated module registers
+   under the FNV-1a 64 of its first bytes (Flow.module); overlay_call hashes the area as it is now. */
+typedef void (*OvlFn)(M68 *m, uint32_t a);
+static struct { uint64_t fp; OvlFn fn; const char *name; } OVL[64];
+static int OVL_N = 0;
+void overlay_register(uint64_t fp, OvlFn fn, const char *name) {
+    if (OVL_N < 64) { OVL[OVL_N].fp = fp; OVL[OVL_N].fn = fn; OVL[OVL_N].name = name; OVL_N++; }
+}
+static uint32_t rd8(uint32_t a);
+static uint64_t overlay_fp(uint32_t base, uint32_t n) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (uint32_t i = 0; i < n; i++) { h ^= rd8(base + i); h *= 0x100000001b3ull; }
+    return h;
+}
 '''
 RUNTIME = RUNTIME.replace('%%TIMING%%', TIMING_RT + WAIT_RT)
 
@@ -513,12 +528,66 @@ class Gen:
             self.emit('void %s(M68 *m);' % name)
         for entry in self.all_entries():
             self.emit('void %s(M68 *m);' % self.flow.fname(entry))
+        self.emit('void overlay_call(M68 *m, uint32_t a);')
+        self.emit('void call_addr(M68 *m, uint32_t a);')
+        if self.flow.module:
+            self.emit('void overlay_register(uint64_t fp, void (*fn)(M68 *, uint32_t), const char *name);')
         self.emit()
         for s, e, entry in self.funcs:
             self.gen_func(s, e, entry)
         for entry in sorted(self.cfg):
             self.gen_cfg_func(entry)
+        if not self.flow.lib:
+            self.gen_dispatch()
+        if self.flow.module:
+            self.gen_module()
         return '\n'.join(self.out)
+
+    def gen_dispatch(self):
+        """overlay_call (the areas of Flow.overlays) and call_addr (every entry of this
+        translation, the overlay areas, else unknown_call) for run-time targets."""
+        self.emit('void overlay_call(M68 *m, uint32_t a) {')
+        self.emit('    uint32_t base = 0, key = 0;')
+        for b, n, k in self.flow.overlays:
+            self.emit('    if (a - 0x%xu < 0x%xu) { base = 0x%xu; key = %du; }' % (b, n, b, k))
+        self.emit('    if (!key) unknown_call(a);')
+        self.emit('    uint64_t fp = overlay_fp(base, key);')
+        self.emit('    for (int i = 0; i < OVL_N; i++) if (OVL[i].fp == fp) { OVL[i].fn(m, a); return; }')
+        self.emit('    fprintf(stderr, "overlay_call: unknown module %016llx at %06x, entry %06x\\n", '
+                  '(unsigned long long)fp, base, a);')
+        self.emit('    exit(5);')
+        self.emit('}')
+        self.emit('void call_addr(M68 *m, uint32_t a) {')
+        self.emit('    switch (a) {')
+        for e in sorted(set(self.all_entries())):
+            self.emit('    case 0x%xu: %s(m); return;' % (e, self.flow.fname(e)))
+        self.emit('    }')
+        for b, n, k in self.flow.overlays:
+            self.emit('    if (a - 0x%xu < 0x%xu) { overlay_call(m, a); return; }' % (b, n))
+        self.emit('    unknown_call(a);')
+        self.emit('}')
+        self.emit()
+
+    def gen_module(self):
+        """An overlay module: a dispatcher over its entries, registered at start-up under the
+        FNV-1a 64 of its first ``key`` bytes at ``base`` (as overlay_call will hash the area)."""
+        from ..headless.trace import fnv1a64
+        base, key = self.flow.module
+        off = base - self.base
+        if off < 0 or off + key > len(self.data):
+            raise Unsupported('overlay module: $%x+%d is outside the image' % (base, key))
+        fp = fnv1a64(self.data[off:off + key])
+        name = self.flow.prefix[0] or 'module_%x' % base
+        self.emit('static void ovl_%s(M68 *m, uint32_t a) {' % name)
+        self.emit('    switch (a) {')
+        for e in sorted(set(x for x in self.all_entries() if self.flow.in_module(x))):
+            self.emit('    case 0x%xu: %s(m); return;' % (e, self.flow.fname(e)))
+        self.emit('    }')
+        self.emit('    unknown_call(a);')
+        self.emit('}')
+        self.emit('__attribute__((constructor)) static void ovl_%s_register(void) '
+                  '{ overlay_register(0x%016xull, ovl_%s, "%s"); }' % (name, fp, name, name))
+        self.emit()
 
     def all_entries(self):
         return [e for _, _, e in self.funcs] + sorted(self.cfg)
@@ -584,6 +653,8 @@ class Gen:
                 return 'goto L%06x;' % target
         elif start <= target < end:
             return 'goto L%06x;' % target
+        if fl.overlay_of(target):
+            return 'overlay_call(m, 0x%xu); return;' % target
         if target in self.entries:
             return '%s(m); return;' % fl.fname(target)
         if fl.lib and not fl.in_module(target):
@@ -835,6 +906,10 @@ class Gen:
                 return L
             if i.ea.kind != 'mem':
                 raise Unsupported('jsr %s' % i.ea.kind)
+            if i.addr in self.flow.dynamic:
+                L.append('{ uint32_t t = %s, sp0 = m->a[7]; push32(m, 0x%xu); call_addr(m, t); '
+                         'if (m->a[7] > sp0) return; }' % (i.ea.addr, i.end))
+                return L
             if i.addr in self.flow.jtabs:
                 return L + self.jump_table(i, lambda t: self.callseq(t, i.end) + ' break;',
                                            'break;')
@@ -857,6 +932,9 @@ class Gen:
                 L.append('%s(m); return;' % nm)
                 return L
             mode = getattr(i.ea, 'mode', None)
+            if i.addr in self.flow.dynamic and mode not in FLOW_MODES:
+                L.append('call_addr(m, %s); return;' % i.ea.addr)
+                return L
             if i.addr in self.flow.jtabs:
                 return L + self.jump_table(i, lambda t: '%s(m); return;' % self.flow.fname(t),
                                            'm->a[7] += 4; return;')
@@ -1005,6 +1083,8 @@ class Gen:
                 self.br(nxt, start, end, ins)]
 
     def call(self, target):
+        if self.flow.overlay_of(target):
+            return 'overlay_call(m, 0x%xu);' % target
         if target in self.entries:
             return '%s(m);' % self.flow.fname(target)
         if self.flow.lib and not self.flow.in_module(target):
@@ -1082,7 +1162,7 @@ def _hex(x):
 
 
 def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern=(), ret=(),
-                    prefix=None, lib=False, inline=()):
+                    prefix=None, lib=False, inline=(), overlay=(), dynamic=(), module=None):
     """Build a decoder.Flow from the command-line spellings (all addresses hex):
 
     jtab     'SITE[,SITE..]:TABLE:COUNT:STRIDE:bra|ptr[:AN]' - jsr/jmp (d8,An,Dn) into a table;
@@ -1091,6 +1171,9 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
     stop, exitat, ret   addresses;   extern 'ADDR=c_name';   prefix 'NAME:LO:HI'
     inline   'ROUTINE[,ROUTINE..]:until=HHHH|words=N|longs=N|string' - the routine reads data
              stored after its call and returns behind it (decoder.Inline)
+    overlay  'BASE:SIZE[:KEY]' - an area code is loaded into at run time (KEY bytes hashed, 256)
+    dynamic  'SITE' - jsr/jmp (An) resolved at run time by address (call_addr)
+    module   'BASE[:KEY]' - this translation is an overlay module (with lib and prefix)
     """
     jtabs = {}
     for spec in jtab:
@@ -1119,8 +1202,17 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
         it = Inline.parse(kind)
         for site in sites.split(','):
             inl[_hex(site)] = it
+    ovl = []
+    for spec in overlay:
+        p = spec.split(':')
+        ovl.append((_hex(p[0]), _hex(p[1]), int(p[2]) if len(p) > 2 else 256))
+    mod = None
+    if module:
+        p = module.split(':')
+        mod = (_hex(p[0]), int(p[1]) if len(p) > 1 else 256)
     return Flow(stops=map(_hex, stop), rets=map(_hex, ret), exits=map(_hex, exitat), externs=ext,
-                jtabs=jtabs, indirect=ind, prefix=pf, lib=lib, inline=inl)
+                jtabs=jtabs, indirect=ind, prefix=pf, lib=lib, inline=inl, overlays=ovl,
+                dynamic=map(_hex, dynamic), module=mod)
 
 
 def refusal_json(e):

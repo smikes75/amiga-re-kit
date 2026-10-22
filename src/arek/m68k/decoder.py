@@ -511,10 +511,17 @@ class Flow:
     lib       translate only the functions; the runtime comes from another translation
     inline    {routine: Inline} - the routine reads data stored right after its call and
               returns behind it (``movea.l (a7)+,An`` ... ``jmp (An)``)
+    overlays  [(base, size, key)] - areas the program loads code into at run time; a call
+              there goes to the translated module whose first ``key`` bytes have the same
+              FNV-1a 64 as the area now (``overlay_call``)
+    dynamic   sites of ``jsr/jmp (An)`` resolved at run time by address (``call_addr``:
+              every translated entry and the overlay areas)
+    module    (base, key) - this translation is an overlay module: it registers itself
+              under the fingerprint of its first ``key`` bytes at ``base``
     """
 
     def __init__(self, stops=(), rets=(), exits=(), externs=None, jtabs=None, indirect=None,
-                 prefix=None, lib=False, inline=None):
+                 prefix=None, lib=False, inline=None, overlays=(), dynamic=(), module=None):
         self.stops, self.rets, self.exits = set(stops), set(rets), set(exits)
         self.externs = dict(externs or {})
         self.jtabs = dict(jtabs or {})
@@ -522,6 +529,16 @@ class Flow:
         self.prefix = prefix or ('', 0, 0)
         self.lib = lib
         self.inline = dict(inline or {})
+        self.overlays = [tuple(o) for o in overlays]
+        self.dynamic = set(dynamic)
+        self.module = module
+
+    def overlay_of(self, addr):
+        """The overlay area (base, size, key) that contains ``addr``, or None."""
+        for o in self.overlays:
+            if o[0] <= addr < o[0] + o[1]:
+                return o
+        return None
 
     def fname(self, addr):
         name, lo, hi = self.prefix
@@ -703,6 +720,9 @@ def walk(data, base, start, lo, hi, flow=NOFLOW, cache=None):
         mode = getattr(getattr(i, 'ea', None), 'mode', None)
         if i.kind == 'bsr' or (i.kind == 'jsr' and mode in FLOW_MODES):
             t = i.target if i.kind == 'bsr' else i.ea.absval
+            if flow.overlay_of(t):                        # a module loaded at run time
+                work.append(i.end)
+                continue
             calls.add(t)
             nxt, why = after_call(data, base, i.end, t, lo, hi, flow, cache)
             if why:
@@ -711,12 +731,16 @@ def walk(data, base, start, lo, hi, flow=NOFLOW, cache=None):
                 work.append(nxt)
             continue
         elif i.kind == 'jsr':
-            if a in flow.jtabs:
+            if a in flow.dynamic:
+                pass                                      # resolved at run time (call_addr)
+            elif a in flow.jtabs:
                 calls.update(t for t in flow.jtabs[a].targets if t is not None)
             elif a in flow.indirect:
                 calls.update(flow.indirect[a])
             elif not stub_for(i.ea):
                 indirect.append((a, 'jsr ' + i.ea.text))
+        elif i.kind == 'jmp' and (a in flow.dynamic or (mode in FLOW_MODES and flow.overlay_of(i.ea.absval))):
+            continue                                      # run time: call_addr / overlay_call
         elif i.kind == 'jmp' and mode in FLOW_MODES and a in flow.indirect:   # rewritten operand
             work.extend(flow.indirect[a])
             calls.update(flow.indirect[a])

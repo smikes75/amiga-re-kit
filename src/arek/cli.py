@@ -262,7 +262,7 @@ def cmd_recomp(a):
     funcs = [recomp.parse_func_spec(s) for s in a.func or []]
     flow = recomp.flow_from_specs(data, a.base, a.jtab or [], a.indirect or [], a.stop or [],
                                   a.exitat or [], a.extern or [], a.ret or [], a.prefix, a.lib,
-                                  a.inline or [])
+                                  a.inline or [], a.overlay or [], a.dynamic or [], a.overlay_module)
     impl = None
     if a.stub_impl:
         impl = 'notes' if a.stub_impl == 'notes' else Path(a.stub_impl).read_text()
@@ -663,6 +663,13 @@ def build_parser():
     s.add_argument('--ret', nargs='*', metavar='ADDR', help='translation returns here (a loop body as a function)')
     s.add_argument('--prefix', metavar='NAME:LO:HI', help='functions in [LO, HI) are f_NAME<addr> (overlay module)')
     s.add_argument('--lib', action='store_true', help='functions only, sharing the runtime of another translation')
+    s.add_argument('--overlay', nargs='*', metavar='BASE:SIZE[:KEY]',
+                   help='an area code is loaded into at run time: calls there go to the module whose first '
+                        'KEY bytes (default 256) hash the same (overlay_call)')
+    s.add_argument('--overlay-module', metavar='BASE[:KEY]',
+                   help='this translation (--lib --prefix) is an overlay module; registers under its fingerprint')
+    s.add_argument('--dynamic', nargs='*', metavar='SITE',
+                   help='jsr/jmp (An) resolved at run time by address over all entries (call_addr)')
     s.add_argument('--stub-impl', metavar='FILE|notes', help='C bodies of the stubs, or "notes" for empty ones')
     s.add_argument('--timing', action='store_true', help='count 68000 clocks per instruction (TICK / CYCLES)')
     s.add_argument('--inline', nargs='*', metavar='ROUTINE[,..]:until=HHHH|words=N|longs=N|string',
