@@ -41,6 +41,10 @@ def A(s):
         raise argparse.ArgumentTypeError('%r: write hex as 0x%s or $%s' % (s, s, s)) from None
 
 
+def _hex(s):
+    return int(s.strip().lstrip('$'), 16)
+
+
 def AH(s):
     """An address where flow specs next to it are bare hex: decimal still works, but a bare
     number that also reads as hex gets a warning."""
@@ -257,7 +261,8 @@ def cmd_recomp(a):
         impl = 'notes' if a.stub_impl == 'notes' else Path(a.stub_impl).read_text()
     src, stats, entries = recomp.generate(data, a.base, funcs, a.auto or [],
                                           a.lo or a.base, a.hi, with_main=a.main, flow=flow,
-                                          stub_impl=impl, timing=a.timing)
+                                          stub_impl=impl, timing=a.timing, memsz=a.memsz,
+                                          slow=tuple(_hex(x) for x in a.slow.split(':')) if a.slow else None)
     Path(a.out).write_text(src)
     print('%s: %d entries (%s), %d instruction kinds, %d instructions' %
           (a.out, len(entries), ', '.join('%06x' % e for e in entries), len(stats), sum(stats.values())))
@@ -499,6 +504,9 @@ def build_parser():
     s.add_argument('--inline', nargs='*', metavar='ROUTINE[,..]:until=HHHH|words=N|longs=N|string',
                    help='the routine reads data stored after its call and returns behind it (hex)')
     s.add_argument('--main', action='store_true', help='append the verification driver main()')
+    s.add_argument('--memsz', type=AH, help='chip RAM bytes from 0 (default 0x80000)')
+    s.add_argument('--slow', metavar='BASE:SIZE', help='slow RAM, hex, e.g. c00000:80000; the driver '
+                   'takes SLOW.bin SLOWOUT.bin as arguments 5 and 6')
     s.add_argument('--stats', action='store_true')
     s.add_argument('-o', '--out', required=True)
     s.set_defaults(fn=cmd_recomp)

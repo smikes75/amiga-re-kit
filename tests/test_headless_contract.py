@@ -50,6 +50,15 @@ def test_missing_disk_names_the_resolved_path(tmp_path):
         shot.check_disk(c, c['ADF1'])
 
 
+def test_an_adf_of_the_wrong_size_is_named(tmp_path):
+    bad = tmp_path / 'g.adf'
+    bad.write_bytes(bytes(901122))
+    with pytest.raises(config.ConfigError, match='901122 bytes'):
+        shot.check_disk({}, str(bad))
+    bad.write_bytes(bytes(901120))
+    assert shot.check_disk({}, str(bad)) == str(bad)
+
+
 def test_a_hanging_emulator_ends_with_a_clear_error(tmp_path):
     vahl = tmp_path / 'VAHeadless'
     vahl.write_text('#!/bin/sh\nsleep 5\n')

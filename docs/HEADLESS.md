@@ -136,8 +136,16 @@ writes `cap/draw_in/capture_21234_0.retrosh` (the script), `onstop_*.retrosh`
 {"d": [...], "a": [...], "pc": 136756, "ccr": {"x":0,"n":1,"z":0,"v":0,"c":0},
  "beam": {"clock": 123456789, "frame": 1003, "position": [100, 20]},
  "machine": "A500_OCS_1MB", "events": [[3, "joystick2 press 1"]],
- "breakpoint": 136756, "skip": 0, "ram_sha256": "...", "assets": {"ROM": "...", "ADF": "..."}}
+ "breakpoint": 136756, "skip": 0, "ram_sha256": "...", "assets": {"ROM": "...", "ADF": "..."},
+ "chips": {"agnus": {"DMACON": 720, "BPL0PT": ..., ...}, "copper": {"COP1LC": 1056, ...},
+           "denise": {...}, "paula": {"INTENA": ...}, "blitter": {...}}}
 ```
+
+`chips` are the emulator's custom registers at the stop (`r agnus`, `r copper`,
+`r denise`, `r paula`, `r blitter`), write-only ones included - the Copper list
+address, DMACON, bitplane and sprite pointers are there without reading the
+game's code. vAmiga 5.0b2 labels two lines COP1LC and two BPL6PT; the repeated
+name is stored as `NAME#2`.
 
 The asset hashes tie the capture to the exact ROM, disk and emulator
 binary — a capture made with a different build is a different measurement

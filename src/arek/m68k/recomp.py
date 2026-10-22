@@ -79,16 +79,39 @@ RUNTIME = r'''
 #include <stdlib.h>
 #include <string.h>
 
-#define MEMSZ 0x80000u
+#ifndef MEMSZ
+#define MEMSZ 0x80000u                  /* chip RAM from address 0 */
+#endif
+#ifndef SLOWSZ
+#define SLOWSZ 0u                       /* slow RAM at SLOWBASE (e.g. 0x80000u), 0 = none */
+#endif
+#ifndef SLOWBASE
+#define SLOWBASE 0xc00000u
+#endif
 uint8_t MEM[MEMSZ];
 uint8_t WRLOG[MEMSZ];
+#if SLOWSZ
+uint8_t SLOW[SLOWSZ];
+uint8_t SLOWLOG[SLOWSZ];
+#endif
 
 typedef struct { uint32_t d[8], a[8]; int x, n, z, v, c; uint32_t srhi; } M68;
 void exit_point(M68 *m, uint32_t at);   /* a Flow.exits routine was called: the host ends the run */
 
 %%TIMING%%
 
-static void oob(uint32_t a) { fprintf(stderr, "pristup mimo chip RAM: %08x\n", a); exit(3); }
+static void oob(uint32_t a) {
+    fprintf(stderr, "access outside the modelled RAM (MEMSZ %x, SLOWBASE %x SLOWSZ %x): %08x\n",
+            MEMSZ, SLOWBASE, SLOWSZ, a);
+    exit(3);
+}
+static uint8_t *slow_at(uint32_t a) {   /* NULL outside slow RAM */
+#if SLOWSZ
+    if (a - SLOWBASE < SLOWSZ) return &SLOW[a - SLOWBASE];
+#endif
+    (void)a;
+    return 0;
+}
 
 /* --- model hardwaru: jen to, co hra pouziva (docs/RECOMP.md 8) ------------ */
 #define CUSTOM(a) (((a) & 0xfff000u) == 0xdff000u)
@@ -137,19 +160,26 @@ static void hw_write(uint32_t off, uint32_t v) {
 }
 static uint32_t rd8(uint32_t a) {
     if (CUSTOM(a)) { uint32_t w = hw_read(a & 0x1fe); return (a & 1) ? (w & 0xff) : (w >> 8); }
-    if (a >= MEMSZ) oob(a);
-    return MEM[a];
+    if (a < MEMSZ) return MEM[a];
+    uint8_t *p = slow_at(a);
+    if (!p) oob(a);
+    return *p;
 }
 static uint32_t rd16(uint32_t a) {
     if (CUSTOM(a)) return hw_read(a & 0x1fe);
-    if (a + 1 >= MEMSZ) oob(a);
-    return (MEM[a] << 8) | MEM[a + 1];
+    if (a + 1 < MEMSZ) return (MEM[a] << 8) | MEM[a + 1];
+    return (rd8(a) << 8) | rd8(a + 1);
 }
 static uint32_t rd32(uint32_t a) { return (rd16(a) << 16) | rd16(a + 2); }
 static void wr8(uint32_t a, uint32_t v) {
     if (CUSTOM(a)) { v &= 0xff; hw_write(a & 0x1fe, (v << 8) | v); return; }   /* 68000: the byte on both halves of the bus */
-    if (a >= MEMSZ) oob(a);
-    MEM[a] = v; WRLOG[a] = 1;
+    if (a < MEMSZ) { MEM[a] = v; WRLOG[a] = 1; return; }
+    uint8_t *p = slow_at(a);
+    if (!p) oob(a);
+    *p = v;
+#if SLOWSZ
+    SLOWLOG[a - SLOWBASE] = 1;
+#endif
 }
 static void wr16(uint32_t a, uint32_t v) {
     if (CUSTOM(a)) { hw_write(a & 0x1fe, v); return; }
@@ -988,10 +1018,17 @@ static jmp_buf EXIT_JB;
 static uint32_t EXIT_AT = 0;
 void exit_point(M68 *m, uint32_t at) { (void)m; EXIT_AT = at; longjmp(EXIT_JB, 1); }
 int main(int argc, char **argv) {
-    if (argc < 5) { fprintf(stderr, "recomp RAM.bin regs.txt out.bin wrlog.txt\n"); return 1; }
+    if (argc < 5) { fprintf(stderr, "recomp RAM.bin regs.txt out.bin wrlog.txt [SLOW.bin SLOWOUT.bin]\n"); return 1; }
     FILE *f = fopen(argv[1], "rb");
     if (!f || fread(MEM, 1, MEMSZ, f) != MEMSZ) { fprintf(stderr, "RAM?\n"); return 1; }
     fclose(f);
+#if SLOWSZ
+    if (argc > 5) {                                  /* slow RAM image (zeros when not given) */
+        f = fopen(argv[5], "rb");
+        if (!f || fread(SLOW, 1, SLOWSZ, f) != SLOWSZ) { fprintf(stderr, "SLOW RAM?\n"); return 1; }
+        fclose(f);
+    }
+#endif
     M68 m; memset(&m, 0, sizeof m);
     f = fopen(argv[2], "r");
     for (int i = 0; i < 8; i++) if (fscanf(f, "%x", &m.d[i]) != 1) return 1;
@@ -1004,6 +1041,9 @@ int main(int argc, char **argv) {
     fclose(f);
     if (!setjmp(EXIT_JB)) ENTRY(name, &m);
     f = fopen(argv[3], "wb"); fwrite(MEM, 1, MEMSZ, f); fclose(f);
+#if SLOWSZ
+    if (argc > 6) { f = fopen(argv[6], "wb"); fwrite(SLOW, 1, SLOWSZ, f); fclose(f); }
+#endif
     f = fopen(argv[4], "w");
     for (int i = 0; i < 8; i++) fprintf(f, "%08x\n", m.d[i]);
     for (int i = 0; i < 8; i++) fprintf(f, "%08x\n", m.a[i]);
@@ -1015,6 +1055,9 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 0x100; i++)
         if (HW_UNMODELLED[i]) fprintf(f, "hwreg %03x\n", i * 2);
     for (uint32_t a = 0; a < MEMSZ; a++) if (WRLOG[a]) fprintf(f, "w %x\n", a);
+#if SLOWSZ
+    for (uint32_t a = 0; a < SLOWSZ; a++) if (SLOWLOG[a]) fprintf(f, "w %x\n", SLOWBASE + a);
+#endif
     fclose(f);
     return 0;
 }
@@ -1081,7 +1124,7 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
 
 
 def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow=NOFLOW,
-             stub_impl=None, timing=False):
+             stub_impl=None, timing=False, memsz=None, slow=None):
     """Return (c_source, stats, entries). ``funcs`` are (start, end, entry) linear ranges,
     ``auto`` are entry addresses whose bodies are discovered by walking the
     flow graph (transitively over bsr/jsr). ``flow`` (a decoder.Flow) carries what the
@@ -1090,6 +1133,9 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
     stubs that record a hardware note, or C source with their bodies.
     ``timing``: every instruction adds its 68000 clocks (arek.m68k.timing, branch outcome and
     MUL/DIV operands included) through TICK(pc, n) into CYCLES or the host's tick_hook.
+    ``memsz``: chip RAM bytes from 0 (default 512 KB); ``slow``: (base, size) of slow RAM, e.g.
+    (0xc00000, 0x80000) - the driver then reads/writes it as optional files 5 and 6. Both can
+    also be set when compiling (-DMEMSZ=..., -DSLOWBASE=..., -DSLOWSZ=...).
     Raises Unsupported / SystemExit-free."""
     hi = min(hi if hi is not None else base + len(data), base + len(data))
     lo = max(lo, base)                           # nothing outside the image can be walked
@@ -1120,8 +1166,15 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
                + ''.join('void %s(M68 *m);\n' % f for f in sorted(called - defined)) + src)
     from .. import identity
     ident = identity()
+    mem = ''
+    if flow.lib and (memsz is not None or slow is not None):
+        raise ValueError('memsz/slow belong to the main translation, not to a --lib module')
+    if memsz is not None:
+        mem += '#define MEMSZ 0x%xu\n' % memsz
+    if slow is not None:
+        mem += '#define SLOWBASE 0x%xu\n#define SLOWSZ 0x%xu\n' % tuple(slow)
     src = ('/* generated by amiga-re-kit %s, decoder sha256 %s, recomp sha256 %s */\n'
-           % (ident['version'], ident['decoder_sha256'], ident['recomp_sha256'])) + src
+           % (ident['version'], ident['decoder_sha256'], ident['recomp_sha256'])) + mem + src
     if with_main:
         disp = '\n'.join('    if (!strcmp(n, "%s")) { %s(m); return; }' % (flow.fname(e), flow.fname(e))
                          for e in g.all_entries())

@@ -22,9 +22,9 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-png = ["Pillow>=10"]
+png = []                # kept for old install lines: PNG output needs no extra package since 0.4.4
 mcp = ["mcp>=1.2"]
-dev = ["pytest>=8", "Pillow>=10", "mcp>=1.2"]
+dev = ["pytest>=8", "mcp>=1.2"]
 
 [project.scripts]
 arek = "arek.cli:main"

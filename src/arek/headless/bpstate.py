@@ -20,6 +20,9 @@ from pathlib import Path
 
 from . import config, shot
 
+# chips whose registers ``r <chip>`` prints at the stop (cpu.json "chips")
+CHIPS = ('agnus', 'copper', 'denise', 'paula', 'blitter')
+
 
 def state(conf, events, addr, npass, t_end, t_set=0, ram_len=524288, keep=None,
           setup=(), after_break=(), ram_regions=(), screenshot=False, adf=None, timeout=900):
@@ -34,8 +37,9 @@ def state(conf, events, addr, npass, t_end, t_set=0, ram_len=524288, keep=None,
     os.makedirs(tmp, exist_ok=True)
     dump = os.path.join(tmp, 'ram_%x_%d.bin' % (addr, npass))
     onstop = os.path.join(tmp, 'onstop_%x_%d.retrosh' % (addr, npass))
-    lines = ['try debugger', 'r cpu', '? agnus', '? agnus beam',
-             'commander', 'mem save bin %s 0 %d' % (dump, ram_len)]
+    lines = ['try debugger', 'r cpu', '? agnus', '? agnus beam']
+    lines += ['try r %s' % chip for chip in CHIPS]
+    lines += ['commander', 'mem save bin %s 0 %d' % (dump, ram_len)]
     regions = []
     for base, length in ram_regions:
         filename = os.path.join(tmp, 'ram_%x_%d_%x.bin' % (addr, npass, base))
@@ -56,6 +60,7 @@ def state(conf, events, addr, npass, t_end, t_set=0, ram_len=524288, keep=None,
         return None, out
     st = parse_regs(out)
     st['beam'] = parse_beam(out)
+    st['chips'] = parse_chips(out)
     st['ram'] = Path(dump).read_bytes()
     st['regions'] = regions
     return st, out
@@ -73,7 +78,7 @@ def parse_regs(out):
             vals = re.findall(r'0x([0-9A-Fa-f]{8})', m.group(3))
             for i, v in enumerate(vals):
                 st['d' if kind == 'D' else 'a'][int(m.group(1)) + i] = int(v, 16)
-    m = re.search(r'PC\s*:\s*0x([0-9A-Fa-f]{8})', out)
+    m = re.search(r'(?<![A-Z])PC\s*:\s*0x([0-9A-Fa-f]{8})', out)
     if m:
         st['pc'] = int(m.group(1), 16)
     m = re.search(r'Flags\s*:\s*(\S+)', out)
@@ -81,6 +86,48 @@ def parse_regs(out):
         f = m.group(1)[-5:]
         st['ccr'] = {k.lower(): int(c.isupper()) for k, c in zip('XNZVC', f)}
     return st
+
+
+_VALUE = re.compile(r'(\w+)\s*:\s*((?:0x[0-9A-Fa-f]+\s*)+|yes|no|-?\d+)(?=\s|$)')
+
+
+def parse_chips(out):
+    """Custom chip registers from ``r agnus|copper|denise|paula|blitter`` (vAmiga 5.0b2)::
+
+        DMACON : 0x0200            -> {"agnus": {"DMACON": 512, ...}}
+        BPL0PT : 0x0  BPL1PT : 0x0 (two per line), SPRxPOS : 0x0 0x0 ... (a list), USEA : no (bool)
+
+    vAmiga 5.0b2 labels two lines COP1LC (the second is presumably COP2LC) and two BPL6PT;
+    a repeated name is stored as NAME#2. These are the emulator's view of the registers,
+    including write-only ones."""
+    chips, cur = {}, None
+    for line in out.splitlines():
+        s = line.strip()
+        m = re.fullmatch(r'(?:try )?r (\w+)', s)
+        if m:
+            cur = m.group(1) if m.group(1) in CHIPS else None
+            if cur:
+                chips[cur] = {}
+            continue
+        if cur is None:
+            continue
+        if re.match(r'(try |r |\? |commander|mem |screenshot|shutdown)', s):
+            cur = None
+            continue
+        for name, val in _VALUE.findall(s):
+            val = val.strip()
+            if val in ('yes', 'no'):
+                v = val == 'yes'
+            elif val.startswith('0x'):
+                nums = [int(x, 16) for x in val.split()]
+                v = nums[0] if len(nums) == 1 else nums
+            else:
+                v = int(val)
+            key, k = name, 2
+            while key in chips[cur]:
+                key, k = '%s#%d' % (name, k), k + 1
+            chips[cur][key] = v
+    return chips
 
 
 def parse_beam(out):

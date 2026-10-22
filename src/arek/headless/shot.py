@@ -50,6 +50,10 @@ def check_disk(conf, adf):
     if not os.path.isfile(adf):
         raise config.ConfigError('ADF does not exist: %s (relative paths in local.conf resolve against '
                                  'the directory of the conf file)' % adf)
+    size = os.path.getsize(adf)
+    if adf.lower().endswith('.adf') and size not in (901120, 1802240):
+        raise config.ConfigError('%s has %d bytes; an ADF has 901120 (DD) or 1802240 (HD) - the emulator '
+                                 'would say only "Unsupported file type"' % (adf, size))
     return adf
 
 
@@ -94,16 +98,27 @@ def run_script(conf, text, capture=False, env=None, timeout=600):
         os.unlink(path)
 
 
+def write_png(path, width, height, rgb):
+    """RGB24 bytes -> PNG with the standard library (no Pillow needed)."""
+    import struct
+    import zlib
+
+    def chunk(kind, body):
+        return (struct.pack('>I', len(body)) + kind + body
+                + struct.pack('>I', zlib.crc32(kind + body) & 0xffffffff))
+    stride = width * 3
+    rows = b''.join(b'\0' + rgb[y * stride:(y + 1) * stride] for y in range(height))
+    Path(path).write_bytes(b'\x89PNG\r\n\x1a\n'
+                           + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+                           + chunk(b'IDAT', zlib.compress(rows, 6)) + chunk(b'IEND', b''))
+    return path
+
+
 def raw_to_png(raw, png):
-    try:
-        from PIL import Image
-    except ImportError as e:
-        raise HeadlessError('Pillow is needed for PNG output (pip install amiga-re-kit[png])') from e
     d = Path(raw).read_bytes()
     if len(d) != RAW_W * RAW_H * 3:
         raise HeadlessError('unexpected raw frame size %s: %d' % (raw, len(d)))
-    Image.frombytes('RGB', (RAW_W, RAW_H), d).save(png)
-    return png
+    return write_png(png, RAW_W, RAW_H, d)
 
 
 def shot(conf, prefix, t, events=(), adf=None, setup=(), timeout=600):

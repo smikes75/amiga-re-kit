@@ -23,8 +23,8 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 ## Install
 
 ```sh
-pip install -e ".[mcp,png,dev]"     # or without extras: pip install -e .
-python -m pytest                    # 1227 tests: synthetic data + CPU timings measured on Moira
+pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
+python -m pytest                    # 1236 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -98,7 +98,7 @@ asks for (see `examples/profile.example.json`).
 | `arek.m68k.decoder` | strict 68000 decoder: raises `Unsupported` instead of guessing; accepts only addressing modes the 68000 accepts (checked opcode by opcode against Moira) | Superfrog (fixed ADDA/SUBA/CMPA); LINK/UNLK/PEA/EXG from Alien Breed; memory shifts, CMPM, ABCD/SBCD, MULS/DIVS new |
 | `arek.m68k.disasm` | linear and flow-walk listings straight from the decoder | new |
 | `arek.m68k.hwscan` | which routines are pure RAM and which touch custom chips / CIA / ROM | Turrican II |
-| `arek.m68k.recomp` | static 68k → C recompiler with a verification driver (`MEM[]`, write log, blitter incl. line and fill modes); jump tables, indirect targets, external routines, overlay modules, data stored after a call (`Flow`); optional clock counting; a `WAIT_LOOP(m, pc, addr)` hook in loops that poll memory or hardware | Superfrog; extensions from Alien Breed |
+| `arek.m68k.recomp` | static 68k → C recompiler with a verification driver (`MEM[]`, write log, blitter incl. line and fill modes); jump tables, indirect targets, external routines, overlay modules, data stored after a call (`Flow`); optional clock counting; a `WAIT_LOOP(m, pc, addr)` hook in loops that poll memory or hardware; chip RAM size and slow RAM (`--memsz`, `--slow c00000:80000`) | Superfrog; extensions from Alien Breed |
 | `arek.m68k.timing` | 68000 clock counts per instruction, data-dependent ones included (MUL/DIV operands, shift counts, branch outcome); matches Moira on all 42 247 decodable opcodes | new |
 | `arek.m68k.xref` | call / data cross references from `m68k-elf-objdump` text | Superfrog |
 | `arek.m68k.audit` | profile-driven inventory + conservative reachability, JSON in / JSON out | Superfrog |

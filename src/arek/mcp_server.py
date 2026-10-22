@@ -231,13 +231,16 @@ def hwscan(path: str, base: str, roots: list, lo: str = None, hi: str = None,
 
 @mcp.tool()
 def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = None,
-           stubs: list = None, with_main: bool = False, flow: dict = None, timing: bool = False) -> dict:
+           stubs: list = None, with_main: bool = False, flow: dict = None, timing: bool = False,
+           memsz: str = None, slow: str = None) -> dict:
     """Statically recompile 68k routines to C. ``auto``: entry addresses whose
     bodies are discovered by walking; ``funcs``: 'START:END[:ENTRY]' linear
     ranges; ``stubs``: 'An:DISP:NAME' for jsr through jump tables. ``flow``: what
     the bytes do not say, as lists of the CLI spellings under the keys jtab,
     indirect, stop, exitat, extern, ret, inline, plus prefix 'NAME:LO:HI' and lib (bool).
     ``timing`` counts 68000 clocks per instruction into CYCLES (or the host's tick_hook).
+    ``memsz``: chip RAM bytes (default "0x80000"); ``slow``: slow RAM "BASE:SIZE" in hex,
+    e.g. "c00000:80000" (the driver then takes SLOW.bin SLOWOUT.bin as arguments 5 and 6).
     Raises on anything the decoder does not support - nothing is silently skipped."""
     from .m68k import recomp as rc
     for s in stubs or []:
@@ -249,7 +252,9 @@ def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = No
                             f.get('exitat', []), f.get('extern', []), f.get('ret', []),
                             f.get('prefix'), bool(f.get('lib')), f.get('inline', []))
     src, stats, entries = rc.generate(data, b, fs, [_addr(a) for a in auto or []],
-                                      with_main=with_main, flow=fl, timing=timing)
+                                      with_main=with_main, flow=fl, timing=timing,
+                                      memsz=_addr(memsz) if memsz else None,
+                                      slow=tuple(int(x, 16) for x in slow.split(':')) if slow else None)
     Path(out_c).write_text(src)
     return {'out': out_c, 'entries': ['%06x' % e for e in entries], 'stats': stats}
 

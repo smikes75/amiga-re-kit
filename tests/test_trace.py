@@ -69,7 +69,7 @@ def test_summary_env_and_arm_events():
 def test_capture_builds_script_and_reads_back(tmp_path, monkeypatch):
     from arek.headless import shot
     adf, rom = tmp_path / 'g.adf', tmp_path / 'k.rom'
-    adf.write_bytes(b'x')
+    adf.write_bytes(bytes(901120))
     rom.write_bytes(b'x')
     conf = {'ROM': str(rom), 'ADF1': str(adf), 'VAHL': '/bin/true', 'MACHINE': 'A500_OCS_1MB'}
     out = str(tmp_path / 'run.vtr')
