@@ -321,8 +321,9 @@ def decode(data, base, addr):
             if mode == 1:                            # DBcc
                 d = r.w()
                 d = d - 0x10000 if d & 0x8000 else d
+                t = branch(addr + 2 + d)
                 return Insn(addr, r.pc, 'dbcc', cond=cond, reg=reg,
-                            target=branch(addr + 2 + d), text='db%s d%d' % (CC[cond], reg))
+                            target=t, text='db%s d%d,$%x' % (CC[cond], reg, t))
             e = ea(SZ_B, need='da')
             return Insn(addr, r.pc, 'scc', cond=cond, ea=e,
                         text='s%s %s' % (CC[cond], e.text))

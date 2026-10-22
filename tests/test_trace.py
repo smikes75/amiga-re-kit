@@ -112,3 +112,110 @@ def test_cli_and_mcp_trace(tmp_path, capsys):
         txt = r.content[0].text if hasattr(r, 'content') else str(r)
         assert 'decoder_sha256' in txt
     asyncio.run(go())
+
+
+# --- vamiga-inputs-reglog-899da5d.patch: inputs per frame, hashed ranges, register and audio logs
+
+def test_hashed_range_record():
+    data = b'\x01\x02\x03\x04'
+    blob = _head(trace.VTR2, 0x100, 3, 2) + struct.pack('<II', 0, 2) + b'ab' + \
+        struct.pack('<IIQ', 0x50000, 4 | 0x80000000, trace.fnv1a64(data))
+    rec = next(trace.records(blob))
+    assert rec['ranges'] == {0: b'ab'} and rec['hashes'] == {0x50000: (4, trace.fnv1a64(data))}
+    assert trace.summary(blob)[0]['hashes'] == {'50000': '%016x' % trace.fnv1a64(data)}
+    assert trace.fnv1a64(b'') == 0xcbf29ce484222325
+
+
+def test_range_spellings():
+    assert trace.parse_range('50000:1000') == (0x50000, 0x1000, False)
+    assert trace.parse_range('c00000:80000h') == (0xc00000, 0x80000, True)
+    assert trace.ranges_arg([(0, 0x10), (0xc00000, 0x80000, True)]) == '0:10,c00000:80000h'
+
+
+def test_input_file_check_and_env(tmp_path):
+    good = tmp_path / 'in.txt'
+    good.write_text('\nR\nRF\nUL\nS\n\n')
+    assert trace.check_inputs(good) == 6
+    bad = tmp_path / 'bad.txt'
+    bad.write_text('R\nfire\n')
+    with pytest.raises(trace.TraceError, match='line 2'):
+        trace.check_inputs(bad)
+    e = trace.env('/t.vtr', inputs=good, reglog='r.bin', audlog='a.bin', skip=5, from_frame=0)
+    assert e['VAHL_INPUTS'] == str(good) and e['VAHL_TRACE_SKIP'] == '5' and e['VAHL_TRACE_FROM_FRAME'] == '0'
+    assert e['VAHL_REGLOG'].endswith('r.bin') and e['VAHL_AUDLOG'].endswith('a.bin')
+    with pytest.raises(trace.TraceError):
+        trace.env('/t.vtr', inputs=bad)
+
+
+def test_reglog_and_audlog(tmp_path, capsys):
+    from arek import cli
+    regs = struct.pack('<4I', 16, (189 << 16) | 33, (0x09a << 16) | 0x7fff, 0xfc0118) + \
+        struct.pack('<4I', 17, (2 << 16) | 9, (0x0a8 << 16) | 64, 0x1000000 | 0x40010)
+    r = trace.read_reglog(regs)
+    assert r[0] == {'frame': 16, 'v': 189, 'h': 33, 'reg': 0x09a, 'name': 'INTENA', 'value': 0x7fff,
+                    'pc': 0xfc0118, 'agnus': False}
+    assert r[1]['name'] == 'AUD0VOL' and r[1]['agnus'] and r[1]['pc'] == 0x40010
+    with pytest.raises(trace.TraceError):
+        trace.read_reglog(regs[:-1])
+    aud = struct.pack('<3I', 5, (10 << 16) | 3, (0xff80 << 16) | 2)
+    assert trace.read_audlog(aud) == [(5, 10, 3, -128, 2)]
+    (tmp_path / 'r.bin').write_bytes(regs)
+    (tmp_path / 'a.bin').write_bytes(aud * 3)
+    assert cli.main(['trace', 'regs', str(tmp_path / 'r.bin'), '--reg', 'AUD0VOL']) == 0
+    out = capsys.readouterr().out
+    assert 'AUD0VOL  0040' in out and 'INTENA' not in out and '(DMA)' in out
+    assert cli.main(['trace', 'audio', str(tmp_path / 'a.bin')]) == 0
+    assert 'channel 2: 3 samples, frames 5-5' in capsys.readouterr().out
+
+
+def test_capture_passes_inputs_and_logs(tmp_path, monkeypatch):
+    from arek.headless import shot
+    seen = {}
+
+    def fake_run(conf, script, capture=False, env=None, timeout=0):
+        seen['env'] = env
+        with open(env['VAHL_TRACE'], 'wb') as f:
+            f.write(_vtr2(0x100, 0, [(0, b'ab')]))
+        return ''
+
+    monkeypatch.setattr(shot, 'run_script', fake_run)
+    adf, rom, inp = tmp_path / 'g.adf', tmp_path / 'k.rom', tmp_path / 'in.txt'
+    adf.write_bytes(bytes(901120))
+    rom.write_bytes(b'x')
+    inp.write_text('R\nF\n')
+    conf = {'ROM': str(rom), 'ADF1': str(adf), 'VAHL': '/bin/true'}
+    trace.capture(conf, str(tmp_path / 'r.vtr'), [], 1, 2, breaks=[0x100], inputs=str(inp),
+                  reglog=str(tmp_path / 'regs.bin'), from_frame=3)
+    assert seen['env']['VAHL_INPUTS'] == str(inp) and seen['env']['VAHL_TRACE_FROM_FRAME'] == '3'
+    assert 'VAHL_AUDLOG' not in seen['env']
+
+
+def test_selftest_disk_and_key_decoding():
+    from arek import adf
+    from arek.headless import selftest
+    d = selftest.disk()
+    assert len(d) == adf.SIZE and d[:4] == b'DOS\0'
+    assert struct.unpack('>I', d[4:8])[0] == adf.bootblock_checksum(d[:1024])
+    # boot code: lea pay(pc),a0 ... and the handler entry the trace breaks on
+    assert d[12:14] == b'\x41\xfa' and selftest.HANDLER == 0x40028
+    assert selftest.keys_of(0x0000, 0xff) == ''
+    assert selftest.keys_of(0x0003, 0xff) == 'R'            # right: bit 1, bit 0 = bit 1 (no down)
+    assert selftest.keys_of(0x0300, 0x7f) == 'LF'           # left: bit 9, bit 8 = bit 9 (no up)
+    assert selftest.keys_of(0x0100, 0xff) == 'U' and selftest.keys_of(0x0001, 0xff) == 'D'
+
+
+def test_a_build_without_the_patch_is_named(tmp_path):
+    old = tmp_path / 'VAHeadless'
+    old.write_bytes(b'\x00VAHL_TRACE\x00VAHL_TRACE_RANGES\x00')
+    trace.require_patch(str(old), ['VAHL_TRACE', 'VAHL_TRACE_RANGES'])
+    with pytest.raises(trace.TraceError, match='vamiga-inputs-reglog-899da5d.patch.*VAHL_INPUTS'):
+        trace.require_patch(str(old), ['VAHL_TRACE', 'VAHL_INPUTS'])
+    adf, rom, inp = tmp_path / 'g.adf', tmp_path / 'k.rom', tmp_path / 'in.txt'
+    adf.write_bytes(bytes(901120))
+    rom.write_bytes(b'x')
+    inp.write_text('R\n')
+    conf = {'ROM': str(rom), 'ADF1': str(adf), 'VAHL': str(old)}
+    with pytest.raises(trace.TraceError, match='VAHL_INPUTS'):
+        trace.capture(conf, str(tmp_path / 'r.vtr'), [], 1, 2, breaks=[0x100], inputs=str(inp))
+    with pytest.raises(trace.TraceError, match='VAHL_TRACE_SKIP'):          # hashed range
+        trace.capture(conf, str(tmp_path / 'r.vtr'), [], 1, 2, breaks=[0x100], ranges=[(0, 4, True)])

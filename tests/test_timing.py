@@ -17,7 +17,9 @@ ROWS = [l.rstrip('\n').split('\t') for l in (Path(__file__).parent / 'data' / 'm
 @pytest.mark.parametrize('code, kw, cycles, text', ROWS, ids=[r[3] for r in ROWS])
 def test_cycles_match_moira(code, kw, cycles, text):
     i = decoder.decode(bytes.fromhex(code + '0000'), 0x1000, 0x1000)
-    assert i.text == text or (i.kind == 'bit' and i.text.split()[0] == text)   # table predates bit operands
+    # the table predates bit operands and dbcc targets in the text
+    assert i.text == text or (i.kind == 'bit' and i.text.split()[0] == text) or \
+        (i.kind == 'dbcc' and i.text.split(',')[0] == text)
     assert timing.cycles(i, **json.loads(kw)) == int(cycles)
 
 

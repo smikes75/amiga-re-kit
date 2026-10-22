@@ -1,0 +1,155 @@
+diff --git a/Core/Components/CPU/CPU.cpp b/Core/Components/CPU/CPU.cpp
+index 72ed6a5..01207f9 100644
+--- a/Core/Components/CPU/CPU.cpp
++++ b/Core/Components/CPU/CPU.cpp
+@@ -17,6 +17,7 @@
+ #include "MsgQueue.h"
+ #include "utl/support.h"
+ #include "utl/io.h"
++#include <fstream>
+ 
+ 
+ //
+@@ -305,6 +306,7 @@ static bool vahl_trace_open()
+                 u32 start = u32(strtoul(q, &end, 16));
+                 if (!end || *end != ':') break;
+                 u32 len = u32(strtoul(end + 1, &end, 16));
++                if (end && *end == 'h') { len |= 0x80000000u; end++; }   // "start:lenh" = an FNV-1a 64 hash instead of the bytes (long traces)
+                 vahl_ranges.push_back({start, len});
+                 if (!end || *end != ',') break;
+                 q = end + 1;
+@@ -313,9 +315,36 @@ static bool vahl_trace_open()
+     }
+     return vahl_trace != nullptr;
+ }
++// VAHL_INPUTS=<file>: input per frame (line k = keys held: R L U D F S) applied at the k-th breakpoint hit in the VBL (v < 100)
++// sets joystick 2 and space (0x40) for frame k - frame exact, unlike 'wait 1 frames' in RetroShell.
++static std::vector<std::string> vahl_inputs; static bool vahl_inputs_probed = false; static size_t vahl_input_k = 0;
++static std::string vahl_prev_keys;
++static void vahl_apply_inputs(Amiga &amiga, u16 vpos)
++{
++    if (!vahl_inputs_probed) {
++        vahl_inputs_probed = true;
++        if (const char *p = getenv("VAHL_INPUTS")) { std::ifstream in(p); std::string line; while (std::getline(in, line)) vahl_inputs.push_back(line); }
++    }
++    static i64 lastFrame = -1;   // only the first hit of a frame (VBL); a copper interrupt high on the screen does not take an input line
++    if (vahl_inputs.empty() || vpos >= 100 || amiga.agnus.pos.frame == lastFrame) return;
++    lastFrame = amiga.agnus.pos.frame;
++    std::string k = vahl_input_k < vahl_inputs.size() ? vahl_inputs[vahl_input_k] : std::string(); vahl_input_k++;
++    auto &j = amiga.controlPort2.joystick;
++    bool r = k.find('R') != std::string::npos, l = k.find('L') != std::string::npos, u = k.find('U') != std::string::npos, d = k.find('D') != std::string::npos;
++    bool f = k.find('F') != std::string::npos, sp = k.find('S') != std::string::npos, spPrev = vahl_prev_keys.find('S') != std::string::npos;
++    j.trigger(r ? GamePadAction::PULL_RIGHT : l ? GamePadAction::PULL_LEFT : GamePadAction::RELEASE_X);
++    j.trigger(d ? GamePadAction::PULL_DOWN : u ? GamePadAction::PULL_UP : GamePadAction::RELEASE_Y);
++    bool fPrev = vahl_prev_keys.find('F') != std::string::npos;
++    if (f != fPrev) j.trigger(f ? GamePadAction::PRESS_FIRE : GamePadAction::RELEASE_FIRE);
++    if (sp && !spPrev) amiga.keyboard.press(KeyCode(0x40));
++    if (!sp && spPrev) amiga.keyboard.release(KeyCode(0x40));
++    vahl_prev_keys = k;
++}
++
+ void
+ Moira::didReachBreakpoint(u32 addr)
+ {
++    vahl_apply_inputs(amiga, u16(agnus.pos.v));
+     if (vahl_trace_open()) { vahl_trace_write(addr, 0, 0); return; }
+     amiga.setFlag(RL::BREAKPOINT_REACHED);
+ }
+@@ -323,6 +352,12 @@ Moira::didReachBreakpoint(u32 addr)
+ void
+ Moira::vahl_trace_write(u32 addr, u32 pc, u32 watch)
+ {
++    static long skip = -1;   // VAHL_TRACE_SKIP=N: only count the first N hits (full RAM just in a window around a divergence)
++    if (skip < 0) { const char *e = getenv("VAHL_TRACE_SKIP"); skip = e ? strtol(e, nullptr, 0) : 0; }
++    if ((long)vahl_hits < skip) { vahl_hits++; return; }
++    static long fromFrame = -2;   // VAHL_TRACE_FROM_FRAME=F: records from frame F on
++    if (fromFrame == -2) { const char *e = getenv("VAHL_TRACE_FROM_FRAME"); fromFrame = e ? strtol(e, nullptr, 0) : -1; }
++    if (fromFrame >= 0 && (long)agnus.pos.frame < fromFrame) { vahl_hits++; return; }
+     u32 len = 524288;
+     if (const char *s = getenv("VAHL_TRACE_LEN")) len = u32(strtoul(s, nullptr, 0));
+     u32 head[25] = {
+@@ -340,9 +375,16 @@ Moira::vahl_trace_write(u32 addr, u32 pc, u32 watch)
+         for (auto &rg : vahl_ranges) {
+             u32 hdr[2] = { rg.first, rg.second };
+             fwrite(hdr, 4, 2, vahl_trace);
+-            std::vector<u8> buf(rg.second);
+-            for (u32 i = 0; i < rg.second; i++) buf[i] = mem.spypeek8 <Accessor::CPU> (rg.first + i);
+-            fwrite(buf.data(), 1, rg.second, vahl_trace);
++            u32 n = rg.second & 0x7fffffffu;
++            if (rg.second & 0x80000000u) {
++                u64 h = 0xcbf29ce484222325ull;
++                for (u32 i = 0; i < n; i++) { h ^= mem.spypeek8 <Accessor::CPU> (rg.first + i); h *= 0x100000001b3ull; }
++                fwrite(&h, 8, 1, vahl_trace);
++            } else {
++                std::vector<u8> buf(n);
++                for (u32 i = 0; i < n; i++) buf[i] = mem.spypeek8 <Accessor::CPU> (rg.first + i);
++                fwrite(buf.data(), 1, n, vahl_trace);
++            }
+         }
+     }
+     fflush(vahl_trace);
+diff --git a/Core/Components/Memory/Memory.cpp b/Core/Components/Memory/Memory.cpp
+index 1b7087b..78ee194 100644
+--- a/Core/Components/Memory/Memory.cpp
++++ b/Core/Components/Memory/Memory.cpp
+@@ -2642,9 +2642,23 @@ Memory::spypeekCustom16(u32 addr) const
+     }
+ }
+ 
++// VAHL_REGLOG=<file>: writes to the DMA, interrupt and audio registers (DMACON, INTENA, INTREQ, ADKCON, AUD0-3),
++// 16 B per write: frame, v<<16|h, register<<16|value, PC | source<<24 (0 CPU / 1 Agnus). Recording only.
++static FILE *vahl_reglog = nullptr; static bool vahl_reglog_probed = false;
+ template <Accessor s> void
+ Memory::pokeCustom16(u32 addr, u16 value)
+ {
++    {
++        u32 r = addr & 0x1FE;
++        if (r == 0x096 || r == 0x09a || r == 0x09c || r == 0x09e || (r >= 0x0a0 && r < 0x0e0)) {
++            if (!vahl_reglog_probed) { vahl_reglog_probed = true; if (const char *p = getenv("VAHL_REGLOG")) vahl_reglog = fopen(p, "wb"); }
++            if (vahl_reglog) {
++                u32 rec[4] = { u32(agnus.pos.frame), (u32(agnus.pos.v) << 16) | u32(agnus.pos.h), (r << 16) | value,
++                               (cpu.getPC0() & 0xffffff) | (s == Accessor::AGNUS ? 0x1000000u : 0u) };
++                fwrite(rec, 4, 4, vahl_reglog);
++            }
++        }
++    }
+     if ((addr & 0xFFF) == 0x30) {
+         logmsg(LOG_OCSREG, "pokeCustom16(SERDAT, '%c')\n", (char)value);
+     } else {
+diff --git a/Core/Components/Paula/Audio/StateMachine.cpp b/Core/Components/Paula/Audio/StateMachine.cpp
+index 2f6f0fc..d4165b6 100644
+--- a/Core/Components/Paula/Audio/StateMachine.cpp
++++ b/Core/Components/Paula/Audio/StateMachine.cpp
+@@ -146,6 +146,16 @@ StateMachine<nr>::AUDxAP() const
+     return (paula.adkcon >> nr) & 0x10;
+ }
+ 
++// VAHL_AUDLOG=<file>: every sample Paula sends to a channel output (penhi/penlo), 12 B: frame, v<<16|h, sample*volume<<16|channel.
++static FILE *vahl_audlog = nullptr; static bool vahl_audlog_probed = false;
++static void vahl_aud(u32 frame, u16 v, u16 h, i16 scaled, u16 nr)
++{
++    if (!vahl_audlog_probed) { vahl_audlog_probed = true; if (const char *p = getenv("VAHL_AUDLOG")) vahl_audlog = fopen(p, "wb"); }
++    if (!vahl_audlog) return;
++    u32 a = frame; u32 b = (u32(v) << 16) | h; u32 c = (u32(u16(scaled)) << 16) | nr;
++    fwrite(&a, 4, 1, vahl_audlog); fwrite(&b, 4, 1, vahl_audlog); fwrite(&c, 4, 1, vahl_audlog);
++}
++
+ template <isize nr> void
+ StateMachine<nr>::penhi()
+ {
+@@ -158,6 +168,7 @@ StateMachine<nr>::penhi()
+ 
+     i8 sample = (i8)HI_BYTE(buffer);
+     i16 scaled = (i16)(sample * audvol);
++    vahl_aud(u32(agnus.pos.frame), u16(agnus.pos.v), u16(agnus.pos.h), scaled, u16(nr));
+     
+     logmsg(LOG_AUD, "penhi: %d %d\n", sample, scaled);
+ 
+@@ -182,6 +193,7 @@ StateMachine<nr>::penlo()
+     
+     i8 sample = (i8)LO_BYTE(buffer);
+     i16 scaled = (i16)(sample * audvol);
++    vahl_aud(u32(agnus.pos.frame), u16(agnus.pos.v), u16(agnus.pos.h), scaled, u16(nr));
+ 
+     logmsg(LOG_AUD, "penlo: %d %d\n", sample, scaled);
+ 

@@ -19,7 +19,10 @@
     arek bpstate     --address A --end T --out DIR [--pass N] [--at T CMD] [--region B:L]
     arek trace       run OUT --arm T --end T --break A.. [--watch A..] [--range S:L..] [--at T CMD]
     arek trace       show TRACE [--field NAME=ADDR:FMT ..] [--every N] [--json]
+    arek trace       regs REGLOG [--reg NAME..] | audio AUDLOG
+                     (run: --inputs FILE --reglog F --audlog F --skip N --from-frame F)
     arek diff        DIR_A DIR_B [--range LO HI]
+    arek selftest    inputs [--vahl BINARY]   (needs only the Kickstart ROM)
     arek init        [DIR]
 
 All addresses accept ``0x`` or ``$`` hex, or decimal; the flow specs of ``recomp``
@@ -28,6 +31,7 @@ the kit's own tests; the ones that drive the emulator need ``local.conf``.
 """
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -347,6 +351,18 @@ local.conf
 '''
 
 
+def cmd_selftest(a):
+    from .headless import config, selftest
+    conf = config.load(a.conf)
+    if a.vahl:
+        conf['VAHL'] = os.path.abspath(a.vahl)
+    r = selftest.inputs(conf, frames=a.frames, timeout=a.timeout)
+    print('%s: inputs %d/%d frames exact%s' % (conf['VAHL'], r['match'], r['frames'],
+                                               '' if not r['mismatch'] else ', first wrong: %s' % (r['mismatch'][:3],)))
+    if r['mismatch'] or not r['frames']:
+        raise RuntimeError('VAHL_INPUTS is not frame exact with this build (files in %s)' % r['dir'])
+
+
 def cmd_trace(a):
     from .headless import trace
     if a.what == 'run':
@@ -354,11 +370,32 @@ def cmd_trace(a):
         if a.arm is None or a.end is None or not (a.brk or a.watch):
             raise ValueError('trace run needs --arm, --end and --break and/or --watch')
         conf = config.load(a.conf)
-        ranges = [tuple(int(x, 16) for x in r.split(':')) for r in a.ranges]
+        ranges = [trace.parse_range(r) for r in a.ranges]
         events = [(float(t), cmd) for t, cmd in a.at]
         n = trace.capture(conf, a.file, events, a.arm, a.end, a.brk, a.watch, ranges or None,
-                          timeout=a.timeout)
+                          timeout=a.timeout, inputs=a.inputs, reglog=a.reglog, audlog=a.audlog,
+                          skip=a.skip, from_frame=a.from_frame)
         print('%s: %d records' % (a.file, n))
+        return
+    if a.what == 'regs':
+        rows = [r for r in trace.read_reglog(a.file) if not a.reg or r['name'] in a.reg]
+        if a.json:
+            print(json.dumps(rows, indent=1))
+        else:
+            for r in rows:
+                print('frame %6d  beam %3d,%3d  %-8s %04x  pc %06x%s' % (
+                    r['frame'], r['v'], r['h'], r['name'], r['value'], r['pc'], '  (DMA)' if r['agnus'] else ''))
+        return
+    if a.what == 'audio':
+        per = {}
+        for frame, v, h, sample, ch in trace.read_audlog(a.file):
+            c = per.setdefault(ch, [0, None, None])
+            c[0] += 1
+            c[1] = frame if c[1] is None else c[1]
+            c[2] = frame
+        for ch in sorted(per):
+            n, f0, f1 = per[ch]
+            print('channel %d: %d samples, frames %d-%d' % (ch, n, f0, f1))
         return
     fields = {}
     for f in a.field:
@@ -547,13 +584,21 @@ def build_parser():
     s.set_defaults(fn=cmd_diff)
 
     s = sp.add_parser('trace', help='continuous trace of the original (patched VAHeadless)')
-    s.add_argument('what', choices=['run', 'show'])
-    s.add_argument('file', help='trace file (written by run, read by show)')
+    s.add_argument('what', choices=['run', 'show', 'regs', 'audio'])
+    s.add_argument('file', help='trace file (written by run, read by show); regs: a reglog, audio: an audlog')
     s.add_argument('--arm', type=float, help='second at which breakpoints/watchpoints are set')
     s.add_argument('--end', type=float, help='second at which the run stops')
     s.add_argument('--break', dest='brk', type=A, nargs='*', default=[])
     s.add_argument('--watch', type=A, nargs='*', default=[])
-    s.add_argument('--range', dest='ranges', nargs='*', default=[], metavar='START:LEN', help='hex; without it VTR1 = chip RAM')
+    s.add_argument('--range', dest='ranges', nargs='*', default=[], metavar='START:LEN[h]',
+                   help='hex; LENh = only an FNV-1a 64 hash of the range; without it VTR1 = chip RAM')
+    s.add_argument('--inputs', help='run: input per frame (lines of R L U D F S), applied at the first '
+                   'breakpoint hit of each frame in the VBL - frame exact')
+    s.add_argument('--reglog', help='run: write DMACON/INTENA/INTREQ/ADKCON/AUDx writes here')
+    s.add_argument('--audlog', help='run: write every Paula output sample here')
+    s.add_argument('--skip', type=int, help='run: no records for the first N hits')
+    s.add_argument('--from-frame', type=int, help='run: no records before this frame')
+    s.add_argument('--reg', nargs='*', help='regs: only these registers, e.g. DMACON AUD0VOL')
     s.add_argument('--at', nargs=2, action='append', default=[], metavar=('T', 'CMD'), help='input event')
     s.add_argument('--field', nargs='*', default=[], metavar='NAME=ADDR:FMT', help='show: value to read, e.g. px=0xc0599e:h')
     s.add_argument('--every', type=int, default=1)
@@ -561,6 +606,14 @@ def build_parser():
     s.add_argument('--conf', default='local.conf')
     s.add_argument('--timeout', type=int, default=1200, help='run: seconds of wall time before giving up')
     s.set_defaults(fn=cmd_trace)
+
+    s = sp.add_parser('selftest', help='check a VAHeadless build (inputs frame by frame) on a synthetic disk')
+    s.add_argument('what', choices=['inputs'])
+    s.add_argument('--conf', default='local.conf', help='needs ROM (and VAHL unless --vahl)')
+    s.add_argument('--vahl', help='the binary to test instead of VAHL from the conf')
+    s.add_argument('--frames', type=int, default=240)
+    s.add_argument('--timeout', type=int, default=300)
+    s.set_defaults(fn=cmd_selftest)
 
     s = sp.add_parser('init', help='create a project skeleton with local.conf')
     s.add_argument('dir', nargs='?', default='.')
@@ -579,6 +632,9 @@ def main(argv=None):
     except (ValueError, RuntimeError, FileNotFoundError, FileExistsError) as e:
         print('arek: %s' % e, file=sys.stderr)
         return 1
+    except BrokenPipeError:                      # arek ... | head
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
     return 0
 
 

@@ -23,7 +23,7 @@ def dec(hexwords, base=0x1000):
     ('33c000dff096', 'move.w d0,$dff096.l', 'move'),
     ('4e71', 'nop', 'nop'),
     ('60000004', 'bra $1006', 'bra'),
-    ('51c8fffe', 'dbf d0', 'dbcc'),
+    ('51c8fffe', 'dbf d0,$1000', 'dbcc'),
     ('4ed0', 'jmp (a0)', 'jmp'),
     ('4eb900001000', 'jsr $1000.l', 'jsr'),
     ('4eaeff3a', 'jsr (-198,a6)', 'jsr'),

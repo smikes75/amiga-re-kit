@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 1236 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 1243 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -75,6 +75,8 @@ arek diff    cap/before cap/after --range 0x60000 0x70000
 arek shot    build/shots/title 5 10 --at 3 "joystick2 press 1"
 arek trace   run build/l1.vtr --arm 196 --end 199 --break 0xc01106 --range 0:80000 c00000:80000
 arek trace   show build/l1.vtr --field px=0xc0599e:h  # one row per hit, emulation never stopped
+arek trace   run build/l1.vtr --arm 3 --end 60 --break 0xc01106 --inputs l1.txt --reglog regs.bin  # input per frame
+arek selftest inputs                                   # is this VAHeadless frame exact? (synthetic disk)
 arek --version                                         # version + decoder/recompiler hashes
 ```
 

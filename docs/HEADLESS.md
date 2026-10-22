@@ -58,6 +58,7 @@ Optional patches on top of the headless one:
 |---|---|---|
 | `vamiga-trace.patch` | c59425d | `VAHL_TRACE`: every breakpoint hit writes a VTR1 record (registers, beam, chip RAM) and the run continues |
 | `vamiga-trace-ranges-899da5d.patch` | 899da5d | the same, plus `VAHL_TRACE_RANGES=start:len,...` (VTR2: only chosen ranges, incl. slow RAM, custom registers, CIA) and watchpoints (VTW2: + PC of the accessing instruction) |
+| `vamiga-inputs-reglog-899da5d.patch` | 899da5d + headless + trace-ranges | `VAHL_INPUTS` (input per frame, frame exact), `VAHL_REGLOG` (DMACON/INTENA/INTREQ/ADKCON/AUDx writes), `VAHL_AUDLOG` (Paula output samples), `VAHL_TRACE_SKIP`, `VAHL_TRACE_FROM_FRAME`, hashed ranges `start:lenh` (from the Alien Breed project) |
 | `vamiga-regtrace.patch` | c59425d | ring buffer of every custom register write (WASM builds) |
 | `vamiga-wasm.patch` | c59425d | WebAssembly build without the emulation thread |
 
@@ -171,6 +172,43 @@ $ADDR 0` / `commander` are issued; before that the run is untouched. Without
 bytes). Records are read-only snapshots (`spypeek`): a trace never changes
 the run it records, so its frames line up with a plain `arek shot` of the
 same script.
+
+## Input frame by frame, register and audio logs
+
+RetroShell events are placed by `wait`, and `wait 1 frames` waits 1.4 frames
+on average (measured in the Alien Breed project): a recorded input then lands
+a frame early or late and a run diverges from the recording within a second.
+`vamiga-inputs-reglog-899da5d.patch` applies inputs inside the emulator instead:
+
+```sh
+arek trace run build/l1.vtr --arm 3 --end 60 --break 0xc01106 \
+    --inputs build/l1_inputs.txt --range c0599e:2 0:80000h \
+    --reglog build/l1_regs.bin --audlog build/l1_audio.bin
+arek trace regs  build/l1_regs.bin --reg DMACON AUD0PER
+arek trace audio build/l1_audio.bin
+```
+
+- `--inputs FILE`: one line per frame with the keys held - `R L U D F S`
+  (right, left, up, down, fire on joystick 2, space); an empty line holds
+  nothing. Line k is applied at the k-th frame in which a breakpoint is hit at
+  v < 100, so `--break` must include an address of the VBL handler (the first
+  hit of a frame counts; a copper interrupt lower on the screen does not take a
+  line). The trace is armed at `--arm`; line 0 is the first VBL after it.
+- `--range START:LENh`: an FNV-1a 64 hash of the range instead of its bytes
+  (`rec['hashes']`, `trace.fnv1a64`) - long traces that only need to know
+  *when* RAM diverges.
+- `--reglog FILE`: 16 bytes per write to DMACON, INTENA, INTREQ, ADKCON and
+  AUD0-3: frame, beam, register, value, PC, CPU or DMA (`trace.read_reglog`).
+- `--audlog FILE`: 12 bytes per sample Paula outputs: frame, beam,
+  sample × volume, channel (`trace.read_audlog`).
+- `--skip N`, `--from-frame F`: no records for the first N hits / before frame F.
+
+`arek trace run` refuses a binary that does not know the variables it needs
+(a build without the patch would ignore them, or stop at the first breakpoint
+and hang). **`arek selftest inputs`** checks a build without any game: it boots a
+synthetic disk whose VBL handler stores JOY1DAT and the fire bit of every frame,
+feeds it a pseudo-random input file and compares frame by frame (240 of 240
+expected; needs only the Kickstart ROM).
 
 ## Known caveat: `mem save bin` and chip bus timing
 
