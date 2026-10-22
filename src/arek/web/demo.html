@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wb-obraz demo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d0d10; color: #ccc; font: 13px system-ui, sans-serif; }
+  #bar { height: 32px; display: flex; gap: 12px; align-items: center; padding: 0 12px; }
+  #stage { position: absolute; top: 32px; left: 0; right: 0; bottom: 0; display: flex; align-items: center;
+           justify-content: center; padding: 12px; box-sizing: border-box; overflow: hidden; }
+  .game { position: relative; line-height: 0; }
+  .game canvas#screen { display: block; image-rendering: pixelated; background: #000; }
+  .game .crt-layer { border: 0; background: none; width: auto; position: absolute; left: 0; top: 0; pointer-events: none;
+                     image-rendering: pixelated; opacity: var(--crt-on, 0); transition: opacity .36s ease-in-out; }
+  .game::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: var(--crt-on, 0);
+                 transition: opacity .36s ease-in-out; box-shadow: inset 0 0 42px rgba(0, 0, 0, var(--crt-edge, .5)); }
+  .game.no-vignette::after { display: none; }
+  .game[data-crt=fine] { --crt-edge: .25 } .game[data-crt=standard] { --crt-edge: .5 } .game[data-crt=strong] { --crt-edge: .65 }
+</style>
+</head>
+<body>
+<div id="bar"><span id="label"></span></div>
+<div id="stage"><div class="game"><canvas id="screen"></canvas><canvas class="crt-layer" aria-hidden="true"></canvas></div></div>
+<script src="wb-obraz.js"></script>
+<script>
+'use strict';
+// A game of W x H pixels, Original width W0 = W. Test hooks (arek web test):
+//   wbObrazTest.set(mode, {zoom, detail, shape, crt, blur}) -> info ; wbObrazTest.fill('grey'|'rows'|'picture')
+const W = 320, H = 256, W0 = 320, O = WBOBRAZ;
+const game = document.querySelector('.game'), screen = document.getElementById('screen'), stage = document.getElementById('stage');
+const scr = new O.Screen(game, screen);
+const state = { mode: 'original', cfg: JSON.parse(JSON.stringify(O.VIEW_DEFAULTS)), pattern: 'picture' };
+
+function limit() {
+  const cs = getComputedStyle(stage);
+  const aw = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const ah = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  return Math.min(aw / W, ah / H);
+}
+let S = 1;
+function paint() {
+  if (state.pattern === 'picture') {                     // a synthetic picture: checker and colour bars
+    const g = screen.getContext('2d');
+    g.fillStyle = '#000'; g.fillRect(0, 0, screen.width, screen.height);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x += 8) {
+      const c = ((x >> 3) + (y >> 3)) & 1 ? '#284878' : '#1a2a40';
+      g.fillStyle = (x >> 3) % 10 === 0 ? ['#c33', '#3c3', '#33c', '#cc3', '#c3c', '#3cc', '#ccc', '#333'][(y >> 5) & 7] : c;
+      g.fillRect(x * S, y * S, 8 * S, S);
+    }
+  } else O.testPattern(screen, state.pattern, W, H, S);
+}
+function layout() {
+  const dpr = window.devicePixelRatio || 1, c = state.cfg[state.mode];
+  S = O.deviceScale(c.zoom, W0, W, dpr, limit());
+  const bw = O.padded(W * S, dpr), bh = O.padded(H * S, dpr);      // the picture is W*S x H*S at the top left
+  if (screen.width !== bw || screen.height !== bh) { screen.width = bw; screen.height = bh; }
+  screen.style.width = bw / dpr + 'px'; screen.style.height = bh / dpr + 'px';
+  screen.style.filter = O.filter({ blur: c.blur }, S / dpr);
+  paint();
+  const pd = scr.crt({ mode: state.mode, detail: c.crtDetail, shape: c.crtShape, S, dpr, w: bw, h: bh, on: c.crt ? 1 : 0 });
+  scr.align();
+  document.getElementById('label').textContent = O.zoomLabel(c.zoom, S, dpr, W0, W) + ' · ' + state.mode;
+  return Object.assign(scr.info(), { scale: S, dpr, W, H, P: pd.P, D: pd.D, content: [W * S, H * S] });
+}
+window.display = () => Object.assign(scr.info(), { scale: S, dpr: window.devicePixelRatio || 1, content: [W * S, H * S] });
+window.wbObrazTest = {
+  set(mode, cfg) { state.mode = mode; Object.assign(state.cfg[mode], cfg || {}); return layout(); },
+  fill(kind) { state.pattern = kind; game.classList.toggle('no-vignette', kind !== 'picture'); paint(); return true; },
+};
+addEventListener('resize', layout);
+layout();
+</script>
+</body>
+</html>

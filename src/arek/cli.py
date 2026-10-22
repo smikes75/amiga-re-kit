@@ -25,6 +25,7 @@
     arek diff        DIR_A DIR_B [--range LO HI]
     arek render      CAPTURE [--ram F --cop A] [--png OUT] [--compare RAW]
     arek selftest    inputs|display [--vahl BINARY]   (needs only the Kickstart ROM)
+    arek web         copy DIR | demo [--port N] | test URL [--quick]   (display contract)
     arek init        [DIR]
 
 All addresses accept ``0x`` or ``$`` hex, or decimal; the flow specs of ``recomp``
@@ -389,6 +390,47 @@ def cmd_render(a):
             raise RuntimeError('the render differs from the screenshot')
 
 
+def cmd_web(a):
+    import hashlib
+    import shutil
+    web = Path(__file__).parent / 'web'
+    if a.what == 'copy':
+        dest = Path(a.target or '.')
+        dest.mkdir(parents=True, exist_ok=True)
+        out = dest / 'wb-obraz.js'
+        shutil.copyfile(web / 'wb-obraz.js', out)
+        print('%s  sha256 %s (wb-obraz %s)' % (out, hashlib.sha256(out.read_bytes()).hexdigest(), _wb_version(web)))
+    elif a.what == 'demo':
+        import functools
+        import http.server
+        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(web))
+        srv = http.server.ThreadingHTTPServer(('127.0.0.1', a.port), handler)
+        print('http://127.0.0.1:%d/demo.html  (wb-obraz %s; Ctrl+C to stop)' % (a.port, _wb_version(web)))
+        try:
+            srv.serve_forever()
+        except KeyboardInterrupt:
+            pass
+    else:
+        from . import webtest
+        if not a.target:
+            raise ValueError('web test URL (a page with window.wbObrazTest; arek web demo serves one)')
+        try:
+            r = webtest.run(a.target, quick=a.quick)
+        except ImportError as e:
+            raise RuntimeError('web test needs playwright (pip install playwright; playwright install chromium)') from e
+        for f in r['fails'][:30]:
+            print('FAIL', f)
+        print('%d checks, %d failures' % (r['checks'], len(r['fails'])))
+        if r['fails']:
+            raise RuntimeError('the page does not follow the display contract')
+
+
+def _wb_version(web):
+    import re
+    m = re.search(r"VERSION = '([\d.]+)'", (web / 'wb-obraz.js').read_text())
+    return m.group(1) if m else '?'
+
+
 def cmd_selftest(a):
     from .headless import config, selftest
     conf = config.load(a.conf)
@@ -696,6 +738,13 @@ def build_parser():
     s.add_argument('--plain', action='store_true', help='colours as nibble x 17 instead of the vAmiga monitor')
     s.add_argument('--fail', action='store_true', help='exit 1 when the render differs from the screenshot')
     s.set_defaults(fn=cmd_render)
+
+    s = sp.add_parser('web', help='display contract: reference wb-obraz.js, demo page, Chromium tests (WB-OBRAZ-CRT.md)')
+    s.add_argument('what', choices=['copy', 'demo', 'test'])
+    s.add_argument('target', nargs='?', help='copy: destination folder; test: URL of a page with window.wbObrazTest')
+    s.add_argument('--port', type=int, default=8920, help='demo: port')
+    s.add_argument('--quick', action='store_true', help='test: fewer combinations')
+    s.set_defaults(fn=cmd_web)
 
     s = sp.add_parser('selftest', help='check a VAHeadless build on a synthetic disk: inputs frame by frame, display model')
     s.add_argument('what', choices=['inputs', 'display'])

@@ -1,0 +1,168 @@
+"""Display contract tests (WB-OBRAZ-CRT.md §5) in Chromium, for any page with the test hooks.
+
+The page provides ``window.wbObrazTest.set(mode, cfg) -> info`` (cfg: zoom, crtDetail,
+crtShape, crt, blur; info: scale, W, H, P, D, origin, backing, crtLayer, crtOrigin) and
+``window.wbObrazTest.fill(kind)`` ('grey', 'rows' - see wb-obraz.js ``testPattern``).
+``arek web demo`` serves a page that does, built on the reference ``wb-obraz.js``.
+
+    run('http://localhost:8920/demo.html')        # needs the optional playwright package
+
+Checks: §5.1-5.3 per dpr x window width x mode x detail x zoom (S whole, backing = W·S,
+CSS size x dpr = backing, content and CRT layer on whole device pixels, P and D);
+§5.4 grey picture with CRT - row brightness exactly periodic with P, columns with 3;
+§5.4b (1.3) a different grey per game row, CRT off - every game row exactly S device rows.
+Tolerances: Chromium keeps layout in 1/64 CSS px, so positions within 0.05 and sizes within
+0.025 device pixels.
+"""
+import itertools
+import struct
+import zlib
+
+DPRS = (1, 1.25, 1.5, 2)
+WIDTHS = (1280, 1000, 760)
+MODES = ('original', 'enhanced')
+DETAILS = ('fine', 'standard', 'strong')
+ZOOMS = (1, 1.5, 2, 2.5, 3, 4, 6, 0)
+TOL_POS, TOL_SIZE = 0.05, 0.025
+SCREEN = {'fine': 2, 'standard': 3, 'strong': 4}
+
+
+def png_rgb(data):
+    """Decode an 8-bit RGB/RGBA PNG (as Chromium writes it) -> (width, height, rows of (r, g, b))."""
+    if data[:8] != b'\x89PNG\r\n\x1a\n':
+        raise ValueError('not a PNG')
+    pos, idat, w = 8, b'', None
+    while pos < len(data):
+        n, kind = struct.unpack('>I4s', data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + n]
+        if kind == b'IHDR':
+            w, h, depth, ctype = struct.unpack('>IIBB', body[:10])
+            if depth != 8 or ctype not in (2, 6) or body[12]:
+                raise ValueError('PNG: only 8-bit RGB/RGBA, not interlaced')
+            bpp = 3 if ctype == 2 else 4
+        elif kind == b'IDAT':
+            idat += body
+        pos += 12 + n
+    raw, stride, rows, prev = zlib.decompress(idat), w * bpp, [], bytearray(w * bpp)
+    for y in range(h):
+        f, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            a = line[i - bpp] if i >= bpp else 0
+            b, c = prev[i], prev[i - bpp] if i >= bpp else 0
+            if f == 1:
+                line[i] = (line[i] + a) & 255
+            elif f == 2:
+                line[i] = (line[i] + b) & 255
+            elif f == 3:
+                line[i] = (line[i] + (a + b) // 2) & 255
+            elif f == 4:
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append([tuple(line[x * bpp:x * bpp + 3]) for x in range(w)])
+        prev = line
+    return w, h, rows
+
+
+def quantum(dpr):
+    """Layout quantum (wb-obraz.js): device pixels between exact positions in Chromium's 1/64 CSS px."""
+    for q in range(1, 65):
+        u = q * 64 / dpr
+        if abs(u - round(u)) < 1e-6:
+            return q
+    return 1
+
+
+def _crop(rows, x0, y0, w, h):
+    return [r[x0:x0 + w] for r in rows[y0:y0 + h]]
+
+
+def check_layout(info, mode, detail, dpr, fails, tag):
+    S, W, H = info['scale'], info['W'], info['H']
+    ok = lambda cond, what: cond or fails.append('%s: %s' % (tag, what))
+    ok(S == int(S) and S >= 1, 'S %s not whole' % S)
+    q = quantum(dpr)
+    ok(info.get('content', info['backing']) == [W * S, H * S], 'content %s != %dx%d' % (info.get('content'), W * S, H * S))
+    ok(all(b >= c and b % q == 0 for b, c in zip(info['backing'], (W * S, H * S))),
+       'backing %s not the content rounded up to the layout quantum %d' % (info['backing'], q))
+    ok(all(abs(v - round(v)) < TOL_POS and round(v) % q == 0 for v in info['origin']),
+       'origin %s not on a multiple of %d device pixels' % (info['origin'], q))
+    ok(info['crtLayer'] == info['backing'], 'CRT layer %s != backing' % info['crtLayer'])
+    ok(all(abs(a - b) < TOL_POS for a, b in zip(info['crtOrigin'], info['origin'])), 'CRT layer not over the content')
+    P, D = info['P'], info['D']
+    if mode == 'original':
+        ok(P == max(2, S), 'P %d != max(2, S)' % P)
+    else:
+        ok(P == SCREEN[detail] and D == 1, 'P %d D %d' % (P, D))
+
+
+def run(url, quick=False, log=print):
+    """Run the checks; returns {'checks': n, 'fails': [...]} (raises ImportError without playwright)."""
+    from playwright.sync_api import sync_playwright
+    fails, checks = [], 0
+    zooms = (2, 0) if quick else ZOOMS
+    with sync_playwright() as pw:
+        br = pw.chromium.launch()
+        for dpr in DPRS:
+            for width in (WIDTHS[:1] if quick else WIDTHS):
+                ctx = br.new_context(device_scale_factor=dpr, viewport={'width': width, 'height': 900})
+                page = ctx.new_page()
+                page.goto(url)
+                page.wait_for_function('window.wbObrazTest')
+                for mode, detail, zoom in itertools.product(MODES, DETAILS, zooms):
+                    info = page.evaluate('([m, d, z]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crt: true, blur: 0})',
+                                         [mode, detail, zoom])
+                    check_layout(info, mode, detail, dpr, fails, 'dpr %s w%d %s/%s zoom %s' % (dpr, width, mode, detail, zoom))
+                    checks += 1
+                ctx.close()
+        log('§5.1-5.3: %d layouts, %d failures' % (checks, len(fails)))
+        for dpr in DPRS:
+            ctx = br.new_context(device_scale_factor=dpr, viewport={'width': 1280, 'height': 1000})
+            page = ctx.new_page()
+            page.goto(url)
+            page.wait_for_function('window.wbObrazTest')
+            for mode, detail, zoom in itertools.product(MODES, DETAILS, (2, 3, 0) if not quick else (2,)):
+                info = page.evaluate('([m, d, z]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crt: true, blur: 0})',
+                                     [mode, detail, zoom])
+                page.evaluate("wbObrazTest.fill('grey')")
+                page.wait_for_timeout(450)
+                _, _, rows = png_rgb(page.screenshot())
+                x0, y0 = round(info['origin'][0]), round(info['origin'][1])
+                bw, bh = info.get('content', info['backing'])
+                im = _crop(rows, x0, y0, bw, bh)
+                P, tag = info['P'], 'dpr %s %s/%s zoom %s S %d' % (dpr, mode, detail, zoom, info['scale'])
+                col = [sum(r[bw // 2 + 1]) / 3 for r in im]
+                lo, hi = int(bh * .3), int(bh * .7)
+                bad = [y for y in range(lo, hi - P) if abs(col[y] - col[y + P]) > 1.01]
+                yr = lo + 1 if (lo + 1) % P != P - 1 else lo
+                badc = [x for x in range(int(bw * .3), int(bw * .7))
+                        if max(abs(im[yr][x][k] - im[yr][x + 3][k]) for k in range(3)) > 1]
+                if bad or badc:
+                    fails.append('§5.4 %s: %d rows, %d columns off the period' % (tag, len(bad), len(badc)))
+                checks += 1
+                # §5.4b: CRT off, a grey per game row - each game row exactly S device rows
+                info = page.evaluate('([m, d, z]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crt: false, blur: 0})',
+                                     [mode, detail, zoom])
+                page.evaluate("wbObrazTest.fill('rows')")
+                page.wait_for_timeout(450)
+                _, _, rows = png_rgb(page.screenshot())
+                x0, y0 = round(info['origin'][0]), round(info['origin'][1])
+                bw, bh = info.get('content', info['backing'])
+                lum = [rows[y][x0 + bw // 2][0] for y in range(y0, y0 + bh)]
+                runs, n = [], 1
+                for a, b in zip(lum, lum[1:]):
+                    if a == b:
+                        n += 1
+                    else:
+                        runs.append(n)
+                        n = 1
+                runs.append(n)
+                S = info['scale']
+                if any(r != S for r in runs) or len(runs) != info['H']:
+                    odd = [(i, r) for i, r in enumerate(runs) if r != S][:4]
+                    fails.append('§5.4b %s: %d game rows seen, rows of other height %s' % (tag, len(runs), odd))
+                checks += 1
+            ctx.close()
+        br.close()
+    log('§5.4/5.4b done: %d checks, %d failures' % (checks, len(fails)))
+    return {'checks': checks, 'fails': fails}
