@@ -12,8 +12,12 @@ capture RAM + registers at the routine's call and at its return with
 ``arek.headless.bpstate``, run the recompiled function over the first
 state and diff registers, CCR and every written address against the second.
 """
+import re
+
 from . import decoder
-from .decoder import SZ_B, SZ_W, SZ_L, SZNAME, Unsupported, decode, successors, call_tree
+from .decoder import (SZ_B, SZ_W, SZ_L, SZNAME, FLOW_MODES, NOFLOW, Flow, JumpTable, jtab_targets,
+                      Unsupported, decode, successors, call_tree)
+from .timing import cycles, ea_class, ea_time
 
 # ---------------------------------------------------------------- generator
 
@@ -29,6 +33,41 @@ uint8_t MEM[MEMSZ];
 uint8_t WRLOG[MEMSZ];
 
 typedef struct { uint32_t d[8], a[8]; int x, n, z, v, c; uint32_t srhi; } M68;
+void exit_point(M68 *m, uint32_t at);   /* a Flow.exits routine was called: the host ends the run */
+
+/* 68000 clocks of the translated code (generate(timing=True); arek.m68k.timing, no DMA
+   contention). Compile with -DTICK_HOOK to route every instruction to the host instead. */
+uint64_t CYCLES = 0;
+#ifdef TICK_HOOK
+void tick_hook(M68 *m, uint32_t pc, uint32_t clocks);
+#define TICK(pc, n) tick_hook(m, (pc), (n))
+#else
+#define TICK(pc, n) (CYCLES += (n))
+#endif
+static uint32_t mulu_t(uint32_t s) { return 38 + 2 * (uint32_t)__builtin_popcount(s & 0xffff); }
+static uint32_t muls_t(uint32_t s) { uint32_t v = (s & 0xffff) << 1; return 38 + 2 * (uint32_t)__builtin_popcount((v ^ (v >> 1)) & 0xffff); }
+/* DIVU/DIVS clocks: Jorge Cwik's analysis of the microcode, in the form of Moira's cyclesDiv (MIT) */
+static uint32_t divu_t(uint32_t dividend, uint32_t divisor) {
+    divisor &= 0xffff;
+    if ((dividend >> 16) >= divisor) return 10;
+    uint32_t mc = 38, hdivisor = divisor << 16;
+    for (int i = 0; i < 15; i++) {
+        if (dividend & 0x80000000u) dividend = (dividend << 1) - hdivisor;
+        else { dividend <<= 1; if (dividend >= hdivisor) { dividend -= hdivisor; mc += 1; } else mc += 2; }
+    }
+    return 2 * mc;
+}
+static uint32_t divs_t(uint32_t dividend, uint32_t divisor) {
+    int64_t dv = (int32_t)dividend, ds = (int16_t)divisor;
+    int64_t adv = dv < 0 ? -dv : dv, ads = ds < 0 ? -ds : ds;
+    uint32_t mc = dv < 0 ? 7 : 6;
+    if ((adv >> 16) >= ads) return (mc + 2) * 2;
+    mc += 55;
+    if (ds >= 0) mc = dv < 0 ? mc + 1 : mc - 1;
+    uint32_t aq = (uint32_t)(adv / ads);
+    for (int i = 0; i < 15; i++) { if (!(aq & 0x8000)) mc++; aq = (aq << 1) & 0xffff; }
+    return 2 * mc;
+}
 
 static void oob(uint32_t a) { fprintf(stderr, "pristup mimo chip RAM: %08x\n", a); exit(3); }
 
@@ -52,6 +91,8 @@ static uint32_t hw_read(uint32_t off) {
     switch (off) {
     case 0x002:                          /* DMACONR: blitter u nas dobehne hned */
         return (CREG[0x096 >> 1] & 0x1fff) | (BZERO ? 0x2000 : 0);
+    case 0x01c:                          /* INTENAR = shadow of INTENA writes */
+        return CREG[0x09a >> 1] & 0x7fff;
     default:
         HW_UNMODELLED[off >> 1] = 1;
         return CREG[off >> 1];
@@ -61,8 +102,9 @@ static void hw_write(uint32_t off, uint32_t v) {
     v &= 0xffff;
     switch (off) {
     case 0x096:                          /* DMACON: bit 15 = nastav/smaz */
-        if (v & 0x8000) CREG[0x096 >> 1] |= v & 0x7fff;
-        else CREG[0x096 >> 1] &= ~(v & 0x7fff);
+    case 0x09a:                          /* INTENA: likewise, read back through INTENAR */
+        if (v & 0x8000) CREG[off >> 1] |= v & 0x7fff;
+        else CREG[off >> 1] &= ~(v & 0x7fff);
         return;
     case 0x058:                          /* BLTSIZE: zapis spousti blit */
         CREG[off >> 1] = v;
@@ -86,7 +128,7 @@ static uint32_t rd16(uint32_t a) {
 }
 static uint32_t rd32(uint32_t a) { return (rd16(a) << 16) | rd16(a + 2); }
 static void wr8(uint32_t a, uint32_t v) {
-    if (CUSTOM(a)) { hw_note("bajtovy zapis do custom registru"); return; }
+    if (CUSTOM(a)) { v &= 0xff; hw_write(a & 0x1fe, (v << 8) | v); return; }   /* 68000: the byte on both halves of the bus */
     if (a >= MEMSZ) oob(a);
     MEM[a] = v; WRLOG[a] = 1;
 }
@@ -113,10 +155,48 @@ static uint16_t minterm(int lf, uint32_t a, uint32_t b, uint32_t c) {
     return d & 0xffff;
 }
 static uint32_t bltptr(int off) {
-    return (((uint32_t)CREG[off >> 1] << 16) | CREG[(off + 2) >> 1]) & 0x7ffffu;
+    return (((uint32_t)CREG[off >> 1] << 16) | CREG[(off + 2) >> 1]) & 0x7fffeu;   /* DMA ignores bit 0 */
 }
 static void set_bltptr(int off, uint32_t v) {
     CREG[off >> 1] = (v >> 16) & 0xffff; CREG[(off + 2) >> 1] = v & 0xffff;
+}
+/* Line mode (BLTCON1 bit 0; Hardware Reference Manual ch. 6): A = the dot (BLTADAT >> ASH), B = the
+   pattern (BLTBDAT rotated by BSH), C/D = the word holding the dot, BLTAPTL = the error term (its sign
+   starts in BLTCON1 bit 6), BLTAMOD = 4(dmin - dmax), BLTBMOD = 4 dmin, BLTCMOD = the row width.
+   SUD (bit 4) set: X is the axis stepped every time (AUL, bit 2 = left), Y the one stepped when the
+   error is not negative (SUL, bit 3 = up); SUD clear swaps the axes. SING (bit 1) = one dot per row. */
+static void run_blit_line(void) {
+    uint16_t con0 = CREG[0x040 >> 1], con1 = CREG[0x042 >> 1];
+    int lf = con0 & 0xff, sh = con0 >> 12, bsh = con1 >> 12, sing = (con1 >> 1) & 1, sign = (con1 >> 6) & 1, onedot = 0;
+    int h = CREG[0x058 >> 1] >> 6; if (!h) h = 1024;
+    int16_t err = (int16_t)CREG[0x052 >> 1], amod = CREG[0x064 >> 1], bmod = CREG[0x062 >> 1], cmod = CREG[0x060 >> 1];
+    uint16_t adat = CREG[0x074 >> 1] & CREG[0x044 >> 1], bdat = CREG[0x072 >> 1];
+    uint16_t lb = (uint16_t)((bdat >> bsh) | (bdat << ((16 - bsh) & 15)));
+    uint32_t cpt = bltptr(0x048), dpt = bltptr(0x054);
+    BZERO = 1; BLITS++;
+    for (int i = 0; i < h; i++) {
+        uint16_t c = rd16(cpt), a = (uint16_t)(adat >> sh), b = (lb & 1) ? 0xffff : 0;
+        uint16_t d = minterm(lf, a, b, c);
+        int pix = !sing || !onedot; onedot = 1;
+        #define LX_INC() do { if (++sh == 16) { sh = 0; cpt += 2; } } while (0)
+        #define LX_DEC() do { if (sh-- == 0) { sh = 15; cpt -= 2; } } while (0)
+        #define LY_INC() do { cpt += cmod; onedot = 0; } while (0)
+        #define LY_DEC() do { cpt -= cmod; onedot = 0; } while (0)
+        if (!sign) { err += amod; if (con1 & 0x10) { if (con1 & 0x08) LY_DEC(); else LY_INC(); } else { if (con1 & 0x08) LX_DEC(); else LX_INC(); } }
+        else err += bmod;
+        if (con1 & 0x10) { if (con1 & 0x04) LX_DEC(); else LX_INC(); } else { if (con1 & 0x04) LY_DEC(); else LY_INC(); }
+        sign = err < 0;
+        lb = (uint16_t)((lb << 1) | (lb >> 15));
+        if (pix) { wr16(dpt, d); if (d) BZERO = 0; }
+        dpt = cpt;
+        #undef LX_INC
+        #undef LX_DEC
+        #undef LY_INC
+        #undef LY_DEC
+    }
+    CREG[0x052 >> 1] = (uint16_t)err; set_bltptr(0x048, cpt); set_bltptr(0x054, dpt);
+    CREG[0x040 >> 1] = (uint16_t)((con0 & 0x0fff) | (sh << 12));
+    CREG[0x042 >> 1] = (uint16_t)((con1 & ~0x40) | (sign ? 0x40 : 0));
 }
 static void run_blit(void) {
     uint16_t con0 = CREG[0x040 >> 1], con1 = CREG[0x042 >> 1];
@@ -124,8 +204,8 @@ static void run_blit(void) {
     int usea = (con0 >> 11) & 1, useb = (con0 >> 10) & 1;
     int usec = (con0 >> 9) & 1, used = (con0 >> 8) & 1;
     int desc = (con1 >> 1) & 1;
-    if (con1 & 1) { hw_note("blitter: rezim LINE (nemodelovano)"); return; }
-    if (con1 & 0x1c) hw_note("blitter: vyplnovy rezim (nemodelovano)");
+    if (con1 & 1) { run_blit_line(); return; }
+    int fill = (con1 >> 3) & 3;                 /* fill (descending): bit 3 IFE inclusive, bit 4 EFE exclusive; bit 2 FCI = carry at row start */
     uint16_t size = CREG[0x058 >> 1];
     int h = size >> 6, w = size & 0x3f;
     if (!h) h = 1024;
@@ -139,7 +219,7 @@ static void run_blit(void) {
     BZERO = 1;
     BLITS++;
     for (int y = 0; y < h; y++) {
-        uint32_t aold = 0, bold = 0;
+        uint32_t aold = 0, bold = 0; int fc = (con1 >> 2) & 1;
         for (int x = 0; x < w; x++) {
             uint32_t adat = usea ? rd16(apt) : CREG[0x074 >> 1];
             uint32_t bdat = useb ? rd16(bpt) : CREG[0x072 >> 1];
@@ -156,6 +236,11 @@ static void run_blit(void) {
             }
             aold = adat; bold = bdat;
             uint16_t d = minterm(lf, as & 0xffff, bs & 0xffff, cdat);
+            if (fill) {                         /* bit 0 to 15: an edge toggles the fill carry (HRM ch. 6) */
+                uint16_t o = 0;
+                for (int j = 0; j < 16; j++) { int b = (d >> j) & 1; if (b) fc ^= 1; if ((fill & 1) ? (b | fc) : fc) o |= (uint16_t)(1u << j); }
+                d = o;
+            }
             if (d) BZERO = 0;
             if (used) wr16(dpt, d);
             if (usea) apt += step;
@@ -218,20 +303,23 @@ static uint32_t f_sub(M68 *m, uint32_t s, uint32_t d, int sz) {   /* d - s */
 static void f_cmp(M68 *m, uint32_t s, uint32_t d, int sz) {       /* jako sub, bez X */
     int x = m->x; f_sub(m, s, d, sz); m->x = x;
 }
+/* ADDX/SUBX: C, X and V from the whole operation d + s + X (d - s - X); Z is only cleared */
 static uint32_t f_addx(M68 *m, uint32_t s, uint32_t d, int sz) {
-    int z0 = m->z, x = m->x;
-    uint32_t r = f_add(m, s, d, sz);
-    int c1 = m->c, v1 = m->v;
-    if (x) { r = f_add(m, 1, r, sz); m->c = m->c || c1; m->v = m->v || v1; }
-    m->z = z0 && (r == 0);                   /* Z se jen nuluje */
+    uint64_t full = (uint64_t)(s & MASK[sz]) + (d & MASK[sz]) + (uint32_t)m->x;
+    uint32_t r = (uint32_t)full & MASK[sz];
+    int sm = msb(s, sz), dm = msb(d, sz), rm = msb(r, sz);
+    m->c = m->x = full > MASK[sz];
+    m->v = (sm == dm) && (rm != dm); m->n = rm;
+    if (r) m->z = 0;
     return r;
 }
 static uint32_t f_subx(M68 *m, uint32_t s, uint32_t d, int sz) {
-    int z0 = m->z, x = m->x;
-    uint32_t r = f_sub(m, s, d, sz);
-    int c1 = m->c, v1 = m->v;
-    if (x) { r = f_sub(m, 1, r, sz); m->c = m->c || c1; m->v = m->v || v1; }
-    m->z = z0 && (r == 0);
+    uint64_t sub = (uint64_t)(s & MASK[sz]) + (uint32_t)m->x;
+    uint32_t r = (uint32_t)((d & MASK[sz]) - sub) & MASK[sz];
+    int sm = msb(s, sz), dm = msb(d, sz), rm = msb(r, sz);
+    m->c = m->x = (uint64_t)(d & MASK[sz]) < sub;
+    m->v = (sm != dm) && (rm != dm); m->n = rm;
+    if (r) m->z = 0;
     return r;
 }
 /* ABCD/SBCD: X and C from the decimal carry, Z only cleared. N and V are
@@ -271,9 +359,19 @@ static void do_divu(M68 *m, int reg, uint32_t src) {
     src &= 0xffff;
     if (src == 0) { fprintf(stderr, "deleni nulou\n"); exit(5); }
     uint32_t q = m->d[reg] / src, r = m->d[reg] % src;
-    if (q > 0xffff) { m->v = 1; return; }    /* pretecni: registr zustava */
+    if (q > 0xffff) { m->v = 1; m->c = 0; return; }   /* pretecni: registr zustava */
     m->d[reg] = (r << 16) | (q & 0xffff);
     m->n = (q >> 15) & 1; m->z = (q == 0); m->v = 0; m->c = 0;
+}
+/* DIVS: quotient rounded toward zero, remainder has the sign of the dividend */
+static void do_divs(M68 *m, int reg, uint32_t src) {
+    int32_t sv = (int16_t)(src & 0xffff), dv = (int32_t)m->d[reg];
+    if (sv == 0) { fprintf(stderr, "deleni nulou\n"); exit(5); }
+    if (dv == INT32_MIN && sv == -1) { m->v = 1; m->c = 0; return; }
+    int32_t q = dv / sv, r = dv % sv;
+    if (q > 32767 || q < -32768) { m->v = 1; m->c = 0; return; }   /* pretecni: registr zustava */
+    m->d[reg] = ((uint32_t)(r & 0xffff) << 16) | ((uint32_t)q & 0xffff);
+    m->n = q < 0; m->z = (q == 0); m->v = 0; m->c = 0;
 }
 static uint32_t f_neg(M68 *m, uint32_t d, int sz) {
     uint32_t r = f_sub(m, d, 0, sz); return r;
@@ -291,9 +389,18 @@ static uint32_t f_shift(M68 *m, const char *k, uint32_t v, int cnt, int sz) {
                 else r = (r >> 1) & MASK[sz];
             }
         }
+    } else if (k[2] == 'x') {                       /* roxl/roxr: through X; the bit shifted out goes to X and C */
+        int left = (k[3] == 'l');
+        for (int i = 0; i < cnt; i++) {
+            if (left) { last = msb(r, sz); r = ((r << 1) | (uint32_t)m->x) & MASK[sz]; }
+            else { last = r & 1; r = ((r >> 1) | ((uint32_t)m->x << (b - 1))) & MASK[sz]; }
+            m->x = last;
+        }
+        m->n = msb(r, sz); m->z = (r == 0); m->v = 0;
+        m->c = m->x;                                /* count 0: C = X */
+        return r;
     } else {                                        /* rol/ror */
-        int left = (k[2] == 'l' || k[1] == 'o');
-        left = (k[strlen(k) - 1] == 'l');
+        int left = (k[strlen(k) - 1] == 'l');
         for (int i = 0; i < cnt; i++) {
             if (left) { last = msb(r, sz); r = ((r << 1) | last) & MASK[sz]; }
             else { last = r & 1; r = ((r >> 1) | ((uint32_t)last << (b - 1))) & MASK[sz]; }
@@ -302,6 +409,10 @@ static uint32_t f_shift(M68 *m, const char *k, uint32_t v, int cnt, int sz) {
     m->n = msb(r, sz); m->z = (r == 0); m->v = 0;
     m->c = cnt ? last : 0;
     if (cnt && (k[0] == 'l' || k[0] == 'a')) m->x = last;
+    if (k[0] == 'a' && k[2] == 'l') {               /* asl: V = the sign bit changed at any step */
+        uint32_t t = v & MASK[sz];
+        for (int i = 0; i < cnt && i < b; i++) { if (msb(t, sz) != msb((t << 1) & MASK[sz], sz)) m->v = 1; t = (t << 1) & MASK[sz]; }
+    }
     return r;
 }
 static int cond(M68 *m, int c) {
@@ -328,8 +439,8 @@ class Gen:
     def STUBS(self):
         return decoder.STUBS
 
-    def __init__(self, data, base, funcs, cfg=None):
-        self.data, self.base = data, base
+    def __init__(self, data, base, funcs, cfg=None, flow=NOFLOW, timing=False):
+        self.data, self.base, self.flow, self.timing = data, base, flow, timing
         self.funcs = funcs                  # [(start, end, entry)] - linearni useky
         self.cfg = cfg or {}                # entry -> {adresa: Insn} z grafu toku
         self.entries = {e: (s, en) for s, en, e in funcs}
@@ -342,9 +453,12 @@ class Gen:
         self.out.append(s)
 
     def gen(self):
-        self.emit(RUNTIME)
+        if not self.flow.lib:
+            self.emit(RUNTIME)
+        for name in sorted(set(self.flow.externs.values())):
+            self.emit('void %s(M68 *m);' % name)
         for entry in self.all_entries():
-            self.emit('void f_%06x(M68 *m);' % entry)
+            self.emit('void %s(M68 *m);' % self.flow.fname(entry))
         self.emit()
         for s, e, entry in self.funcs:
             self.gen_func(s, e, entry)
@@ -362,13 +476,15 @@ class Gen:
         order = sorted(ins)
         idx = {a: k for k, a in enumerate(order)}
         self.emit('/* vstup $%06x, %d instrukci z grafu toku */' % (entry, len(ins)))
-        self.emit('void f_%06x(M68 *m) {' % entry)
+        self.emit('void %s(M68 *m) {' % self.flow.fname(entry))
         if order and order[0] != entry:
             self.emit('    goto L%06x;' % entry)
         for k, a in enumerate(order):
             i = ins[a]
             self.stats[i.kind] = self.stats.get(i.kind, 0) + 1
             self.emit('L%06x: ; /* %s */' % (a, i.text))
+            if self.timing and self.tick(i):
+                self.emit('    ' + self.tick(i))
             for line in self.body(i, None, None, ins):
                 self.emit('    ' + line)
             nxt = successors(i)
@@ -380,7 +496,7 @@ class Gen:
 
     def gen_func(self, start, end, entry):
         self.emit('/* $%06x - $%06x, vstup $%06x */' % (start, end, entry))
-        self.emit('void f_%06x(M68 *m) {' % entry)
+        self.emit('void %s(M68 *m) {' % self.flow.fname(entry))
         if entry != start:
             self.emit('    goto L%06x;' % entry)
         addr = start
@@ -388,6 +504,8 @@ class Gen:
             ins = decode(self.data, self.base, addr)
             self.stats[ins.kind] = self.stats.get(ins.kind, 0) + 1
             self.emit('L%06x: ; /* %s */' % (addr, ins.text))
+            if self.timing and self.tick(ins):
+                self.emit('    ' + self.tick(ins))
             for line in self.body(ins, start, end):
                 self.emit('    ' + line)
             addr = ins.end
@@ -396,13 +514,24 @@ class Gen:
         self.emit()
 
     def br(self, target, start, end, ins=None):
+        fl = self.flow
+        if target in fl.stops:
+            return 'unknown_call(0x%xu); return;' % target
+        if target in fl.rets:
+            return 'return;'
+        if target in fl.exits:
+            return 'exit_point(m, 0x%xu); return;' % target
+        if target in fl.externs:
+            return '%s(m); return;' % fl.externs[target]       # jmp into an external routine = tail call
         if ins is not None:
             if target in ins:
                 return 'goto L%06x;' % target
         elif start <= target < end:
             return 'goto L%06x;' % target
         if target in self.entries:
-            return 'f_%06x(m); return;' % target
+            return '%s(m); return;' % fl.fname(target)
+        if fl.lib and not fl.in_module(target):
+            return '%s(m); return;' % fl.fname(target)          # into the main translation
         raise Unsupported('skok mimo funkci na $%x' % target)
 
     def body(self, i, start, end, ins=None):
@@ -638,39 +767,79 @@ class Gen:
             L.append('    if ((uint16_t)m->d[%d] != 0xffff) { %s } }'
                      % (i.reg, self.br(i.target, start, end, ins)))
         elif k == 'bsr':
-            L.append('push32(m, 0x%xu);' % i.end)
-            L.append(self.call(i.target))
+            L.append(self.callseq(i.target, i.end))
         elif k == 'jsr':
             nm = self.stub_name(i.ea)
             if nm:
                 L.append('%s(m);' % nm)
                 return L
-            L.append('push32(m, 0x%xu);' % i.end)
             if i.ea.kind != 'mem':
                 raise Unsupported('jsr %s' % i.ea.kind)
-            try:
-                t = int(i.ea.addr, 0)
-                L.append(self.call(t))
-            except ValueError:
+            if i.addr in self.flow.jtabs:
+                return L + self.jump_table(i, lambda t: self.callseq(t, i.end) + ' break;',
+                                           'break;')
+            if i.addr in self.flow.indirect:
+                L.append('{ uint32_t t = %s; switch (t) {' % i.ea.addr)
+                for t in self.flow.indirect[i.addr]:
+                    L.append('  case 0x%xu: %s break;' % (t, self.callseq(t, i.end)))
+                L.append('  default: unknown_call(t); } }')
+                return L
+            if getattr(i.ea, 'mode', None) in FLOW_MODES:
+                L.append(self.callseq(i.ea.absval, i.end))
+            else:
+                L.append('push32(m, 0x%xu);' % i.end)
                 L.append('unknown_call(%s);' % i.ea.addr)
         elif k == 'jmp':
             nm = self.stub_name(i.ea)
             if nm:
                 L.append('%s(m); return;' % nm)
                 return L
-            try:
-                t = int(i.ea.addr, 0)
-                L.append(self.br(t, start, end, ins))
-            except ValueError:
+            mode = getattr(i.ea, 'mode', None)
+            if i.addr in self.flow.jtabs:
+                return L + self.jump_table(i, lambda t: '%s(m); return;' % self.flow.fname(t),
+                                           'm->a[7] += 4; return;')
+            if i.addr in self.flow.indirect:
+                if mode in FLOW_MODES:                     # the program rewrites the operand
+                    t = ('rd32(0x%xu)' % (i.addr + 2)) if i.end - i.addr == 6 else \
+                        ('(uint32_t)(int16_t)rd16(0x%xu)' % (i.addr + 2))
+                else:
+                    t = i.ea.addr
+                L.append('{ uint32_t t = %s; switch (t) {' % t)
+                for t in self.flow.indirect[i.addr]:
+                    L.append('  case 0x%xu: %s' % (t, self.br(t, start, end, ins)))
+                L.append('  default: unknown_call(t); } }')
+                return L
+            if mode in FLOW_MODES:
+                L.append(self.br(i.ea.absval, start, end, ins))
+            else:
                 raise Unsupported('neprimy jmp @%x' % i.addr)
-        elif k in ('mulu', 'divu'):
+        elif k in ('mulu', 'divu', 'muls', 'divs') and self.timing:
+            pre(i.ea)
+            ea_t = ea_time(i.ea)
+            L.append('{ uint32_t s_ = (uint16_t)(%s);' % i.ea.read(SZ_W))
+            if k == 'mulu':
+                L.append('  TICK(0x%xu, mulu_t(s_) + %d); m->d[%d] = (uint32_t)((uint16_t)m->d[%d] * s_); }'
+                         % (i.addr, ea_t, i.reg, i.reg))
+                L.append('f_logic(m, m->d[%d], 2);' % i.reg)
+            elif k == 'muls':
+                L.append('  TICK(0x%xu, muls_t(s_) + %d); m->d[%d] = (uint32_t)((int32_t)(int16_t)m->d[%d] * (int32_t)(int16_t)s_); }'
+                         % (i.addr, ea_t, i.reg, i.reg))
+                L.append('f_logic(m, m->d[%d], 2);' % i.reg)
+            else:
+                L.append('  if (s_) TICK(0x%xu, %s_t(m->d[%d], s_) + %d); do_%s(m, %d, s_); }'
+                         % (i.addr, k, i.reg, ea_t, k, i.reg))
+        elif k in ('mulu', 'divu', 'muls', 'divs'):
             pre(i.ea)
             if k == 'mulu':
                 L.append('m->d[%d] = (uint32_t)((uint16_t)m->d[%d] * (uint16_t)(%s));'
                          % (i.reg, i.reg, i.ea.read(SZ_W)))
                 L.append('f_logic(m, m->d[%d], 2);' % i.reg)
+            elif k == 'muls':
+                L.append('m->d[%d] = (uint32_t)((int32_t)(int16_t)m->d[%d] * (int32_t)(int16_t)(%s));'
+                         % (i.reg, i.reg, i.ea.read(SZ_W)))
+                L.append('f_logic(m, m->d[%d], 2);' % i.reg)
             else:
-                L.append('do_divu(m, %d, %s);' % (i.reg, i.ea.read(SZ_W)))
+                L.append('do_%s(m, %d, %s);' % (k, i.reg, i.ea.read(SZ_W)))
         else:
             raise Unsupported('generator neumi %s @%x' % (k, i.addr))
         return L
@@ -682,13 +851,64 @@ class Gen:
             return decoder.STUBS.get((ea.areg, ea.disp or 0))
         return None
 
+    def tick(self, i):
+        """TICK statement for instruction i (before its body runs); mul/div tick in the body."""
+        k, pc = i.kind, i.addr
+        if k in ('mulu', 'muls', 'divu', 'divs'):
+            return None
+        if k == 'bcc':
+            return 'TICK(0x%xu, cond(m, %d) ? 10 : %d);' % (pc, i.cond, cycles(i, taken=False))
+        if k == 'dbcc':
+            return 'TICK(0x%xu, cond(m, %d) ? 12 : ((m->d[%d] & 0xffff) == 0 ? 14 : 10));' % (pc, i.cond, i.reg)
+        if k == 'scc' and ea_class(i.ea) == 'dn':
+            return 'TICK(0x%xu, cond(m, %d) ? 6 : 4);' % (pc, i.cond)
+        if k == 'shift' and not getattr(i, 'mem', False) and not i.cnt.isdigit():
+            return 'TICK(0x%xu, %d + 2 * (%s));' % (pc, cycles(i, count=0), i.cnt)
+        if k == 'bit' and i.bitop and ea_class(i.ea) == 'dn':
+            if i.src.startswith('m->d['):
+                return 'TICK(0x%xu, %d + ((%s & 31) >= 16 ? 2 : 0));' % (pc, cycles(i, count=0), i.src)
+            return 'TICK(0x%xu, %d);' % (pc, cycles(i, count=int(i.src.rstrip('u'), 16)))
+        return 'TICK(0x%xu, %d);' % (pc, cycles(i))
+
+    def jump_table(self, i, case, empty):
+        """jsr/jmp (d8,An,Dn) or (d8,PC,Dn) into a JumpTable: a switch on the slot index."""
+        if getattr(i.ea, 'mode', None) not in (6, 73):
+            raise Unsupported('jump table at $%x: unexpected operand %s' % (i.addr, i.ea.text))
+        jt = self.flow.jtabs[i.addr]
+        reg = ('m->a[%d]' if i.ea.xa else 'm->d[%d]') % i.ea.xr
+        ix = ('(int32_t)%s' if i.ea.xl else '(int32_t)(int16_t)%s') % reg
+        origin = i.ea.pcbase if i.ea.mode == 73 else jt.origin
+        L = ['{ int32_t off = %s + (%d) + (%d); if (off < 0 || off %% %d) unknown_call((uint32_t)off); '
+             'switch (off / %d) {' % (ix, i.ea.disp, origin - jt.table, jt.stride, jt.stride)]
+        for k, t in enumerate(jt.targets):
+            L.append('  case %d: %s' % (k, empty if t is None else case(t)))
+        L.append('  default: unknown_call((uint32_t)off); } }')
+        return L
+
+    def callseq(self, target, ret):
+        """bsr/jsr: push the return address and call. A callee that removed more than its
+        return address (``addq.l #4,a7 ; rts`` = return to the caller's caller) makes
+        this routine return at once, as the 68000 would."""
+        if target in self.flow.exits:
+            return 'exit_point(m, 0x%xu);' % target
+        if target in self.flow.externs:
+            return ('{ uint32_t sp0 = m->a[7]; push32(m, 0x%xu); %s(m); if (m->a[7] > sp0) return; }'
+                    % (ret, self.flow.externs[target]))
+        return '{ uint32_t sp0 = m->a[7]; push32(m, 0x%xu); %s if (m->a[7] > sp0) return; }' % (ret, self.call(target))
+
     def call(self, target):
         if target in self.entries:
-            return 'f_%06x(m);' % target
+            return '%s(m);' % self.flow.fname(target)
+        if self.flow.lib and not self.flow.in_module(target):
+            return '%s(m);' % self.flow.fname(target)        # a routine of the main translation
         return 'unknown_call(0x%xu);' % target
 
 MAIN_C = r'''
 /* --- driver for verification against the emulator --------------------------------- */
+#include <setjmp.h>
+static jmp_buf EXIT_JB;
+static uint32_t EXIT_AT = 0;
+void exit_point(M68 *m, uint32_t at) { (void)m; EXIT_AT = at; longjmp(EXIT_JB, 1); }
 int main(int argc, char **argv) {
     if (argc < 5) { fprintf(stderr, "recomp RAM.bin regs.txt out.bin wrlog.txt\n"); return 1; }
     FILE *f = fopen(argv[1], "rb");
@@ -704,13 +924,15 @@ int main(int argc, char **argv) {
     if (fscanf(f, "%63s", name) != 1) return 1;
     if (fscanf(f, "%x", &ret) == 1) push32(&m, ret);   /* jako bsr od volajiciho */
     fclose(f);
-    ENTRY(name, &m);
+    if (!setjmp(EXIT_JB)) ENTRY(name, &m);
     f = fopen(argv[3], "wb"); fwrite(MEM, 1, MEMSZ, f); fclose(f);
     f = fopen(argv[4], "w");
     for (int i = 0; i < 8; i++) fprintf(f, "%08x\n", m.d[i]);
     for (int i = 0; i < 8; i++) fprintf(f, "%08x\n", m.a[i]);
     fprintf(f, "%d %d %d %d %d\n", m.x, m.n, m.z, m.v, m.c);
     fprintf(f, "blits %ld\n", BLITS);
+    if (EXIT_AT) fprintf(f, "exit %x\n", EXIT_AT);
+    fprintf(f, "cycles %llu\n", (unsigned long long)CYCLES);
     for (int i = 0; i < HW_NOTES; i++) fprintf(f, "note %s\n", HW_NOTE[i]);
     for (int i = 0; i < 0x100; i++)
         if (HW_UNMODELLED[i]) fprintf(f, "hwreg %03x\n", i * 2);
@@ -734,28 +956,87 @@ def add_stub(spec):
     decoder.STUBS[(int(reg.lstrip('aA')), int(disp))] = name
 
 
-def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False):
-    """Return (c_source, stats). ``funcs`` are (start, end, entry) linear ranges,
+def _hex(x):
+    return int(str(x).strip().lstrip('$'), 16)
+
+
+def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern=(), ret=(),
+                    prefix=None, lib=False):
+    """Build a decoder.Flow from the command-line spellings (all addresses hex):
+
+    jtab     'SITE[,SITE..]:TABLE:COUNT:STRIDE:bra|ptr[:AN]' - jsr/jmp (d8,An,Dn) into a table;
+             AN = the value of An at the jump when the table starts below it
+    indirect 'SITE=T1,T2,...' - possible targets of jsr/jmp (An), or of a rewritten jmp abs
+    stop, exitat, ret   addresses;   extern 'ADDR=c_name';   prefix 'NAME:LO:HI'
+    """
+    jtabs = {}
+    for spec in jtab:
+        p = spec.split(':')
+        sites, table, count, stride, kind = p[:5]
+        table, stride = _hex(table), int(stride)
+        jt = JumpTable(jtab_targets(data, base, table, int(count), stride, kind), stride, table,
+                       _hex(p[5]) if len(p) > 5 else None)
+        for site in sites.split(','):
+            jtabs[_hex(site)] = jt
+    ind = {}
+    for spec in indirect:
+        site, targets = spec.split('=')
+        ind[_hex(site)] = [_hex(t) for t in targets.split(',') if t]
+    ext = {}
+    for spec in extern:
+        a, name = spec.split('=')
+        ext[_hex(a)] = name
+    pf = None
+    if prefix:
+        name, plo, phi = prefix.split(':')
+        pf = (name, _hex(plo), _hex(phi))
+    return Flow(stops=map(_hex, stop), rets=map(_hex, ret), exits=map(_hex, exitat), externs=ext,
+                jtabs=jtabs, indirect=ind, prefix=pf, lib=lib)
+
+
+def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow=NOFLOW,
+             stub_impl=None, timing=False):
+    """Return (c_source, stats, entries). ``funcs`` are (start, end, entry) linear ranges,
     ``auto`` are entry addresses whose bodies are discovered by walking the
-    flow graph (transitively over bsr/jsr). Raises Unsupported / SystemExit-free."""
-    hi = hi if hi is not None else base + len(data)
+    flow graph (transitively over bsr/jsr). ``flow`` (a decoder.Flow) carries what the
+    bytes do not say: jump tables, indirect targets, external routines, overlay modules.
+    ``stub_impl``: None = the stubs (decoder.STUBS) are defined elsewhere, 'notes' = empty
+    stubs that record a hardware note, or C source with their bodies.
+    ``timing``: every instruction adds its 68000 clocks (arek.m68k.timing, branch outcome and
+    MUL/DIV operands included) through TICK(pc, n) into CYCLES or the host's tick_hook.
+    Raises Unsupported / SystemExit-free."""
+    hi = min(hi if hi is not None else base + len(data), base + len(data))
+    lo = max(lo, base)                           # nothing outside the image can be walked
     cfg = {}
     if auto:
-        tree = call_tree(data, base, list(auto), lo, hi)
+        tree = call_tree(data, base, list(auto), lo, hi, flow)
         for e, (ins, calls, bad, ind) in tree.items():
             if bad:
                 raise Unsupported('routine $%x, %s @%x' % (e, bad[0][1], bad[0][0]))
             if ind:
                 raise Unsupported('routine $%x, indirect jump: %s @%x' % (e, ind[0][1], ind[0][0]))
             cfg[e] = ins
-    g = Gen(data, base, list(funcs), cfg)
+    g = Gen(data, base, list(funcs), cfg, flow, timing)
     src = g.gen()
+    if stub_impl is not None and decoder.STUBS:
+        names = sorted(set(decoder.STUBS.values()))
+        impl = stub_impl if stub_impl != 'notes' else '\n'.join(
+            'static void %s(M68 *m) { (void)m; hw_note("stub %s"); }' % (n, n) for n in names)
+        cut = src.find('\nvoid f_')
+        cut = len(src) if cut < 0 else cut
+        src = (src[:cut] + '\n/* --- stubs --- */\n' + ''.join('static void %s(M68 *m);\n' % n for n in names)
+               + impl + '\n' + src[cut:])
+    if flow.lib:          # prototypes of main-translation routines this module calls
+        defined = set(re.findall(r'\nvoid (f_\w+)\(M68 \*m\) \{', src))
+        called = set(re.findall(r'\b(f_\w+)\(m\)', src))
+        src = ('/* --- overlay module (Flow.lib): include after the main translation, shares its runtime --- */\n'
+               + ''.join('void %s(M68 *m);\n' % f for f in sorted(called - defined)) + src)
     from .. import identity
     ident = identity()
     src = ('/* generated by amiga-re-kit %s, decoder sha256 %s, recomp sha256 %s */\n'
            % (ident['version'], ident['decoder_sha256'], ident['recomp_sha256'])) + src
     if with_main:
-        disp = '\n'.join('    if (!strcmp(n, "f_%06x")) { f_%06x(m); return; }' % (e, e)
+        disp = '\n'.join('    if (!strcmp(n, "%s")) { %s(m); return; }' % (flow.fname(e), flow.fname(e))
                          for e in g.all_entries())
         src += ('\nstatic void ENTRY(const char *n, M68 *m) {\n%s\n'
                 '    fprintf(stderr, "unknown entry %%s\\n", n); exit(2);\n}\n' % disp)

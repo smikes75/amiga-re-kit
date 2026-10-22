@@ -157,12 +157,14 @@ def cmd_dis(a):
     data = rd(a.file)
     syms = _syms(a.syms)
     if a.walk is not None:
-        rows, fr = disasm.listing_walk(data, a.base, a.walk, a.lo or a.base, a.hi or a.base + len(data))
+        rows, fr = disasm.listing_walk(data, a.base, a.walk, a.lo or a.base, a.hi or a.base + len(data),
+                                       cycles=a.cycles)
         print(disasm.format_listing(rows, syms))
         for addr, why in fr:
             print('; frontier %06x: %s' % (addr, why))
     else:
-        rows = disasm.listing(data, a.base, a.lo or a.base, a.hi or a.base + len(data), a.limit, dcw=a.dcw)
+        rows = disasm.listing(data, a.base, a.lo or a.base, a.hi or a.base + len(data), a.limit, dcw=a.dcw,
+                              cycles=a.cycles)
         print(disasm.format_listing(rows, syms))
 
 
@@ -221,8 +223,14 @@ def cmd_recomp(a):
     for s in a.stub or []:
         recomp.add_stub(s)
     funcs = [recomp.parse_func_spec(s) for s in a.func or []]
+    flow = recomp.flow_from_specs(data, a.base, a.jtab or [], a.indirect or [], a.stop or [],
+                                  a.exitat or [], a.extern or [], a.ret or [], a.prefix, a.lib)
+    impl = None
+    if a.stub_impl:
+        impl = 'notes' if a.stub_impl == 'notes' else Path(a.stub_impl).read_text()
     src, stats, entries = recomp.generate(data, a.base, funcs, a.auto or [],
-                                          a.lo or a.base, a.hi, with_main=a.main)
+                                          a.lo or a.base, a.hi, with_main=a.main, flow=flow,
+                                          stub_impl=impl, timing=a.timing)
     Path(a.out).write_text(src)
     print('%s: %d entries (%s), %d instruction kinds, %d instructions' %
           (a.out, len(entries), ', '.join('%06x' % e for e in entries), len(stats), sum(stats.values())))
@@ -369,6 +377,7 @@ def build_parser():
     s.add_argument('--hi', type=A)
     s.add_argument('--walk', type=A, help='entry address: list only reachable code')
     s.add_argument('--dcw', action='store_true', help='linear: write undecodable words as dc.w (reassemblable)')
+    s.add_argument('--cycles', action='store_true', help='append the 68000 clock count of each instruction')
     s.add_argument('--limit', type=int)
     s.add_argument('--syms')
     s.set_defaults(fn=cmd_dis)
@@ -415,6 +424,19 @@ def build_parser():
     s.add_argument('--stub', nargs='*', metavar='An:DISP:NAME')
     s.add_argument('--lo', type=A)
     s.add_argument('--hi', type=A)
+    s.add_argument('--jtab', nargs='*', metavar='SITE[,..]:TABLE:COUNT:STRIDE:bra|ptr[:AN]',
+                   help='jsr/jmp (d8,An,Dn) into a table of bra.w slots or pointers; '
+                        'all flow addresses are hex, as in --func')
+    s.add_argument('--indirect', nargs='*', metavar='SITE=T1,T2',
+                   help='possible targets of jsr/jmp (An), or of a jmp abs the program rewrites')
+    s.add_argument('--stop', nargs='*', metavar='ADDR', help='never translate (a branch into data)')
+    s.add_argument('--exitat', nargs='*', metavar='ADDR', help='calling it ends the run (exit_point)')
+    s.add_argument('--extern', nargs='*', metavar='ADDR=NAME', help='replace a routine by C NAME(M68 *m)')
+    s.add_argument('--ret', nargs='*', metavar='ADDR', help='translation returns here (a loop body as a function)')
+    s.add_argument('--prefix', metavar='NAME:LO:HI', help='functions in [LO, HI) are f_NAME<addr> (overlay module)')
+    s.add_argument('--lib', action='store_true', help='functions only, sharing the runtime of another translation')
+    s.add_argument('--stub-impl', metavar='FILE|notes', help='C bodies of the stubs, or "notes" for empty ones')
+    s.add_argument('--timing', action='store_true', help='count 68000 clocks per instruction (TICK / CYCLES)')
     s.add_argument('--main', action='store_true', help='append the verification driver main()')
     s.add_argument('--stats', action='store_true')
     s.add_argument('-o', '--out', required=True)

@@ -176,11 +176,11 @@ def scan_routine(data, base, start, lo, hi, abase, ram=None, chip=CHIP_MAX):
         if i.kind == 'bsr':
             r.calls.add(i.target)
         elif i.kind == 'jsr':
-            if i.ea.mode in (70, 71):
+            if i.ea.mode in decoder.FLOW_MODES:
                 r.calls.add(i.ea.absval)
             else:
                 r.indirect.append((a, 'jsr ' + i.ea.text))
-        elif i.kind == 'jmp' and i.ea.mode not in (70, 71):
+        elif i.kind == 'jmp' and i.ea.mode not in decoder.FLOW_MODES:
             r.indirect.append((a, 'jmp ' + i.ea.text))
         work.extend(decoder.successors(i))
     return r

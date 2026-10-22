@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,png,dev]"     # or without extras: pip install -e .
-python -m pytest                    # 75 tests, synthetic data only
+python -m pytest                    # 1177 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -61,9 +61,12 @@ arek hwscan main.bin --base 0x20700 --roots 0x20700    # the hardware boundary
 arek copper ram.bin --base 0x0 --limit 200             # a copper list from a RAM dump
 arek xref   prog.txt --syms syms.json                  # from an objdump listing
 arek dis    main.bin --base 0x20700 --dcw              # linear, undecodable words as dc.w
+arek dis    main.bin --base 0x20700 --walk 0x21234 --cycles   # 68000 clock count per instruction
 
 # 4. translate and verify
 arek recomp  main.bin --base 0x20700 --auto 0x21234 --main -o draw.c
+arek recomp  main.bin --base 0x20700 --auto 0x21234 --timing \
+             --jtab 21300:21400:12:4:bra --indirect 21350=21500,21600 --extern 21700=load_file -o game.c
 arek bpstate --address 0x21234 --end 20 --out cap/before
 arek bpstate --address 0x21300 --end 20 --out cap/after
 arek diff    cap/before cap/after --range 0x60000 0x70000
@@ -90,10 +93,11 @@ asks for (see `examples/profile.example.json`).
 | `arek.packers.scan` | brute-force scan: signatures (PP20, RNC, ATN!, IMP!, …) + verified blocks | S.W.I.V. |
 | `arek.hunk` | bounded HUNK reader: CODE/DATA/BSS, RELOC32, split streams; `build()` for probes | Superfrog |
 | `arek.copper` | copper list disassembler with custom register names | S.W.I.V. |
-| `arek.m68k.decoder` | strict 68000 decoder: raises `Unsupported` instead of guessing | Superfrog (fixed ADDA/SUBA/CMPA); LINK/UNLK/PEA/EXG from Alien Breed; memory shifts, CMPM, ABCD/SBCD new |
+| `arek.m68k.decoder` | strict 68000 decoder: raises `Unsupported` instead of guessing; accepts only addressing modes the 68000 accepts (checked opcode by opcode against Moira) | Superfrog (fixed ADDA/SUBA/CMPA); LINK/UNLK/PEA/EXG from Alien Breed; memory shifts, CMPM, ABCD/SBCD, MULS/DIVS new |
 | `arek.m68k.disasm` | linear and flow-walk listings straight from the decoder | new |
 | `arek.m68k.hwscan` | which routines are pure RAM and which touch custom chips / CIA / ROM | Turrican II |
-| `arek.m68k.recomp` | static 68k → C recompiler with a verification driver (`MEM[]`, write log, minimal blitter model) | Superfrog |
+| `arek.m68k.recomp` | static 68k → C recompiler with a verification driver (`MEM[]`, write log, blitter incl. line and fill modes); jump tables, indirect targets, external routines, overlay modules (`Flow`); optional clock counting | Superfrog; extensions from Alien Breed |
+| `arek.m68k.timing` | 68000 clock counts per instruction, data-dependent ones included (MUL/DIV operands, shift counts, branch outcome); matches Moira on all 42 247 decodable opcodes | new |
 | `arek.m68k.xref` | call / data cross references from `m68k-elf-objdump` text | Superfrog |
 | `arek.m68k.audit` | profile-driven inventory + conservative reachability, JSON in / JSON out | Superfrog |
 | `arek.headless` | `local.conf`, RetroShell scripts, screenshots, breakpoint captures | Turrican II / Superfrog |

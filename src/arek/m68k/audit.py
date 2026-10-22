@@ -61,7 +61,7 @@ def graph(data, base, roots):
         elif ins.kind in ('bcc', 'dbcc', 'bsr'):
             targets = [ins.target, ins.end]
         elif ins.kind in ('jsr', 'jmp'):
-            if ins.ea.mode in (70, 71):
+            if ins.ea.mode in decoder.FLOW_MODES:
                 targets.append(ins.ea.absval)
             else:
                 issues.add((pc, 'unresolved_' + ins.kind))

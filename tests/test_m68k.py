@@ -61,11 +61,11 @@ def test_decoder_table(hx, text, kind):
 
 def test_decoder_is_strict():
     with pytest.raises(decoder.Unsupported):
-        dec('81c1')                                  # divs: not modelled -> explicit
+        dec('0108')                                  # movep: not modelled -> explicit
     with pytest.raises(decoder.Unsupported):
         dec('ffff')
     for hx in ('e1c0', 'e1fc0001', 'e1fa0000', 'e8c0',
-               '8340', '4848', '4858', '4860', '487c0000', 'c1c8'):   # pack, bkpt, pea (a0)+/-(a0)/#, bad exg   # memory shift of dn / #imm / (pc); 68020 bit field
+               '8340', '4848', '4858', '4860', '487c0000', 'c1c8', 'c0c8', '80c8', '81c8'):   # pack, bkpt, pea (a0)+/-(a0)/#, bad exg   # memory shift of dn / #imm / (pc); 68020 bit field
         with pytest.raises(decoder.Unsupported):
             dec(hx)
 
@@ -152,7 +152,7 @@ def test_recomp_generates_and_runs(code, tmp_path):
 
 
 def test_recomp_refuses_unknown_instruction():
-    data = bytes.fromhex('81c1 4e75'.replace(' ', ''))
+    data = bytes.fromhex('0108 4e75'.replace(' ', ''))
     with pytest.raises(decoder.Unsupported):
         recomp.generate(data, 0x1000, auto=[0x1000])
 

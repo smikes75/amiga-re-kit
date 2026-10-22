@@ -179,14 +179,15 @@ def hunk_load(path: str, base: str, out_prefix: str) -> list:
 # ------------------------------------------------------------------ 68k
 @mcp.tool()
 def disassemble(path: str, base: str, lo: str = None, hi: str = None,
-                limit: int = 400) -> str:
-    """Linear disassembly of [lo, hi) of a binary loaded at ``base``. Stops at
-    the first undecodable word (marked ``??``) - use ``walk`` for code with
-    data in between."""
+                limit: int = 400, cycles: bool = False) -> str:
+    """Linear disassembly of [lo, hi) of a binary loaded at ``base``. Undecodable
+    words are marked ``??`` - use ``walk`` for code with data in between.
+    ``cycles`` appends each instruction's 68000 clock count."""
     from .m68k import disasm
     data = _bytes(path)
     b = _addr(base)
-    rows = disasm.listing(data, b, _addr(lo) if lo else b, _addr(hi) if hi else b + len(data), limit)
+    rows = disasm.listing(data, b, _addr(lo) if lo else b, _addr(hi) if hi else b + len(data), limit,
+                          cycles=cycles)
     return disasm.format_listing(rows)
 
 
@@ -225,17 +226,25 @@ def hwscan(path: str, base: str, roots: list, lo: str = None, hi: str = None,
 
 @mcp.tool()
 def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = None,
-           stubs: list = None, with_main: bool = False) -> dict:
+           stubs: list = None, with_main: bool = False, flow: dict = None, timing: bool = False) -> dict:
     """Statically recompile 68k routines to C. ``auto``: entry addresses whose
     bodies are discovered by walking; ``funcs``: 'START:END[:ENTRY]' linear
-    ranges; ``stubs``: 'An:DISP:NAME' for jsr through jump tables. Raises on
-    anything the decoder does not support - nothing is silently skipped."""
+    ranges; ``stubs``: 'An:DISP:NAME' for jsr through jump tables. ``flow``: what
+    the bytes do not say, as lists of the CLI spellings under the keys jtab,
+    indirect, stop, exitat, extern, ret, plus prefix 'NAME:LO:HI' and lib (bool).
+    ``timing`` counts 68000 clocks per instruction into CYCLES (or the host's tick_hook).
+    Raises on anything the decoder does not support - nothing is silently skipped."""
     from .m68k import recomp as rc
     for s in stubs or []:
         rc.add_stub(s)
     fs = [rc.parse_func_spec(s) for s in funcs or []]
-    src, stats, entries = rc.generate(_bytes(path), _addr(base), fs,
-                                      [_addr(a) for a in auto or []], with_main=with_main)
+    data, b = _bytes(path), _addr(base)
+    f = flow or {}
+    fl = rc.flow_from_specs(data, b, f.get('jtab', []), f.get('indirect', []), f.get('stop', []),
+                            f.get('exitat', []), f.get('extern', []), f.get('ret', []),
+                            f.get('prefix'), bool(f.get('lib')))
+    src, stats, entries = rc.generate(data, b, fs, [_addr(a) for a in auto or []],
+                                      with_main=with_main, flow=fl, timing=timing)
     Path(out_c).write_text(src)
     return {'out': out_c, 'entries': ['%06x' % e for e in entries], 'stats': stats}
 
