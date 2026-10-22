@@ -58,6 +58,7 @@ Optional patches on top of the headless one:
 |---|---|---|
 | `vamiga-trace.patch` | c59425d | `VAHL_TRACE`: every breakpoint hit writes a VTR1 record (registers, beam, chip RAM) and the run continues |
 | `vamiga-trace-ranges-899da5d.patch` | 899da5d | the same, plus `VAHL_TRACE_RANGES=start:len,...` (VTR2: only chosen ranges, incl. slow RAM, custom registers, CIA) and watchpoints (VTW2: + PC of the accessing instruction) |
+| `vamiga-shots-regset-899da5d.patch` | 899da5d + the four above | `VAHL_SHOTS` + `VAHL_SHOTS_FRAMES`: the picture of every frame in a window, the run goes on; `VAHL_REGLOG_REGS`: which registers `VAHL_REGLOG` records (from the Alien Breed project's requests) |
 | `vamiga-buslog-899da5d.patch` | 899da5d + headless + trace-ranges + inputs-reglog | `VAHL_BUSLOG` (+ `VAHL_BUSLOG_FRAMES=first:last`): the owner of every DMA slot of every line, CPU waits with their PC, every blit with its registers and end (`arek trace bus`) |
 | `vamiga-inputs-reglog-899da5d.patch` | 899da5d + headless + trace-ranges | `VAHL_INPUTS` (input per frame, frame exact), `VAHL_REGLOG` (DMACON/INTENA/INTREQ/ADKCON/AUDx writes), `VAHL_AUDLOG` (Paula output samples), `VAHL_TRACE_SKIP`, `VAHL_TRACE_FROM_FRAME`, hashed ranges `start:lenh` (from the Alien Breed project) |
 | `vamiga-regtrace.patch` | c59425d | ring buffer of every custom register write (WASM builds) |
@@ -222,6 +223,22 @@ sprites, `c` Copper, `b` blitter. A lowres line with 6 planes reads `462C351C` p
 (Superfrog, frame 8600): 95 blits, 9 940 blitter slots, the CPU waited 29 557 slots - against
 12 663 in the next frame without blits. `trace.read_buslog`, `bus_summary`, `bus_line`; MCP
 `trace_bus`. The patch only records; the run is the same as without it.
+
+## Consecutive pictures, chosen registers
+
+`screenshot save` ends the process, so N pictures used to be N runs, and `wait 1
+frames` between them is not frame exact. With `vamiga-shots-regset-899da5d.patch`:
+
+```sh
+arek trace run build/s.vtr --arm 3 --end 176 --shots build/f --shot-frames 8600:8619 \
+    --reglog build/regs.bin --reglog-regs 0e0-0f6,08e,090,100-104,180-1be --at 30 "mouse1 press left" ...
+arek trace regs build/regs.bin --reg DIWSTRT DIWSTOP BPL1PTL
+```
+
+writes `build/f_008600.png` … one per finished frame (the same cutout as `screenshot
+save`) and every CPU or Copper (`(DMA)`) write to the chosen registers with the beam -
+the bitplane pointers and display window that `spypeek` cannot read back. A run with
+only logs or pictures needs no `--break`.
 
 ## The picture: `--screenshot`, `arek render`, `selftest display`
 

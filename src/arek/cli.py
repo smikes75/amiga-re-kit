@@ -453,15 +453,19 @@ def cmd_trace(a):
     from .headless import trace
     if a.what == 'run':
         from .headless import config
-        if a.arm is None or a.end is None or not (a.brk or a.watch):
-            raise ValueError('trace run needs --arm, --end and --break and/or --watch')
+        if a.arm is None or a.end is None or not (a.brk or a.watch or a.buslog or a.reglog or a.audlog or a.shots):
+            raise ValueError('trace run needs --arm, --end and --break/--watch (or only --buslog/--reglog/--audlog/--shots)')
         conf = config.load(a.conf)
         ranges = [trace.parse_range(r) for r in a.ranges]
         events = [(float(t), cmd) for t, cmd in a.at]
         n = trace.capture(conf, a.file, events, a.arm, a.end, a.brk, a.watch, ranges or None,
                           timeout=a.timeout, inputs=a.inputs, reglog=a.reglog, audlog=a.audlog,
                           skip=a.skip, from_frame=a.from_frame, buslog=a.buslog,
-                          bus_frames=[int(x) for x in a.bus_frames.split(':')] if a.bus_frames else None)
+                          bus_frames=[int(x) for x in a.bus_frames.split(':')] if a.bus_frames else None,
+                          reglog_regs=a.reglog_regs, shots=a.shots,
+                          shot_frames=[int(x) for x in a.shot_frames.split(':')] if a.shot_frames else None)
+        if a.shots:
+            print('%d pictures: %s_<frame>.png' % (len(trace.shot_files(a.shots)), a.shots))
         print('%s: %d records' % (a.file, n))
         return
     if a.what == 'bus':
@@ -747,6 +751,9 @@ def build_parser():
     s.add_argument('--buslog', help='run: chip bus use per line, CPU waits and blits here (buslog patch)')
     s.add_argument('--bus-frames', metavar='FIRST:LAST', help='run: frames the bus log covers (default all)')
     s.add_argument('--frame', type=int, help='bus: the slot map of this frame, one line per raster line')
+    s.add_argument('--reglog-regs', metavar='SPEC', help='run: registers --reglog records, hex, e.g. 0e0-0f6,08e,090,180-1be')
+    s.add_argument('--shots', metavar='PREFIX', help='run: the picture of every frame in --shot-frames (PREFIX_<frame>.png)')
+    s.add_argument('--shot-frames', metavar='FIRST:LAST', help='run: frames --shots covers')
     s.add_argument('--at', nargs=2, action='append', default=[], metavar=('T', 'CMD'), help='input event')
     s.add_argument('--field', nargs='*', default=[], metavar='NAME=ADDR:FMT', help='show: value to read, e.g. px=0xc0599e:h')
     s.add_argument('--every', type=int, default=1)

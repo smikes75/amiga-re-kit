@@ -255,3 +255,43 @@ def test_buslog_reader_and_summary(tmp_path, capsys):
     assert ' 44 .CR12cbS.' in capsys.readouterr().out
     e = trace.env('/t.vtr', buslog=str(p), bus_frames=(10, 20))
     assert e['VAHL_BUSLOG'] == str(p) and e['VAHL_BUSLOG_FRAMES'] == '10:20'
+
+
+# --- vamiga-shots-regset-899da5d.patch: pictures of consecutive frames, chosen registers
+
+def test_env_for_shots_and_register_sets(tmp_path):
+    e = trace.env('/t.vtr', reglog='r.bin', reglog_regs='0e0-0f6,08e', shots=str(tmp_path / 'f'), shot_frames=(100, 104))
+    assert e['VAHL_REGLOG_REGS'] == '0e0-0f6,08e' and e['VAHL_SHOTS_FRAMES'] == '100:104'
+    assert e['VAHL_SHOTS'] == str(tmp_path / 'f')
+    with pytest.raises(trace.TraceError, match='frame window'):
+        trace.env('/t.vtr', shots='x')
+    for k in (100, 101, 103):
+        (tmp_path / ('f_%06d.raw' % k)).write_bytes(b'')
+    (tmp_path / 'f_notes.raw').write_bytes(b'')
+    assert [f for f, _ in trace.shot_files(str(tmp_path / 'f'))] == [100, 101, 103]
+
+
+def test_register_names_beyond_the_audio_set():
+    regs = struct.pack('<4I', 300, (44 << 16) | 9, (0x0e2 << 16) | 0x1234, 0x1000000 | 0x40010) + \
+        struct.pack('<4I', 300, (44 << 16) | 13, (0x08e << 16) | 0x2c81, 0x1000000 | 0x40014)
+    names = [r['name'] for r in trace.read_reglog(regs)]
+    assert names == ['BPL1PTL', 'DIWSTRT']
+
+
+def test_capture_with_only_pictures_needs_no_breakpoint(tmp_path, monkeypatch):
+    from arek.headless import shot
+    seen = {}
+
+    def fake_run(conf, script, capture=False, env=None, timeout=0):
+        seen['script'], seen['env'] = script, env
+        open(env['VAHL_SHOTS'] + '_000300.raw', 'wb').write(bytes(716 * 285 * 3))
+        return ''
+
+    monkeypatch.setattr(shot, 'run_script', fake_run)
+    adf, rom = tmp_path / 'g.adf', tmp_path / 'k.rom'
+    adf.write_bytes(bytes(901120))
+    rom.write_bytes(b'x')
+    conf = {'ROM': str(rom), 'ADF1': str(adf), 'VAHL': '/nonexistent'}
+    n = trace.capture(conf, str(tmp_path / 'r.vtr'), [], 1, 8, shots=str(tmp_path / 'f'), shot_frames=(300, 300))
+    assert n == 0 and 'debugger' not in seen['script']
+    assert (tmp_path / 'f_000300.png').read_bytes()[:4] == b'\x89PNG'
