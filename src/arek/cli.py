@@ -19,7 +19,8 @@
     arek bpstate     --address A --end T --out DIR [--pass N] [--at T CMD] [--region B:L]
     arek trace       run OUT --arm T --end T --break A.. [--watch A..] [--range S:L..] [--at T CMD]
     arek trace       show TRACE [--field NAME=ADDR:FMT ..] [--every N] [--json]
-    arek trace       regs REGLOG [--reg NAME..] | audio AUDLOG
+    arek trace       regs REGLOG [--reg NAME..] | audio AUDLOG | pack IN OUT
+    arek trace       compare ORIGINAL REBUILD [--range S:L..] [--ignore S:L..] [--shift N | --best-shift N] [--regs]
                      (run: --inputs FILE --reglog F --audlog F --skip N --from-frame F)
     arek diff        DIR_A DIR_B [--range LO HI]
     arek render      CAPTURE [--ram F --cop A] [--png OUT] [--compare RAW]
@@ -420,6 +421,31 @@ def cmd_trace(a):
                           skip=a.skip, from_frame=a.from_frame)
         print('%s: %d records' % (a.file, n))
         return
+    if a.what == 'pack':
+        if not a.other:
+            raise ValueError('trace pack IN OUT')
+        n, before, after = trace.pack(a.file, a.other)
+        print('%s: %d records, %d -> %d bytes' % (a.other, n, before, after))
+        return
+    if a.what == 'compare':
+        from . import parity
+        if not a.other:
+            raise ValueError('trace compare ORIGINAL REBUILD')
+        ta, tb = list(trace.records(a.file)), list(trace.records(a.other))
+        rng = [trace.parse_range(r)[:2] for r in a.ranges] or None
+        ign = [trace.parse_range(r)[:2] for r in a.ignore]
+        if a.best_shift:
+            for s, eq, n in parity.best_shift(ta, tb, range(-a.best_shift, a.best_shift + 1), rng, ign):
+                print('shift %+d: %d of %d pairs equal' % (s, eq, n))
+            return
+        r = parity.compare(ta, tb, rng, ign, a.shift, a.regs, a.limit)
+        if a.json:
+            print(json.dumps(r, indent=1, default=str))
+        else:
+            print(parity.format_compare(r))
+        if r['first'] and a.fail:
+            raise RuntimeError('the traces differ')
+        return
     if a.what == 'regs':
         rows = [r for r in trace.read_reglog(a.file) if not a.reg or r['name'] in a.reg]
         if a.json:
@@ -630,14 +656,22 @@ def build_parser():
     s.set_defaults(fn=cmd_diff)
 
     s = sp.add_parser('trace', help='continuous trace of the original (patched VAHeadless)')
-    s.add_argument('what', choices=['run', 'show', 'regs', 'audio'])
+    s.add_argument('what', choices=['run', 'show', 'regs', 'audio', 'compare', 'pack'])
     s.add_argument('file', help='trace file (written by run, read by show); regs: a reglog, audio: an audlog')
+    s.add_argument('other', nargs='?', help='compare: the rebuild trace; pack: the output file')
+    s.add_argument('--ignore', nargs='*', default=[], metavar='START:LEN', help='compare: hex spans to skip')
+    s.add_argument('--shift', type=int, default=0, help='compare: record k against record k+SHIFT of the rebuild')
+    s.add_argument('--best-shift', type=int, metavar='N', help='compare: try shifts -N..N, report equal pairs')
+    s.add_argument('--regs', action='store_true', help='compare: also D0-D7, A0-A7, SR')
+    s.add_argument('--limit', type=int, default=20)
+    s.add_argument('--fail', action='store_true', help='compare: exit 1 when the traces differ')
     s.add_argument('--arm', type=float, help='second at which breakpoints/watchpoints are set')
     s.add_argument('--end', type=float, help='second at which the run stops')
     s.add_argument('--break', dest='brk', type=A, nargs='*', default=[])
     s.add_argument('--watch', type=A, nargs='*', default=[])
     s.add_argument('--range', dest='ranges', nargs='*', default=[], metavar='START:LEN[h]',
-                   help='hex; LENh = only an FNV-1a 64 hash of the range; without it VTR1 = chip RAM')
+                   help='hex; LENh = only an FNV-1a 64 hash of the range; without it VTR1 = chip RAM. '
+                        'compare: only these spans')
     s.add_argument('--inputs', help='run: input per frame (lines of R L U D F S), applied at the first '
                    'breakpoint hit of each frame in the VBL - frame exact')
     s.add_argument('--reglog', help='run: write DMACON/INTENA/INTREQ/ADKCON/AUDx writes here')

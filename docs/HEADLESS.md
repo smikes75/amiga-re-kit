@@ -173,6 +173,36 @@ bytes). Records are read-only snapshots (`spypeek`): a trace never changes
 the run it records, so its frames line up with a plain `arek shot` of the
 same script.
 
+## Long parity: `arek trace compare`, `arek trace pack`
+
+Run the original with `arek trace run --inputs` and let the rebuild's engine write the
+same records for the same input, then compare record k with record k (+ shift):
+
+```sh
+arek trace compare build/orig.vtr build/native.vtr --range c01776:300 --ignore c0197a:2
+arek trace compare build/orig.vtr build/native.vtr --best-shift 3      # out of phase?
+arek trace pack build/orig.vtr build/orig.vtp                          # XOR + zlib, read as before
+```
+
+The report names the first record that differs (hit and frame on both sides) with its
+words, the records that differ and the addresses that differ most often; `--regs` adds
+D0-D7/A0-A7/SR, hashed ranges (`start:lenh`) are compared by hash (or against the bytes the
+other side captured). `arek.parity` is the API, MCP `trace_compare` the tool.
+
+A rebuild writes VTR2 records (little endian) - in C:
+
+```c
+/* one record per breakpoint-equivalent point, e.g. at the VBL handler */
+uint32_t h[24] = { 0x32525456 /* VTR2 */, pc, hit, frame, v, hpos, sr,
+                   d0, d1, d2, d3, d4, d5, d6, d7, a0, a1, a2, a3, a4, a5, a6, a7,
+                   1 /* ranges */ };
+uint32_t r[2] = { start, length };
+fwrite(h, 4, 24, f); fwrite(r, 4, 2, f); fwrite(ram + start, 1, length, f);  /* bytes as in RAM */
+```
+
+(`trace.encode` writes the same from Python.) Registers the engine does not keep can be 0;
+compare without `--regs` then.
+
 ## The picture: `--screenshot`, `arek render`, `selftest display`
 
 `arek bpstate ... --screenshot` also saves the picture at the stop (`stable.raw`,
@@ -212,6 +242,10 @@ arek trace audio build/l1_audio.bin
 - `--audlog FILE`: 12 bytes per sample Paula outputs: frame, beam,
   sample × volume, channel (`trace.read_audlog`).
 - `--skip N`, `--from-frame F`: no records for the first N hits / before frame F.
+- Line k applies in frame OFF + k, OFF = the frame of the first breakpoint hit (measured in the
+  Superfrog Sonnet project); the breakpoint must be hit first in each frame.
+- `wait N frames` after `debugger` / `break at` / `commander` prints `std::exception` in
+  the log; the wait still happens (Alien Breed project).
 
 `arek trace run` refuses a binary that does not know the variables it needs
 (a build without the patch would ignore them, or stop at the first breakpoint

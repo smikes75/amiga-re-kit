@@ -36,9 +36,12 @@ The patch only reads (``spypeek``); a trace never changes the run it records.
 """
 import os
 import struct
+import zlib
 
 VTR1, VTR2, VTW2 = 0x31525456, 0x32525456, 0x32575456
 KINDS = {VTR1: 'VTR1', VTR2: 'VTR2', VTW2: 'VTW2'}
+MAGIC = {name: magic for magic, name in KINDS.items()}
+PACKED = b'VTP1'                        # pack(): u32 count, then zlib of records XORed with the previous one
 HEAD = struct.Struct('<24I')
 
 
@@ -51,10 +54,21 @@ def records(src):
     ``kind, addr, hit, frame, v, h, sr, d[8], a[8], pc, ranges{start: bytes}``,
     ``hashes{start: (length, fnv1a64)}`` for hashed ranges.
     ``pc`` is the accessing instruction for watchpoint records (VTW2), the
-    breakpoint address otherwise."""
+    breakpoint address otherwise. A packed file (``pack``) is read the same way."""
     data = src if isinstance(src, (bytes, bytearray, memoryview)) else open(src, 'rb').read()
+    packed = bytes(data[:4]) == PACKED
+    if packed:
+        data = zlib.decompress(bytes(data[8:]))
     data = memoryview(data)
     pos, n = 0, len(data)
+    prev = {}
+
+    def bytes_of(start, ln, what):
+        raw = bytes(take(ln, what))
+        if packed and (start, ln) in prev:
+            raw = _xor(raw, prev[(start, ln)])
+        prev[(start, ln)] = raw
+        return raw
 
     def take(k, what):
         nonlocal pos
@@ -74,15 +88,64 @@ def records(src):
         if h[0] == VTW2:
             rec['pc'] = struct.unpack('<I', take(4, 'watchpoint pc'))[0]
         if h[0] == VTR1:
-            rec['ranges'][0] = bytes(take(h[23], 'RAM'))
+            rec['ranges'][0] = bytes_of(0, h[23], 'RAM')
         else:
             for _ in range(h[23]):
                 start, ln = struct.unpack('<II', take(8, 'range header'))
                 if ln & 0x80000000:
                     rec['hashes'][start] = (ln & 0x7fffffff, struct.unpack('<Q', take(8, 'range hash'))[0])
                 else:
-                    rec['ranges'][start] = bytes(take(ln, 'range data'))
+                    rec['ranges'][start] = bytes_of(start, ln, 'range data')
         yield rec
+
+
+def _xor(a, b):
+    return (int.from_bytes(a, 'big') ^ int.from_bytes(b, 'big')).to_bytes(len(a), 'big')
+
+
+def encode(rec, prev=None):
+    """One record (a dict as ``records`` yields) as bytes. A native engine that writes the same
+    layout (docs/HEADLESS.md) can be compared with the original by ``arek trace compare``.
+    ``prev``: {(start, length): bytes} of the previous record - XOR against it (``pack``)."""
+    kind = rec.get('kind', 'VTR2')
+    ranges, hashes = rec.get('ranges', {}), rec.get('hashes', {})
+    n = len(ranges[0]) if kind == 'VTR1' else len(ranges) + len(hashes)
+    d, a = list(rec.get('d', [0] * 8)), list(rec.get('a', [0] * 8))
+    out = [HEAD.pack(MAGIC[kind], rec.get('addr', 0), rec.get('hit', 0), rec.get('frame', 0), rec.get('v', 0),
+                     rec.get('h', 0), rec.get('sr', 0), *d, *a, n)]
+    if kind == 'VTW2':
+        out.append(struct.pack('<I', rec.get('pc', 0)))
+
+    def body(start, data):
+        if prev is not None:
+            key = (start, len(data))
+            old, prev[key] = prev.get(key), data
+            return _xor(data, old) if old is not None else data
+        return data
+    if kind == 'VTR1':
+        out.append(body(0, ranges[0]))
+        return b''.join(out)
+    for start, data in ranges.items():
+        out.append(struct.pack('<II', start, len(data)) + body(start, data))
+    for start, (ln, hv) in hashes.items():
+        out.append(struct.pack('<IIQ', start, ln | 0x80000000, hv))
+    return b''.join(out)
+
+
+def pack(src, out):
+    """Write the trace ``src`` packed: every range XORed with the same range of the previous
+    record, the whole zlib-compressed (most RAM does not change between hits). ``records``
+    reads it back unchanged. Returns (records, bytes before, bytes after)."""
+    prev, parts, n = {}, [], 0
+    for rec in records(src):
+        parts.append(encode(rec, prev))
+        n += 1
+    raw = b''.join(parts)
+    blob = PACKED + struct.pack('<I', n) + zlib.compress(raw, 6)
+    with open(out, 'wb') as f:
+        f.write(blob)
+    before = os.path.getsize(src) if not isinstance(src, (bytes, bytearray, memoryview)) else len(src)
+    return n, before, len(blob)
 
 
 def read(rec, addr, fmt='H'):

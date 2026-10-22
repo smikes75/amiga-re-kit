@@ -388,6 +388,25 @@ def trace_records(path: str, fields: dict = None, start: int = 0, limit: int = 1
     return {'total': len(rows), 'start': start, 'records': rows[start:start + limit]}
 
 
+@mcp.tool()
+def trace_compare(original: str, rebuild: str, ranges: list = None, ignore: list = None, shift: int = 0,
+                  best_shift: int = 0, regs: bool = False, limit: int = 20) -> dict:
+    """Long parity: record k of the original trace against record k+shift of the rebuild's
+    (same VTR layout, see arek.headless.trace.encode). ``ranges``/``ignore``: hex "START:LEN".
+    Returns the first differing record with its words, the records that differ and the
+    addresses that differ most often; with ``best_shift`` N the equal pairs for shifts -N..N."""
+    from . import parity
+    from .headless import trace
+    ta, tb = list(trace.records(original)), list(trace.records(rebuild))
+    rng = [trace.parse_range(r)[:2] for r in ranges or []] or None
+    ign = [trace.parse_range(r)[:2] for r in ignore or []]
+    if best_shift:
+        return {'shifts': [{'shift': s, 'equal': e, 'pairs': n}
+                           for s, e, n in parity.best_shift(ta, tb, range(-best_shift, best_shift + 1), rng, ign)]}
+    r = parity.compare(ta, tb, rng, ign, shift, regs, limit)
+    return json.loads(json.dumps(r, default=str))
+
+
 def main():
     mcp.run(transport='stdio')
 

@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 1266 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 1273 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -79,6 +79,7 @@ arek shot    build/shots/title 5 10 --at 3 "joystick2 press 1"
 arek trace   run build/l1.vtr --arm 196 --end 199 --break 0xc01106 --range 0:80000 c00000:80000
 arek trace   show build/l1.vtr --field px=0xc0599e:h  # one row per hit, emulation never stopped
 arek trace   run build/l1.vtr --arm 3 --end 60 --break 0xc01106 --inputs l1.txt --reglog regs.bin  # input per frame
+arek trace   compare build/orig.vtr build/native.vtr --best-shift 3   # long parity: where the rebuild leaves the original
 arek selftest inputs                                   # is this VAHeadless frame exact? (synthetic disk)
 arek --version                                         # version + decoder/recompiler hashes
 ```
@@ -100,6 +101,7 @@ asks for (see `examples/profile.example.json`).
 | `arek.packers.scan` | brute-force scan: signatures (PP20, RNC, ATN!, IMP!, …) + verified blocks | S.W.I.V. |
 | `arek.hunk` | bounded HUNK reader: CODE/DATA/BSS, RELOC32, split streams; `build()` for probes | Superfrog |
 | `arek.copper` | copper list disassembler with custom register names | S.W.I.V. |
+| `arek.parity` | long parity: record by record against the original's trace (first difference, addresses, phase shift); traces packed as XOR + zlib | Alien Breed, Turrican II, Superfrog (Sonnet) |
 | `arek.display` | the frame chip RAM shows: Copper timing, bitplanes, dual playfield, EHB, sprites; vAmiga's colours; 0 differing pixels on vAmiga screenshots (`arek selftest display`) | Superfrog (Sonnet), Alien Breed, Turrican II |
 | `arek.m68k.decoder` | strict 68000 decoder: raises `Unsupported` instead of guessing; accepts only addressing modes the 68000 accepts (checked opcode by opcode against Moira) | Superfrog (fixed ADDA/SUBA/CMPA); LINK/UNLK/PEA/EXG from Alien Breed; memory shifts, CMPM, ABCD/SBCD, MULS/DIVS new |
 | `arek.m68k.disasm` | linear and flow-walk listings straight from the decoder | new |
