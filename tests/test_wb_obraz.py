@@ -30,8 +30,11 @@ def test_version_and_scale():
 
 
 def test_layout_quantum():
-    assert js('[1, 1.25, 1.5, 1.75, 2, 3].map(O.quantum)') == [1, 5, 3, 7, 1, 3]
-    assert js('[O.padded(768, 1.25), O.padded(768, 1.5), O.padded(768, 2)]') == [770, 768, 768]
+    # whole CSS pixels: dpr 2 needs even device pixels (Alien Breed: 617 = 308.5 CSS px painted a row off)
+    assert js('[1, 1.25, 1.5, 1.75, 2, 3].map(O.quantum)') == [1, 5, 3, 7, 2, 3]
+    assert js('[O.padded(768, 1.25), O.padded(768, 1.5), O.padded(768, 2), O.padded(879, 2)]') == [770, 768, 768, 880]
+    dx, dy = js('O.snap(10, 308.5, 2)')
+    assert abs((308.5 + dy) * 2 - round((308.5 + dy) * 2)) < 1e-9 and ((308.5 + dy) * 2) % 2 == 0
     # 208.796875 CSS px at dpr 1.25 = 260.996 device px -> moved to 260 (a multiple of 5)
     dx, dy = js('O.snap(256, 208.796875, 1.25)')
     assert abs(dx) < 1e-9 and abs((208.796875 + dy) * 1.25 - 260) < 1e-9

@@ -19,7 +19,7 @@ import struct
 import zlib
 
 DPRS = (1, 1.25, 1.5, 2)
-WIDTHS = (1280, 1000, 760)
+WIDTHS = (1280, 1001, 760)               # 1001: centring lands on half CSS pixels
 MODES = ('original', 'enhanced')
 DETAILS = ('fine', 'standard', 'strong')
 ZOOMS = (1, 1.5, 2, 2.5, 3, 4, 6, 0)
@@ -65,12 +65,35 @@ def png_rgb(data):
 
 
 def quantum(dpr):
-    """Layout quantum (wb-obraz.js): device pixels between exact positions in Chromium's 1/64 CSS px."""
+    """Layout quantum (wb-obraz.js): the fewest device pixels that are a whole number of CSS px."""
     for q in range(1, 65):
-        u = q * 64 / dpr
+        u = q / dpr
         if abs(u - round(u)) < 1e-6:
             return q
     return 1
+
+
+def _inside(info, w, h, tag, fails):
+    x0, y0 = round(info['origin'][0]), round(info['origin'][1])
+    cw, ch = info.get('content', info['backing'])
+    if x0 < 0 or y0 < 0 or x0 + cw > w or y0 + ch > h:
+        fails.append('%s: content %dx%d at %d,%d outside the screenshot %dx%d (does fit use the height?)'
+                     % (tag, cw, ch, x0, y0, w, h))
+        return False
+    return True
+
+
+def _runs(values):
+    """Lengths of the runs of equal values."""
+    runs, n = [], 1
+    for a, b in zip(values, values[1:]):
+        if a == b:
+            n += 1
+        else:
+            runs.append(n)
+            n = 1
+    runs.append(n)
+    return runs
 
 
 def _crop(rows, x0, y0, w, h):
@@ -116,8 +139,8 @@ def run(url, quick=False, log=print):
                     checks += 1
                 ctx.close()
         log('§5.1-5.3: %d layouts, %d failures' % (checks, len(fails)))
-        for dpr in DPRS:
-            ctx = br.new_context(device_scale_factor=dpr, viewport={'width': 1280, 'height': 1000})
+        for dpr, (vw, vh) in itertools.product(DPRS, ((1280, 1000), (1001, 999)) if not quick else ((1001, 999),)):
+            ctx = br.new_context(device_scale_factor=dpr, viewport={'width': vw, 'height': vh})
             page = ctx.new_page()
             page.goto(url)
             page.wait_for_function('window.wbObrazTest')
@@ -126,42 +149,49 @@ def run(url, quick=False, log=print):
                                      [mode, detail, zoom])
                 page.evaluate("wbObrazTest.fill('grey')")
                 page.wait_for_timeout(450)
-                _, _, rows = png_rgb(page.screenshot())
+                sw, sh, rows = png_rgb(page.screenshot())
+                P, tag = info['P'], 'dpr %s %dx%d %s/%s zoom %s S %d' % (dpr, vw, vh, mode, detail, zoom, info['scale'])
+                checks += 1
+                if not _inside(info, sw, sh, '§5.4 ' + tag, fails):
+                    continue
                 x0, y0 = round(info['origin'][0]), round(info['origin'][1])
                 bw, bh = info.get('content', info['backing'])
                 im = _crop(rows, x0, y0, bw, bh)
-                P, tag = info['P'], 'dpr %s %s/%s zoom %s S %d' % (dpr, mode, detail, zoom, info['scale'])
+                edge = int(48 * dpr) + 3                    # the vignette (inset 42 CSS px)
                 col = [sum(r[bw // 2 + 1]) / 3 for r in im]
-                lo, hi = int(bh * .3), int(bh * .7)
+                lo, hi = edge, bh - edge
                 bad = [y for y in range(lo, hi - P) if abs(col[y] - col[y + P]) > 1.01]
                 yr = lo + 1 if (lo + 1) % P != P - 1 else lo
-                badc = [x for x in range(int(bw * .3), int(bw * .7))
+                badc = [x for x in range(edge, bw - edge - 3)
                         if max(abs(im[yr][x][k] - im[yr][x + 3][k]) for k in range(3)) > 1]
                 if bad or badc:
                     fails.append('§5.4 %s: %d rows, %d columns off the period' % (tag, len(bad), len(badc)))
-                checks += 1
                 # §5.4b: CRT off, a grey per game row - each game row exactly S device rows
                 info = page.evaluate('([m, d, z]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crt: false, blur: 0})',
                                      [mode, detail, zoom])
                 page.evaluate("wbObrazTest.fill('rows')")
                 page.wait_for_timeout(450)
-                _, _, rows = png_rgb(page.screenshot())
+                sw, sh, rows = png_rgb(page.screenshot())
+                checks += 1
+                if not _inside(info, sw, sh, '§5.4b ' + tag, fails):
+                    continue
                 x0, y0 = round(info['origin'][0]), round(info['origin'][1])
                 bw, bh = info.get('content', info['backing'])
                 lum = [rows[y][x0 + bw // 2][0] for y in range(y0, y0 + bh)]
-                runs, n = [], 1
-                for a, b in zip(lum, lum[1:]):
-                    if a == b:
-                        n += 1
-                    else:
-                        runs.append(n)
-                        n = 1
-                runs.append(n)
+                runs = _runs(lum)
                 S = info['scale']
                 if any(r != S for r in runs) or len(runs) != info['H']:
                     odd = [(i, r) for i, r in enumerate(runs) if r != S][:4]
                     fails.append('§5.4b %s: %d game rows seen, rows of other height %s' % (tag, len(runs), odd))
-                checks += 1
+                # and every game column exactly S device columns (a resampled width shows here)
+                page.evaluate("wbObrazTest.fill('cols')")
+                page.wait_for_timeout(100)
+                sw, sh, rows = png_rgb(page.screenshot())
+                lumx = [rows[y0 + bh // 2][x][0] for x in range(x0, x0 + bw)]
+                runs = _runs(lumx)
+                if any(r != S for r in runs) or len(runs) != info['W']:
+                    odd = [(i, r) for i, r in enumerate(runs) if r != S][:4]
+                    fails.append('§5.4b %s: %d game columns seen, columns of other width %s' % (tag, len(runs), odd))
             ctx.close()
         br.close()
     log('§5.4/5.4b done: %d checks, %d failures' % (checks, len(fails)))

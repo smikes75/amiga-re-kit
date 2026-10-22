@@ -79,11 +79,12 @@ const WBOBRAZ = (() => {
         if (Math.abs(real - wish) < .005) return x(wish);
         return x(wish) + ' · ' + (S < Math.round(wish * w0 / w * dpr) ? t.limited : t.actual) + ' ' + x(real);
     }
-    /** Layout quantum (1.3): Chromium keeps positions and sizes in 1/64 CSS px, so only every q-th device pixel
-     *  is exact - q = 1 at dpr 1 and 2, 5 at 1.25, 3 at 1.5. A canvas whose CSS size or position falls between is
-     *  resampled (an edge row blends, a row doubles or goes). Sizes and positions are kept on multiples of q. */
+    /** Layout quantum (1.3): a canvas is drawn exactly only when its CSS position and size are whole CSS pixels
+     *  (Chromium keeps layout in 1/64 CSS px and paints a half CSS px a device row off - Alien Breed, dpr 2).
+     *  q = the fewest device pixels that are a whole number of CSS px: 1 at dpr 1, 5 at 1.25, 3 at 1.5, 2 at 2.
+     *  Sizes and positions are kept on multiples of q; otherwise an edge row blends, a row doubles or goes. */
     function quantum(dpr) {
-        for (let q = 1; q <= 64; q++) { const u = q * 64 / dpr; if (Math.abs(u - Math.round(u)) < 1e-6) return q; }
+        for (let q = 1; q <= 64; q++) { const u = q / dpr; if (Math.abs(u - Math.round(u)) < 1e-6) return q; }
         return 1;
     }
     /** n device pixels rounded up to the layout quantum (the canvas backing; the game draws into its top left W·S x H·S). */
@@ -95,12 +96,20 @@ const WBOBRAZ = (() => {
         return [at(left), at(top)];
     }
     /** Fill the W x H game picture (S device pixels per game pixel, top left of the canvas) with a test pattern
-     *  (§5): 'grey' (#808080, §5.4) or 'rows' - game row y gets the grey 32 + 24 * (y mod 8), so a doubled or
-     *  missing row shows (§5.4b). The padding beyond W*S x H*S stays black. */
+     *  (§5): 'grey' (#808080, §5.4), 'rows' - game row y gets the grey 32 + 24 * (y mod 8), so a doubled or
+     *  missing row shows (§5.4b) - or 'cols', the same per game column. The padding beyond W*S x H*S stays black. */
     function testPattern(c, kind, W, H, S) {
         const g = c.getContext('2d');
         g.fillStyle = '#000'; g.fillRect(0, 0, c.width, c.height);
         if (kind === 'grey') { g.fillStyle = '#808080'; g.fillRect(0, 0, W * S, H * S); return; }
+        if (kind === 'cols') {
+            for (let x = 0; x < W; x++) {
+                const v = 32 + 24 * (x % 8);
+                g.fillStyle = 'rgb(' + v + ',' + v + ',' + v + ')';
+                g.fillRect(x * S, 0, S, H * S);
+            }
+            return;
+        }
         for (let y = 0; y < H; y++) {
             const v = 32 + 24 * (y % 8);
             g.fillStyle = 'rgb(' + v + ',' + v + ',' + v + ')';
