@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,png,dev]"     # or without extras: pip install -e .
-python -m pytest                    # 1213 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 1227 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -53,6 +53,7 @@ arek bytekiller trk1.bin --offset 0x200 -o main.bin
 arek t2         INTR -o intr.bin       # Turrican II three-stage
 arek atn        BLOCK -o out.bin --offset 0x1234   # Atomik (ATN!), block inside an image
 arek hunk info  prog && arek hunk load prog --base 0x20000 -o h   # AmigaDOS executables
+arek hunk split prog --chip prog2 --base 0xc00000 0x20000 -o h    # records split over two files
 
 # 3. read the code - flow graph, not linear
 arek dis    main.bin --base 0x20700 --walk 0x20700     # only reachable code
@@ -71,7 +72,7 @@ arek recomp  main.bin --base 0x20700 --auto 0x21234 --timing \
 arek bpstate --address 0x21234 --end 20 --out cap/before
 arek bpstate --address 0x21300 --end 20 --out cap/after
 arek diff    cap/before cap/after --range 0x60000 0x70000
-arek shot    build/shots/title 5 10 --at 3 "joystick 1 press fire"
+arek shot    build/shots/title 5 10 --at 3 "joystick2 press 1"
 arek trace   run build/l1.vtr --arm 196 --end 199 --break 0xc01106 --range 0:80000 c00000:80000
 arek trace   show build/l1.vtr --field px=0xc0599e:h  # one row per hit, emulation never stopped
 arek --version                                         # version + decoder/recompiler hashes

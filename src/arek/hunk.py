@@ -90,15 +90,27 @@ def records(reader, hunks, bases, first, count, kinds=None):
 
 
 def info(data):
-    """Sizes and record kinds without relocating (for ``arek hunk info``)."""
+    """Sizes and record kinds without relocating (for ``arek hunk info``).
+
+    A file that ends cleanly after fewer records than the header declares is reported,
+    not refused: ``missing`` lists the hunks whose records are not in it (a game loader
+    may keep them in a second stream - ``split``)."""
     reader = Reader(data)
     sizes = header(reader)
     hunks = [bytearray(s) for s in sizes]
     kinds = []
-    records(reader, hunks, [0] * len(sizes), 0, len(sizes), kinds)
-    return {'hunks': [{'index': i, 'kind': k, 'size': s}
-                      for i, (k, s) in enumerate(zip(kinds, sizes))],
-            'trailing_bytes': len(data) - reader.pos}
+    for index in range(len(sizes)):
+        if reader.pos == len(data):
+            break
+        records(reader, hunks, [0] * len(sizes), index, 1, kinds)
+    out = {'hunks': [{'index': i, 'kind': kinds[i] if i < len(kinds) else None, 'size': s}
+                     for i, s in enumerate(sizes)],
+           'trailing_bytes': len(data) - reader.pos}
+    if len(kinds) < len(sizes):
+        out['missing'] = list(range(len(kinds), len(sizes)))
+        out['note'] = ('records of hunks %d-%d are not in this file; a second stream? '
+                       '(arek hunk split)' % (len(kinds), len(sizes) - 1))
+    return out
 
 
 def load(data, bases):

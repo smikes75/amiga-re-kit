@@ -20,12 +20,42 @@ def test_config_load_and_paths(tmp_path):
 
 def test_shot_script():
     s = shot.build_script({'ROM': '/r', 'MACHINE': 'A500_OCS_1MB'}, '/a.adf',
-                          [(3, 'joystick 1 press fire'), (1, 'keyboard press 0x40')], 5, '/o.png')
+                          [(3, 'joystick2 press 1'), (1, 'keyboard press 0x40')], 5, '/o.png')
     lines = s.splitlines()
     assert lines[0] == 'regression setup A500_OCS_1MB "/r"'
     assert 'denise set FRAME_SKIPPING 0' in lines
     assert lines[3:] == ['regression run "/a.adf"', 'wait 1', 'keyboard press 0x40',
-                         'wait 2', 'joystick 1 press fire', 'wait 2', 'screenshot save /o.png']
+                         'wait 2', 'joystick2 press 1', 'wait 2', 'screenshot save /o.png']
+
+
+@pytest.mark.parametrize('cmd', ['joystick 1 press fire', 'mouse 1 press left', 'joystick2 press fire',
+                                 'joystick1 unpress fire'])
+def test_shot_script_refuses_input_spellings_retroshell_rejects(cmd):
+    with pytest.raises(shot.HeadlessError, match='joystick2 press 1|a number'):
+        shot.build_script({'ROM': '/r'}, '/a.adf', [(1, cmd)], 2, '/o.png')
+
+
+@pytest.mark.parametrize('cmd', ['joystick2 press 1', 'joystick2 unpress 1', 'joystick2 pull left',
+                                 'joystick2 release x', 'mouse1 press left', 'keyboard press 64'])
+def test_shot_script_takes_the_measured_spellings(cmd):
+    assert cmd in shot.build_script({'ROM': '/r'}, '/a.adf', [(1, cmd)], 2, '/o.png')
+
+
+def test_missing_disk_names_the_resolved_path(tmp_path):
+    conf = tmp_path / 'sub' / 'x.conf'
+    conf.parent.mkdir()
+    conf.write_text('ADF1 = ADF/game.adf\n')
+    c = config.load(conf)
+    with pytest.raises(config.ConfigError, match='sub/ADF/game.adf.*directory of the conf file'):
+        shot.check_disk(c, c['ADF1'])
+
+
+def test_a_hanging_emulator_ends_with_a_clear_error(tmp_path):
+    vahl = tmp_path / 'VAHeadless'
+    vahl.write_text('#!/bin/sh\nsleep 5\n')
+    vahl.chmod(0o755)
+    with pytest.raises(shot.HeadlessError, match='did not finish within 1 s'):
+        shot.run_script({'VAHL': str(vahl)}, 'shutdown\n', timeout=1)
 
 
 RCPU = '''

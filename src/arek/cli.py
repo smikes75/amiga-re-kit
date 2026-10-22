@@ -7,7 +7,7 @@
     arek bytekiller  FILE -o OUT [--format b|a] [--offset N]
     arek t2          FILE -o OUT
     arek atn         FILE -o OUT [--offset N]
-    arek hunk        info|load  FILE ...
+    arek hunk        info|load|split  FILE ... [--chip FILE2]
     arek dis         FILE --base B [--lo --hi | --walk START] [--syms J] [--dcw] [--cycles]
     arek walk        FILE --base B --start S [--lo --hi] [--inline R:SPEC]
     arek hwscan      FILE --base B --roots A.. [--abase An=ADDR] [--chip SIZE] [--inline R:SPEC] [--json]
@@ -154,6 +154,11 @@ def cmd_hunk(a):
     data = rd(a.file)
     if a.what == 'info':
         print(json.dumps(hunk.info(data), indent=2))
+    elif a.what == 'split':
+        if not a.chip or len(a.base) != 2:
+            raise ValueError('hunk split needs --chip FILE and --base SLOW_BASE CHIP_BASE')
+        for i, (b, body) in enumerate(hunk.split(data, rd(a.chip), a.base[0], a.base[1], a.n_slow)):
+            wr('%s_%d_%06x.bin' % (a.out, i, b), body)
     else:
         bases = a.base if len(a.base) > 1 else a.base[0]
         for i, (b, body) in enumerate(hunk.load(data, bases)):
@@ -278,7 +283,7 @@ def cmd_shot(a):
     events = [(int(t), cmd) for t, cmd in a.at or []]
     adf = conf.get('ADF%d' % a.adf)
     for t in a.times:
-        print(shot.shot(conf, a.prefix, t, events, adf))
+        print(shot.shot(conf, a.prefix, t, events, adf, timeout=a.timeout))
 
 
 def cmd_bpstate(a):
@@ -288,7 +293,7 @@ def cmd_bpstate(a):
     regions = [tuple(A(x) for x in r.split(':')) for r in a.region or []]
     meta = bpstate.capture(conf, a.out, a.address, a.npass, a.end, events=events,
                            t_set=a.set_at, ram_len=a.ram_len, regions=regions,
-                           adf=conf.get('ADF%d' % a.adf))
+                           adf=conf.get('ADF%d' % a.adf), timeout=a.timeout)
     print('%s/cpu.json  pc=%06x  frame=%s' % (a.out, meta['pc'], meta['beam']['frame']))
 
 
@@ -313,8 +318,28 @@ def cmd_init(a):
         conf.write_text(config.TEMPLATE)
     gi = root / '.gitignore'
     if not gi.exists():
-        gi.write_text('# never commit copyrighted material\n*.adf\n*.rom\nroms/\ndisks/\nbin/\nbuild/\nlocal.conf\n')
+        gi.write_text(GITIGNORE)
     print('project skeleton in %s - edit local.conf (ROM, ADF1, VAHL)' % root)
+
+
+GITIGNORE = '''# never commit copyrighted material (both cases: git can be case-sensitive)
+*.adf
+*.ADF
+*.adz
+*.ADZ
+*.dms
+*.DMS
+*.ipf
+*.IPF
+*.rom
+*.ROM
+roms/
+disks/
+bin/
+build/
+local.conf
+.venv/
+'''
 
 
 def cmd_trace(a):
@@ -326,7 +351,8 @@ def cmd_trace(a):
         conf = config.load(a.conf)
         ranges = [tuple(int(x, 16) for x in r.split(':')) for r in a.ranges]
         events = [(float(t), cmd) for t, cmd in a.at]
-        n = trace.capture(conf, a.file, events, a.arm, a.end, a.brk, a.watch, ranges or None)
+        n = trace.capture(conf, a.file, events, a.arm, a.end, a.brk, a.watch, ranges or None,
+                          timeout=a.timeout)
         print('%s: %d records' % (a.file, n))
         return
     fields = {}
@@ -385,10 +411,13 @@ def build_parser():
     s.add_argument('--offset', type=A, default=0, help='block offset inside an image')
     s.set_defaults(fn=cmd_atn)
 
-    s = sp.add_parser('hunk', help='HUNK executables: info or relocate+dump')
-    s.add_argument('what', choices=['info', 'load'])
+    s = sp.add_parser('hunk', help='HUNK executables: info, relocate+dump, or two streams (split)')
+    s.add_argument('what', choices=['info', 'load', 'split'])
     s.add_argument('file')
-    s.add_argument('--base', type=A, nargs='*', default=[0], help='one base (contiguous) or one per hunk')
+    s.add_argument('--base', type=A, nargs='*', default=[0],
+                   help='load: one base (contiguous) or one per hunk; split: SLOW_BASE CHIP_BASE')
+    s.add_argument('--chip', help='split: the file with the records of the remaining hunks')
+    s.add_argument('--n-slow', type=int, default=2, help='split: hunks whose records are in FILE')
     s.add_argument('-o', '--out', default='hunk')
     s.set_defaults(fn=cmd_hunk)
 
@@ -486,6 +515,7 @@ def build_parser():
     s.add_argument('--at', nargs=2, action='append', metavar=('T', 'CMD'))
     s.add_argument('--adf', type=int, default=1)
     s.add_argument('--conf', default='local.conf')
+    s.add_argument('--timeout', type=int, default=600, help='seconds of wall time before giving up')
     s.set_defaults(fn=cmd_shot)
 
     s = sp.add_parser('bpstate', help='capture CPU + RAM at a breakpoint')
@@ -498,6 +528,7 @@ def build_parser():
     s.add_argument('--region', action='append', metavar='BASE:LENGTH')
     s.add_argument('--adf', type=int, default=1)
     s.add_argument('--conf', default='local.conf')
+    s.add_argument('--timeout', type=int, default=900, help='seconds of wall time before giving up')
     s.add_argument('--out', required=True)
     s.set_defaults(fn=cmd_bpstate)
 
@@ -520,6 +551,7 @@ def build_parser():
     s.add_argument('--every', type=int, default=1)
     s.add_argument('--json', action='store_true')
     s.add_argument('--conf', default='local.conf')
+    s.add_argument('--timeout', type=int, default=1200, help='run: seconds of wall time before giving up')
     s.set_defaults(fn=cmd_trace)
 
     s = sp.add_parser('init', help='create a project skeleton with local.conf')

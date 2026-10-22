@@ -43,7 +43,8 @@ def test_cli_roundtrip(tmp_path, capsys, rnd, code):
     assert cli.main(['init', str(tmp_path / 'proj')]) == 0
     assert (tmp_path / 'proj' / 'local.conf').exists()
     assert cli.main(['shot', 'x', '1', '--conf', str(tmp_path / 'proj' / 'local.conf')]) == 1
-    assert 'no ADF' in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert 'ADF does not exist' in err and 'directory of the conf file' in err
 
 
 def test_mcp_tools(tmp_path, rnd, code):

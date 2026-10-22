@@ -282,25 +282,29 @@ def copper(path: str, base: str = '0', offset: str = '0', limit: int = 512) -> s
 
 # ------------------------------------------------------------------ emulator
 @mcp.tool()
-def headless_shot(conf: str, prefix: str, seconds: int, events: list = None) -> str:
+def headless_shot(conf: str, prefix: str, seconds: int, events: list = None, timeout: int = 600) -> str:
     """Boot the ADF from local.conf in the patched headless vAmiga, run
     ``seconds`` (warp), return the PNG path. ``events``: [[t, "retroshell cmd"]]
-    such as joystick presses."""
+    such as [3, "joystick2 press 1"], [4, "joystick2 unpress 1"], [5, "mouse1 press left"].
+    ``timeout``: seconds of wall time."""
     from .headless import config, shot
     c = config.load(conf)
     ev = [(int(t), cmd) for t, cmd in events or []]
-    return shot.shot(c, prefix, seconds, ev)
+    return shot.shot(c, prefix, seconds, ev, timeout=timeout)
 
 
 @mcp.tool()
 def headless_bpstate(conf: str, out_dir: str, address: str, end_seconds: int,
-                     skip: int = 0, events: list = None, ram_len: int = 524288) -> dict:
+                     skip: int = 0, events: list = None, ram_len: int = 524288,
+                     timeout: int = 900) -> dict:
     """Run to breakpoint ``address`` (the skip+1-th hit) and capture CPU
-    registers, Agnus beam and chip RAM into ``out_dir`` (cpu.json + ram bin)."""
+    registers, Agnus beam and chip RAM into ``out_dir`` (cpu.json + ram bin).
+    ``events`` as in headless_shot; ``timeout``: seconds of wall time."""
     from .headless import config, bpstate
     c = config.load(conf)
     ev = [(int(t), cmd) for t, cmd in events or []]
-    meta = bpstate.capture(c, out_dir, _addr(address), skip, end_seconds, events=ev, ram_len=ram_len)
+    meta = bpstate.capture(c, out_dir, _addr(address), skip, end_seconds, events=ev, ram_len=ram_len,
+                           timeout=timeout)
     return {k: v for k, v in meta.items() if k not in ('regions',)}
 
 

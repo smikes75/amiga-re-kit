@@ -110,10 +110,10 @@ def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None,
     arm the trace at ``t_arm`` and stop at ``t_end``. Writes ``out`` (the
     trace), ``out + '.retrosh'`` (the script) and ``out + '.log'``; returns
     the number of records."""
-    from . import config, shot
+    from . import shot
     if not breaks and not watches:
         raise TraceError('nothing to trace: give breakpoints and/or watchpoints')
-    adf = adf or config.require(conf, 'ADF1')['ADF1']
+    adf = shot.check_disk(conf, adf or conf.get('ADF1'))
     if os.path.exists(out):
         os.unlink(out)
     script = shot.build_script(conf, adf, list(events) + arm_events(t_arm, breaks, watches),

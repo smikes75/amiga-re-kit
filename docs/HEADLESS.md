@@ -41,6 +41,17 @@ track 80; reads of sector 1 succeed; the same disk and loader work on
 899da5d). The ROM `trackdisk.device` path was not affected in that test.
 Which upstream commit between the two fixed it is not known. Use 899da5d.
 
+**Which build do I have?** Both commits print `vAmiga Headless v5.0b2`; only
+the build date in the banner differs. Measure it instead: break right after
+the game's own loader returns (`arek bpstate --address <return>`) and compare
+the loaded bytes with the sectors of the ADF. A c59425d build shows sector 0
+of each track as zeros (measured again in the Superfrog Sonnet project: 10 of
+11 sectors, the 899da5d build 11 of 11). Record the sha256 of the binary
+(`cpu.json` → `assets.VAHL`) next to the result.
+
+A run that hangs ends after `--timeout` seconds of wall time (`shot` 600,
+`bpstate` 900, `trace run` 1200) with an error naming the binary.
+
 Optional patches on top of the headless one:
 
 | patch | base | adds |
@@ -90,6 +101,18 @@ Other masters may need the three hunks transplanted by hand; they are small.
   512 KB chip + 512 KB slow, no turbo. Other profiles: `A1000_OCS_1MB`,
   `A500_ECS_1MB`, `A500_PLUS_1MB`, `A1200_2MB`. Memory can be changed after
   setup (`mem set CHIP_RAM 1024`).
+- Input (measured on 5.0b2; the kit refuses the spaced forms before the run):
+
+  | command | does |
+  |---|---|
+  | `joystick2 press 1` / `joystick2 unpress 1` | fire button down / up (button number; port 2 = the game port, port 1 = the mouse port) |
+  | `joystick2 pull left\|right\|up\|down` / `joystick2 release x\|y` | push / centre an axis |
+  | `mouse1 press left\|right` | a mouse button |
+  | `keyboard press 64` | a raw Amiga keycode (`$40` = space) |
+
+  `joystick 1 press fire` is a syntax error, `joystick2 press fire` "not a
+  number"; `mouse1` and `keyboard` take no `release`. After an error the
+  script stops (see the first point).
 - In warp mode Denise swaps its frame buffer only every 17th frame
   (`DENISE_FRAME_SKIPPING = 16`); a screenshot could be 16 frames older than
   the RAM dump. The kit always sets `denise set FRAME_SKIPPING 0`.
@@ -101,7 +124,7 @@ Other masters may need the three hunks transplanted by hand; they are small.
 
 ```
 arek bpstate --address 0x21234 --pass 0 --end 20 --out cap/draw_in \
-             --at 3 "joystick 1 press fire" --region 0xc00000:0x80000
+             --at 3 "joystick2 press 1" --region 0xc00000:0x80000
 ```
 
 writes `cap/draw_in/capture_21234_0.retrosh` (the script), `onstop_*.retrosh`
@@ -112,7 +135,7 @@ writes `cap/draw_in/capture_21234_0.retrosh` (the script), `onstop_*.retrosh`
 ```json
 {"d": [...], "a": [...], "pc": 136756, "ccr": {"x":0,"n":1,"z":0,"v":0,"c":0},
  "beam": {"clock": 123456789, "frame": 1003, "position": [100, 20]},
- "machine": "A500_OCS_1MB", "events": [[3, "joystick 1 press fire"]],
+ "machine": "A500_OCS_1MB", "events": [[3, "joystick2 press 1"]],
  "breakpoint": 136756, "skip": 0, "ram_sha256": "...", "assets": {"ROM": "...", "ADF": "..."}}
 ```
 

@@ -37,6 +37,35 @@ def test_hunk_split_streams():
     out = hunk.split(a[:cut], a[cut:], 0xc00000, 0x10000)
     assert [b for b, _ in out] == [0xc00000, 0xc00004, 0x10000, 0x10004]
     assert out[2][1] == b'\x60\xfe\x4e\x71'
+    # the first stream alone: info reports the two present hunks and names the missing ones
+    i = hunk.info(a[:cut])
+    assert [h['kind'] for h in i['hunks']] == ['CODE', 'DATA', None, None]
+    assert i['missing'] == [2, 3] and 'hunk split' in i['note'] and i['trailing_bytes'] == 0
+    assert 'missing' not in hunk.info(a)
+    with pytest.raises(hunk.FormatError):
+        hunk.info(a[:cut - 2])                        # cut inside a record: still refused
+
+
+def test_hunk_split_cli(tmp_path):
+    from arek import cli
+    a = hunk.build([('CODE', b'\x4e\x75\x4e\x75'), ('DATA', b'\x00\x01\x02\x03'),
+                    ('CODE', b'\x60\xfe\x4e\x71'), ('BSS', bytes(16))])
+    reader = hunk.Reader(a)
+    hunk.header(reader)
+    hunk.records(reader, [bytearray(4) for _ in range(4)], [0] * 4, 0, 2)
+    (tmp_path / 'main').write_bytes(a[:reader.pos])
+    (tmp_path / 'chip').write_bytes(a[reader.pos:])
+    out = str(tmp_path / 'h')
+    assert cli.main(['hunk', 'split', str(tmp_path / 'main'), '--chip', str(tmp_path / 'chip'),
+                     '--base', '0xc00000', '0x10000', '-o', out]) == 0
+    assert (tmp_path / 'h_2_010000.bin').read_bytes() == b'\x60\xfe\x4e\x71'
+
+
+def test_init_gitignore_covers_both_cases(tmp_path):
+    from arek import cli
+    assert cli.main(['init', str(tmp_path / 'p')]) == 0
+    gi = (tmp_path / 'p' / '.gitignore').read_text().split()
+    assert {'*.adf', '*.ADF', '*.rom', '*.ROM', 'local.conf'} <= set(gi)
 
 
 def _disk():

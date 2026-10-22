@@ -22,13 +22,13 @@ from . import config, shot
 
 
 def state(conf, events, addr, npass, t_end, t_set=0, ram_len=524288, keep=None,
-          setup=(), after_break=(), ram_regions=(), screenshot=False, adf=None):
+          setup=(), after_break=(), ram_regions=(), screenshot=False, adf=None, timeout=900):
     """Run to breakpoint ``addr`` (skipping ``npass`` hits) and capture.
 
     Returns ``(state_dict or None, log_text)``. ``state_dict`` has ``d``,
     ``a``, ``pc``, ``ccr``, ``beam``, ``ram`` (bytes from 0), ``regions``.
     """
-    adf = adf or conf.get('ADF1')
+    adf = shot.check_disk(conf, adf or conf.get('ADF1'))
     config.require(conf, 'ROM', 'VAHL')
     tmp = keep or tempfile.mkdtemp(prefix='arek-bp')
     os.makedirs(tmp, exist_ok=True)
@@ -51,7 +51,7 @@ def state(conf, events, addr, npass, t_end, t_set=0, ram_len=524288, keep=None,
     Path(tmp, 'capture_%x_%d.retrosh' % (addr, npass)).write_text(script)
     if os.path.exists(dump):
         os.unlink(dump)
-    out = shot.run_script(conf, script, capture=True, env={'VAHL_ONSTOP': onstop}, timeout=900)
+    out = shot.run_script(conf, script, capture=True, env={'VAHL_ONSTOP': onstop}, timeout=timeout)
     if not os.path.exists(dump):
         return None, out
     st = parse_regs(out)
@@ -97,7 +97,7 @@ def parse_beam(out):
 
 
 def capture(conf, folder, addr, npass, t_end, events=(), t_set=0, ram_len=524288,
-            regions=(), setup=(), adf=None):
+            regions=(), setup=(), adf=None, timeout=900):
     """``state`` + write ``cpu.json``, ``capture.log`` and the RAM dumps into
     a fresh ``folder``. Returns the metadata dict."""
     folder = Path(folder).resolve()
@@ -105,7 +105,8 @@ def capture(conf, folder, addr, npass, t_end, events=(), t_set=0, ram_len=524288
         raise FileExistsError('choose a new output directory for each capture: %s' % folder)
     folder.mkdir(parents=True)
     st, log = state(conf, list(events), addr, npass, t_end, t_set=t_set, ram_len=ram_len,
-                    keep=str(folder), ram_regions=regions, setup=setup, adf=adf)
+                    keep=str(folder), ram_regions=regions, setup=setup, adf=adf,
+                    timeout=timeout)
     (folder / 'capture.log').write_text(log)
     if st is None or st['pc'] != addr:
         raise RuntimeError('breakpoint not captured; see %s' % (folder / 'capture.log'))
