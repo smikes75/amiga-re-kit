@@ -23,6 +23,12 @@ Needs a VAHeadless built with one of the trace patches:
     first N hits / before frame F. A range ``start:lenh`` records an FNV-1a 64 hash
     instead of the bytes (``rec['hashes']``).
 
+``vamiga-buslog-899da5d.patch`` (on top of inputs-reglog)
+    ``VAHL_BUSLOG=<file>``, ``VAHL_BUSLOG_FRAMES=first:last``: who used the chip bus in every DMA
+    slot of every line, the cycles the CPU waited for it (with its PC) and every blit
+    (``read_buslog``, ``bus_summary``, ``bus_line``; ``arek trace bus``). The ground truth for a
+    model of bus contention.
+
 Record layout (little endian, as the host writes it)::
 
     24 x u32: magic, address, hit counter, Agnus frame, v, h, SR,
@@ -195,7 +201,7 @@ def check_inputs(path):
 
 
 def env(path, ranges=None, length=None, inputs=None, reglog=None, audlog=None, skip=None,
-        from_frame=None):
+        from_frame=None, buslog=None, bus_frames=None):
     """Environment for a traced run of the patched VAHeadless."""
     e = {'VAHL_TRACE': str(path)}
     if ranges:
@@ -213,7 +219,82 @@ def env(path, ranges=None, length=None, inputs=None, reglog=None, audlog=None, s
         e['VAHL_TRACE_SKIP'] = str(skip)
     if from_frame is not None:
         e['VAHL_TRACE_FROM_FRAME'] = str(from_frame)
+    if buslog:
+        e['VAHL_BUSLOG'] = os.path.abspath(buslog)
+        if bus_frames:
+            e['VAHL_BUSLOG_FRAMES'] = '%d:%d' % tuple(bus_frames)
     return e
+
+
+# vamiga-buslog-899da5d.patch: BusOwner of vAmiga 899da5d
+BUS_OWNERS = ['none', 'CPU', 'refresh', 'disk', 'aud0', 'aud1', 'aud2', 'aud3'] + \
+    ['bpl%d' % k for k in range(1, 9)] + ['spr%d' % k for k in range(8)] + ['copper', 'blitter', 'blocked']
+BUS_LETTER = '.CRDAAAA' + '12345678' + 'SSSSSSSS' + 'cbx'
+
+
+def read_buslog(src):
+    """A ``VAHL_BUSLOG`` file: ``{'lines': {(frame, v): owners}, 'waits': [...], 'blits': [...]}``.
+    owners: one BusOwner byte per DMA slot (``BUS_OWNERS``); a wait: frame, v, h, slots, pc, owner
+    (of the slot the CPU asked for); a blit: frame, v, h, bltcon0/1, size, pointers, modulos,
+    and ``end`` (frame, v, h) when the blit ended inside the log."""
+    data = src if isinstance(src, (bytes, bytearray)) else open(src, 'rb').read()
+    pos, n, lines, waits, blits = 0, len(data), {}, [], []
+    open_blit = None
+    while pos < n:
+        tag = data[pos:pos + 1]
+        try:
+            if tag == b'L':
+                frame, v, cnt = struct.unpack_from('<IHH', data, pos + 1)
+                lines[(frame, v)] = bytes(data[pos + 9:pos + 9 + cnt])
+                pos += 9 + cnt
+            elif tag == b'W':
+                frame, v, h, slots, pc, owner = struct.unpack_from('<IHHHIb', data, pos + 1)
+                waits.append({'frame': frame, 'v': v, 'h': h, 'slots': slots, 'pc': pc,
+                              'owner': BUS_OWNERS[owner] if 0 <= owner < len(BUS_OWNERS) else owner})
+                pos += 16
+            elif tag == b'B':
+                f = struct.unpack_from('<IHHHHHHIIIIhhhh', data, pos + 1)
+                open_blit = {'frame': f[0], 'v': f[1], 'h': f[2], 'bltcon0': f[3], 'bltcon1': f[4],
+                             'width': f[5], 'height': f[6], 'pt': list(f[7:11]), 'mod': list(f[11:15]), 'end': None}
+                blits.append(open_blit)
+                pos += 41
+            elif tag == b'E':
+                frame, v, h = struct.unpack_from('<IHH', data, pos + 1)
+                if open_blit is not None and open_blit['end'] is None:
+                    open_blit['end'] = (frame, v, h)
+                pos += 9
+            else:
+                raise TraceError('buslog: unknown record %r at offset %d' % (tag, pos))
+        except struct.error:
+            raise TraceError('buslog: truncated record at offset %d' % pos) from None
+    return {'lines': lines, 'waits': waits, 'blits': blits}
+
+
+def bus_summary(log):
+    """Per frame: DMA slots by owner (grouped: CPU, refresh, disk, audio, bitplane, sprite, copper,
+    blitter, free), CPU waits (count, slots) and blits."""
+    group = ['free', 'CPU', 'refresh', 'disk'] + ['audio'] * 4 + ['bitplane'] * 8 + ['sprite'] * 8 + \
+        ['copper', 'blitter', 'blocked']
+    out = {}
+    for (frame, v), owners in log['lines'].items():
+        row = out.setdefault(frame, {'lines': 0, 'slots': {}, 'cpu_waits': 0, 'cpu_wait_slots': 0, 'blits': 0})
+        row['lines'] += 1
+        for o in owners:
+            g = group[o] if 0 <= o < len(group) else str(o)
+            row['slots'][g] = row['slots'].get(g, 0) + 1
+    for w in log['waits']:
+        row = out.setdefault(w['frame'], {'lines': 0, 'slots': {}, 'cpu_waits': 0, 'cpu_wait_slots': 0, 'blits': 0})
+        row['cpu_waits'] += 1
+        row['cpu_wait_slots'] += w['slots']
+    for b in log['blits']:
+        out.setdefault(b['frame'], {'lines': 0, 'slots': {}, 'cpu_waits': 0, 'cpu_wait_slots': 0, 'blits': 0})['blits'] += 1
+    return dict(sorted(out.items()))
+
+
+def bus_line(owners):
+    """A line of the bus map as letters: . free, C CPU, R refresh, D disk, A audio, 1-8 bitplanes,
+    S sprites, c Copper, b blitter, x blocked."""
+    return ''.join(BUS_LETTER[o] if 0 <= o < len(BUS_LETTER) else '?' for o in owners)
 
 
 REG_NAMES = {0x096: 'DMACON', 0x09a: 'INTENA', 0x09c: 'INTREQ', 0x09e: 'ADKCON'}
@@ -259,7 +340,8 @@ def arm_events(t, breaks=(), watches=()):
 PATCH_OF = {'VAHL_TRACE': 'vamiga-trace*.patch', 'VAHL_TRACE_RANGES': 'vamiga-trace-ranges-899da5d.patch',
             'VAHL_INPUTS': 'vamiga-inputs-reglog-899da5d.patch', 'VAHL_REGLOG': 'vamiga-inputs-reglog-899da5d.patch',
             'VAHL_AUDLOG': 'vamiga-inputs-reglog-899da5d.patch', 'VAHL_TRACE_SKIP': 'vamiga-inputs-reglog-899da5d.patch',
-            'VAHL_TRACE_FROM_FRAME': 'vamiga-inputs-reglog-899da5d.patch'}
+            'VAHL_TRACE_FROM_FRAME': 'vamiga-inputs-reglog-899da5d.patch',
+            'VAHL_BUSLOG': 'vamiga-buslog-899da5d.patch', 'VAHL_BUSLOG_FRAMES': 'vamiga-buslog-899da5d.patch'}
 
 
 def require_patch(vahl, variables):
@@ -274,7 +356,8 @@ def require_patch(vahl, variables):
 
 
 def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None, adf=None,
-            timeout=1200, setup=(), inputs=None, reglog=None, audlog=None, skip=None, from_frame=None):
+            timeout=1200, setup=(), inputs=None, reglog=None, audlog=None, skip=None, from_frame=None,
+            buslog=None, bus_frames=None):
     """Run the original with ``events`` (``[(second, retroshell command)]``),
     arm the trace at ``t_arm`` and stop at ``t_end``. Writes ``out`` (the
     trace), ``out + '.retrosh'`` (the script) and ``out + '.log'``; returns
@@ -283,7 +366,8 @@ def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None,
     if not breaks and not watches:
         raise TraceError('nothing to trace: give breakpoints and/or watchpoints')
     adf = shot.check_disk(conf, adf or conf.get('ADF1'))
-    e = env(out, ranges, inputs=inputs, reglog=reglog, audlog=audlog, skip=skip, from_frame=from_frame)
+    e = env(out, ranges, inputs=inputs, reglog=reglog, audlog=audlog, skip=skip, from_frame=from_frame,
+            buslog=buslog, bus_frames=bus_frames)
     needed = [k for k in e if k != 'VAHL_TRACE_LEN']
     if any(len(r) > 2 and r[2] for r in ranges or ()):
         needed.append('VAHL_TRACE_SKIP')            # hashed ranges came with the inputs/reglog patch
@@ -299,7 +383,9 @@ def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None,
     with open(out + '.log', 'w') as f:
         f.write(log)
     if not os.path.exists(out):
-        raise TraceError('no trace written - is VAHL a build with a trace patch? (see %s.log)' % out)
+        if not buslog:
+            raise TraceError('no trace written - is VAHL a build with a trace patch? (see %s.log)' % out)
+        open(out, 'wb').close()                      # only the bus was wanted; no breakpoint was hit
     return sum(1 for _ in records(out))
 
 

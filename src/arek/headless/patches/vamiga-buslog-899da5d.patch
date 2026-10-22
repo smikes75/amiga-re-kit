@@ -1,0 +1,151 @@
+diff --git a/Core/Components/Agnus/Agnus.cpp b/Core/Components/Agnus/Agnus.cpp
+index ff5ca1f..8dd9c18 100644
+--- a/Core/Components/Agnus/Agnus.cpp
++++ b/Core/Components/Agnus/Agnus.cpp
+@@ -9,6 +9,7 @@
+ 
+ #include "vaconfig.h"
+ #include "Agnus.h"
++#include "VahlBus.h"
+ #include "Emulator.h"
+ 
+ namespace vamiga {
+@@ -512,6 +513,7 @@ Agnus::executeUntilBusIsFree()
+ 
+         // This variable counts the number of DMA cycles the CPU will be suspended
+         DMACycle delay = 0;
++        const long long askFrame = pos.frame; const long askV = pos.v, askH = pos.h; const int askOwner = int(busOwner[pos.h]);
+ 
+         // Execute Agnus until the bus is free
+         do {
+@@ -523,6 +525,7 @@ Agnus::executeUntilBusIsFree()
+ 
+         // Clear the BLS line (Blitter slow down)
+         bls = false;
++        vahlbus::wait(askFrame, askV, askH, long(delay), u32(cpu.getPC0() & 0xffffff), askOwner);
+ 
+         // Add wait states to the CPU
+         cpu.addWaitStates(DMA_CYCLES(delay));
+@@ -879,6 +882,7 @@ Agnus::eolHandler()
+ 
+     // Pass control to the DMA debugger
+     dmaDebugger.eolHandler();
++    vahlbus::line(pos.frame, pos.v, busOwner, long(sizeof busOwner));
+ 
+     // Move to the next line
+     pos.eol();
+diff --git a/Core/Components/Agnus/Blitter/Blitter.cpp b/Core/Components/Agnus/Blitter/Blitter.cpp
+index 388c44c..4c059ce 100644
+--- a/Core/Components/Agnus/Blitter/Blitter.cpp
++++ b/Core/Components/Agnus/Blitter/Blitter.cpp
+@@ -9,6 +9,7 @@
+ 
+ #include "vaconfig.h"
+ #include "Blitter.h"
++#include "../VahlBus.h"
+ #include "Amiga.h"
+ #include "Thread.h"
+ 
+@@ -601,6 +602,7 @@ void
+ Blitter::endBlit()
+ {
+     logmsg(LOG_BLTTIM, "(%td,%td) Blitter terminates\n", agnus.pos.v, agnus.pos.h);
++    vahlbus::blitEnd(agnus.pos.frame, agnus.pos.v, agnus.pos.h);
+     
+     running = false;
+     if CONSTEXPR (BLT_MEM_GUARD) blitcount++;
+diff --git a/Core/Components/Agnus/Blitter/BlitterRegs.cpp b/Core/Components/Agnus/Blitter/BlitterRegs.cpp
+index fb6282d..83ba950 100644
+--- a/Core/Components/Agnus/Blitter/BlitterRegs.cpp
++++ b/Core/Components/Agnus/Blitter/BlitterRegs.cpp
+@@ -10,6 +10,7 @@
+ #include "vaconfig.h"
+ #include "Blitter.h"
+ #include "Agnus.h"
++#include "../VahlBus.h"
+ 
+ namespace vamiga {
+ 
+@@ -310,6 +311,8 @@ Blitter::setBLTSIZE(u16 value)
+     // Overwrite with default values if zero
+     if (!bltsizeV) bltsizeV = 0x0400;
+     if (!bltsizeH) bltsizeH = 0x0040;
++    vahlbus::blit(agnus.pos.frame, agnus.pos.v, agnus.pos.h, bltcon0, bltcon1, u16(bltsizeH), u16(bltsizeV),
++                  bltapt, bltbpt, bltcpt, bltdpt, i16(bltamod), i16(bltbmod), i16(bltcmod), i16(bltdmod));
+     
+     // Warn if the previous Blitter operation is overwritten
+     if (agnus.id[SLOT_BLT]) {
+diff --git a/Core/Components/Agnus/VahlBus.h b/Core/Components/Agnus/VahlBus.h
+new file mode 100644
+index 0000000..154bd93
+--- /dev/null
++++ b/Core/Components/Agnus/VahlBus.h
+@@ -0,0 +1,68 @@
++// VAHL_BUSLOG=<file> [VAHL_BUSLOG_FRAMES=first:last]: who used the chip bus, line by line, plus the
++// cycles the CPU waited and every blit (amiga-re-kit, arek trace bus). Recording only - the emulation
++// does not change. Records, little endian, each starting with a tag byte:
++//   'L' u32 frame, u16 v, u16 n, n x i8 bus owner of each DMA slot (BusOwner: 0 none, 1 CPU, 2 refresh,
++//       3 disk, 4-7 audio, 8-15 bitplane 1-8, 16-23 sprite 0-7, 24 copper, 25 blitter, 26 blocked)
++//   'W' u32 frame, u16 v, u16 h, u16 slots waited, u32 PC, i8 owner of the slot the CPU asked for
++//   'B' u32 frame, u16 v, u16 h, u16 bltcon0, bltcon1, size h, size v, u32 apt, bpt, cpt, dpt, i16 amod..dmod
++//   'E' u32 frame, u16 v, u16 h (the blit ended)
++#pragma once
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <cstdint>
++
++namespace vahlbus {
++
++inline FILE *out(long long frame)
++{
++    static FILE *f = nullptr;
++    static bool probed = false;
++    static long long first = 0, last = -1;
++    if (!probed) {
++        probed = true;
++        if (const char *p = std::getenv("VAHL_BUSLOG")) {
++            f = std::fopen(p, "wb");
++            if (const char *w = std::getenv("VAHL_BUSLOG_FRAMES")) {
++                first = std::atoll(w);
++                const char *c = std::strchr(w, ':');
++                last = c ? std::atoll(c + 1) : first;
++            }
++        }
++    }
++    if (!f || (last >= 0 && (frame < first || frame > last))) return nullptr;
++    return f;
++}
++
++template <typename T> inline void put(FILE *f, T v) { std::fwrite(&v, sizeof v, 1, f); }
++
++inline void line(long long frame, long v, const void *owners, long n)
++{
++    FILE *f = out(frame); if (!f) return;
++    put<uint8_t>(f, 'L'); put<uint32_t>(f, uint32_t(frame)); put<uint16_t>(f, uint16_t(v)); put<uint16_t>(f, uint16_t(n));
++    std::fwrite(owners, 1, size_t(n), f);
++}
++
++inline void wait(long long frame, long v, long h, long slots, uint32_t pc, int owner)
++{
++    FILE *f = out(frame); if (!f) return;
++    put<uint8_t>(f, 'W'); put<uint32_t>(f, uint32_t(frame)); put<uint16_t>(f, uint16_t(v)); put<uint16_t>(f, uint16_t(h));
++    put<uint16_t>(f, uint16_t(slots)); put<uint32_t>(f, pc); put<int8_t>(f, int8_t(owner));
++}
++
++inline void blit(long long frame, long v, long h, uint16_t con0, uint16_t con1, uint16_t sh, uint16_t sv,
++                 uint32_t apt, uint32_t bpt, uint32_t cpt, uint32_t dpt, int16_t am, int16_t bm, int16_t cm, int16_t dm)
++{
++    FILE *f = out(frame); if (!f) return;
++    put<uint8_t>(f, 'B'); put<uint32_t>(f, uint32_t(frame)); put<uint16_t>(f, uint16_t(v)); put<uint16_t>(f, uint16_t(h));
++    put(f, con0); put(f, con1); put(f, sh); put(f, sv); put(f, apt); put(f, bpt); put(f, cpt); put(f, dpt);
++    put(f, am); put(f, bm); put(f, cm); put(f, dm);
++}
++
++inline void blitEnd(long long frame, long v, long h)
++{
++    FILE *f = out(frame); if (!f) return;
++    put<uint8_t>(f, 'E'); put<uint32_t>(f, uint32_t(frame)); put<uint16_t>(f, uint16_t(v)); put<uint16_t>(f, uint16_t(h));
++}
++
++}

@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 1279 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 1280 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -80,6 +80,7 @@ arek trace   run build/l1.vtr --arm 196 --end 199 --break 0xc01106 --range 0:800
 arek trace   show build/l1.vtr --field px=0xc0599e:h  # one row per hit, emulation never stopped
 arek trace   run build/l1.vtr --arm 3 --end 60 --break 0xc01106 --inputs l1.txt --reglog regs.bin  # input per frame
 arek trace   compare build/orig.vtr build/native.vtr --best-shift 3   # long parity: where the rebuild leaves the original
+arek trace   bus build/bus.bin --frame 8600            # who had the chip bus in every slot (buslog patch)
 arek selftest inputs                                   # is this VAHeadless frame exact? (synthetic disk)
 
 # 5. the web page: display contract wb-shell obraz 1.3 (WB-OBRAZ-CRT.md)

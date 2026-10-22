@@ -58,6 +58,7 @@ Optional patches on top of the headless one:
 |---|---|---|
 | `vamiga-trace.patch` | c59425d | `VAHL_TRACE`: every breakpoint hit writes a VTR1 record (registers, beam, chip RAM) and the run continues |
 | `vamiga-trace-ranges-899da5d.patch` | 899da5d | the same, plus `VAHL_TRACE_RANGES=start:len,...` (VTR2: only chosen ranges, incl. slow RAM, custom registers, CIA) and watchpoints (VTW2: + PC of the accessing instruction) |
+| `vamiga-buslog-899da5d.patch` | 899da5d + headless + trace-ranges + inputs-reglog | `VAHL_BUSLOG` (+ `VAHL_BUSLOG_FRAMES=first:last`): the owner of every DMA slot of every line, CPU waits with their PC, every blit with its registers and end (`arek trace bus`) |
 | `vamiga-inputs-reglog-899da5d.patch` | 899da5d + headless + trace-ranges | `VAHL_INPUTS` (input per frame, frame exact), `VAHL_REGLOG` (DMACON/INTENA/INTREQ/ADKCON/AUDx writes), `VAHL_AUDLOG` (Paula output samples), `VAHL_TRACE_SKIP`, `VAHL_TRACE_FROM_FRAME`, hashed ranges `start:lenh` (from the Alien Breed project) |
 | `vamiga-regtrace.patch` | c59425d | ring buffer of every custom register write (WASM builds) |
 | `vamiga-wasm.patch` | c59425d | WebAssembly build without the emulation thread |
@@ -202,6 +203,25 @@ fwrite(h, 4, 24, f); fwrite(r, 4, 2, f); fwrite(ram + start, 1, length, f);  /* 
 
 (`trace.encode` writes the same from Python.) Registers the engine does not keep can be 0;
 compare without `--regs` then.
+
+## The chip bus: `--buslog`, `arek trace bus`
+
+A rebuild that runs every frame in time needs to know what the 68000 really waited for.
+`vamiga-buslog-899da5d.patch` records it; the run needs no breakpoint that is ever hit:
+
+```sh
+arek trace run build/b.vtr --arm 3 --end 176 --break 0xfffff0 --buslog build/bus.bin --bus-frames 8600:8601 \
+    --at 30 "mouse1 press left" ...
+arek trace bus build/bus.bin                     # per frame: slots by owner, CPU waits, blits
+arek trace bus build/bus.bin --frame 8600        # the slot map, one raster line per row
+```
+
+The slot map uses `.` free, `C` CPU, `R` refresh, `D` disk, `A` audio, `1`-`8` bitplanes, `S`
+sprites, `c` Copper, `b` blitter. A lowres line with 6 planes reads `462C351C` per fetch group,
+4 planes in dual playfield `4C2.3C1.` (synthetic display disk). Measured on a game level
+(Superfrog, frame 8600): 95 blits, 9 940 blitter slots, the CPU waited 29 557 slots - against
+12 663 in the next frame without blits. `trace.read_buslog`, `bus_summary`, `bus_line`; MCP
+`trace_bus`. The patch only records; the run is the same as without it.
 
 ## The picture: `--screenshot`, `arek render`, `selftest display`
 

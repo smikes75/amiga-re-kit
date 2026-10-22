@@ -219,3 +219,39 @@ def test_a_build_without_the_patch_is_named(tmp_path):
         trace.capture(conf, str(tmp_path / 'r.vtr'), [], 1, 2, breaks=[0x100], inputs=str(inp))
     with pytest.raises(trace.TraceError, match='VAHL_TRACE_SKIP'):          # hashed range
         trace.capture(conf, str(tmp_path / 'r.vtr'), [], 1, 2, breaks=[0x100], ranges=[(0, 4, True)])
+
+
+# --- vamiga-buslog-899da5d.patch: chip bus per line, CPU waits, blits
+
+def _buslog():
+    owners = bytes([0, 1, 2, 8, 9, 24, 25, 16, 0])
+    return (b'L' + struct.pack('<IHH', 300, 44, len(owners)) + owners +
+            b'W' + struct.pack('<IHHHIb', 300, 44, 3, 2, 0x40010, 8) +
+            b'B' + struct.pack('<IHHHHHHIIIIhhhh', 300, 50, 20, 0x09f0, 0, 20, 16, 0x10000, 0, 0, 0x20000, 0, 0, 0, -2) +
+            b'E' + struct.pack('<IHH', 300, 60, 100))
+
+
+def test_buslog_reader_and_summary(tmp_path, capsys):
+    from arek import cli
+    log = trace.read_buslog(_buslog())
+    assert log['lines'][(300, 44)][:3] == bytes([0, 1, 2])
+    assert log['waits'] == [{'frame': 300, 'v': 44, 'h': 3, 'slots': 2, 'pc': 0x40010, 'owner': 'bpl1'}]
+    b = log['blits'][0]
+    assert (b['bltcon0'], b['width'], b['height'], b['pt'][3], b['mod'][3], b['end']) == (0x09f0, 20, 16, 0x20000, -2, (300, 60, 100))
+    s = trace.bus_summary(log)[300]
+    assert s['slots'] == {'free': 2, 'CPU': 1, 'refresh': 1, 'bitplane': 2, 'copper': 1, 'blitter': 1, 'sprite': 1}
+    assert (s['cpu_waits'], s['cpu_wait_slots'], s['blits']) == (1, 2, 1)
+    assert trace.bus_line(log['lines'][(300, 44)]) == '.CR12cbS.'
+    with pytest.raises(trace.TraceError):
+        trace.read_buslog(_buslog()[:-3])
+    with pytest.raises(trace.TraceError):
+        trace.read_buslog(b'Q')
+    p = tmp_path / 'bus.bin'
+    p.write_bytes(_buslog())
+    assert cli.main(['trace', 'bus', str(p)]) == 0
+    out = capsys.readouterr().out
+    assert 'frame 300: 1 lines' in out and 'CPU waited 1 times, 2 slots; 1 blits' in out
+    assert cli.main(['trace', 'bus', str(p), '--frame', '300']) == 0
+    assert ' 44 .CR12cbS.' in capsys.readouterr().out
+    e = trace.env('/t.vtr', buslog=str(p), bus_frames=(10, 20))
+    assert e['VAHL_BUSLOG'] == str(p) and e['VAHL_BUSLOG_FRAMES'] == '10:20'

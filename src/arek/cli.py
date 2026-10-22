@@ -19,7 +19,7 @@
     arek bpstate     --address A --end T --out DIR [--pass N] [--at T CMD] [--region B:L]
     arek trace       run OUT --arm T --end T --break A.. [--watch A..] [--range S:L..] [--at T CMD]
     arek trace       show TRACE [--field NAME=ADDR:FMT ..] [--every N] [--json]
-    arek trace       regs REGLOG [--reg NAME..] | audio AUDLOG | pack IN OUT
+    arek trace       regs REGLOG [--reg NAME..] | audio AUDLOG | pack IN OUT | bus BUSLOG [--frame F]
     arek trace       compare ORIGINAL REBUILD [--range S:L..] [--ignore S:L..] [--shift N | --best-shift N] [--regs]
                      (run: --inputs FILE --reglog F --audlog F --skip N --from-frame F)
     arek diff        DIR_A DIR_B [--range LO HI]
@@ -460,8 +460,24 @@ def cmd_trace(a):
         events = [(float(t), cmd) for t, cmd in a.at]
         n = trace.capture(conf, a.file, events, a.arm, a.end, a.brk, a.watch, ranges or None,
                           timeout=a.timeout, inputs=a.inputs, reglog=a.reglog, audlog=a.audlog,
-                          skip=a.skip, from_frame=a.from_frame)
+                          skip=a.skip, from_frame=a.from_frame, buslog=a.buslog,
+                          bus_frames=[int(x) for x in a.bus_frames.split(':')] if a.bus_frames else None)
         print('%s: %d records' % (a.file, n))
+        return
+    if a.what == 'bus':
+        log = trace.read_buslog(a.file)
+        if a.json:
+            print(json.dumps({'summary': trace.bus_summary(log), 'waits': log['waits'], 'blits': log['blits']}, indent=1))
+            return
+        if a.frame is not None:
+            for (frame, v), owners in sorted(log['lines'].items()):
+                if frame == a.frame:
+                    print('%3d %s' % (v, trace.bus_line(owners)))
+            return
+        for frame, row in trace.bus_summary(log).items():
+            slots = ', '.join('%s %d' % kv for kv in sorted(row['slots'].items(), key=lambda kv: -kv[1]))
+            print('frame %d: %d lines; %s; CPU waited %d times, %d slots; %d blits'
+                  % (frame, row['lines'], slots, row['cpu_waits'], row['cpu_wait_slots'], row['blits']))
         return
     if a.what == 'pack':
         if not a.other:
@@ -698,7 +714,7 @@ def build_parser():
     s.set_defaults(fn=cmd_diff)
 
     s = sp.add_parser('trace', help='continuous trace of the original (patched VAHeadless)')
-    s.add_argument('what', choices=['run', 'show', 'regs', 'audio', 'compare', 'pack'])
+    s.add_argument('what', choices=['run', 'show', 'regs', 'audio', 'compare', 'pack', 'bus'])
     s.add_argument('file', help='trace file (written by run, read by show); regs: a reglog, audio: an audlog')
     s.add_argument('other', nargs='?', help='compare: the rebuild trace; pack: the output file')
     s.add_argument('--ignore', nargs='*', default=[], metavar='START:LEN', help='compare: hex spans to skip')
@@ -721,6 +737,9 @@ def build_parser():
     s.add_argument('--skip', type=int, help='run: no records for the first N hits')
     s.add_argument('--from-frame', type=int, help='run: no records before this frame')
     s.add_argument('--reg', nargs='*', help='regs: only these registers, e.g. DMACON AUD0VOL')
+    s.add_argument('--buslog', help='run: chip bus use per line, CPU waits and blits here (buslog patch)')
+    s.add_argument('--bus-frames', metavar='FIRST:LAST', help='run: frames the bus log covers (default all)')
+    s.add_argument('--frame', type=int, help='bus: the slot map of this frame, one line per raster line')
     s.add_argument('--at', nargs=2, action='append', default=[], metavar=('T', 'CMD'), help='input event')
     s.add_argument('--field', nargs='*', default=[], metavar='NAME=ADDR:FMT', help='show: value to read, e.g. px=0xc0599e:h')
     s.add_argument('--every', type=int, default=1)

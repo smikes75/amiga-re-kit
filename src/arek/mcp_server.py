@@ -407,6 +407,20 @@ def trace_compare(original: str, rebuild: str, ranges: list = None, ignore: list
     return json.loads(json.dumps(r, default=str))
 
 
+@mcp.tool()
+def trace_bus(path: str, frame: int = None) -> dict:
+    """A VAHL_BUSLOG file (vamiga-buslog patch): per frame the DMA slots by owner, CPU waits and
+    blits; with ``frame`` its slot map as text, one raster line per row (. free, C CPU, R refresh,
+    D disk, A audio, 1-8 bitplanes, S sprites, c Copper, b blitter)."""
+    from .headless import trace
+    log = trace.read_buslog(path)
+    res = {'summary': {str(k): v for k, v in trace.bus_summary(log).items()},
+           'waits': log['waits'][:200], 'blits': log['blits'][:200]}
+    if frame is not None:
+        res['map'] = ['%3d %s' % (v, trace.bus_line(o)) for (f, v), o in sorted(log['lines'].items()) if f == frame]
+    return res
+
+
 def main():
     mcp.run(transport='stdio')
 
