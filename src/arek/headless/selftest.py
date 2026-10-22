@@ -1,7 +1,12 @@
-"""Self-test of a VAHeadless build: are inputs applied frame by frame?
+"""Self-tests of a VAHeadless build on synthetic boot disks (no game involved).
 
-``inputs(conf)`` builds a synthetic bootable ADF (no game involved), runs it with
-``VAHL_INPUTS`` and checks that every frame saw exactly the keys of its line.
+``display(conf)``: does ``arek.display`` render what this emulator shows? The disk
+(``selftest_display.s``: 6 planes of a pattern, dual playfield with scroll and changing
+priorities, EHB, sprites with an attached pair and control words reloaded at VSTOP) is run
+to its idle loop, RAM and the screenshot are captured and compared pixel by pixel.
+
+``inputs(conf)``: are inputs applied frame by frame? It runs its disk with ``VAHL_INPUTS``
+and checks that every frame saw exactly the keys of its line.
 The disk only needs the Kickstart ROM from ``local.conf``. Its boot block copies a
 payload to $40000 and jumps there; the payload installs a level-3 handler at
 $40028 that stores JOY1DAT and CIA-A PRA of each frame at $50000 + 4·n (n at
@@ -32,14 +37,68 @@ BOOT = bytes.fromhex(
 KEYS = ('', 'R', 'L', 'U', 'D', 'F', 'RF', 'UL', 'DR')
 
 
-def disk():
-    """The self-test ADF image."""
+def _boot_disk(code):
     d = bytearray(adf.SIZE)
     d[0:4] = b'DOS\0'
     struct.pack_into('>I', d, 8, 880)
-    d[12:12 + len(BOOT)] = BOOT
+    d[12:12 + len(code)] = code
     struct.pack_into('>I', d, 4, adf.bootblock_checksum(d[:1024]))
     return bytes(d)
+
+
+def disk():
+    """The input self-test ADF image."""
+    return _boot_disk(BOOT)
+
+
+DISPLAY_LOOP, DISPLAY_COPPER = 0x4004c, 0x4004e
+DISPLAY_BOOT = bytes.fromhex(
+    '41fa001843f900040000303c01d032d851c8fffc4ef9000400004df900dff0003d7c7fff009a3d7c7fff009641f90001'
+    '00007e053c3c00c77a133006e748bb40c0fc02b5ef7830c051cdfff051ceffea51cfffe22d7c0004004e00803d400088'
+    '3d7c83a0009660fe010046000102003101040024008e2c810090f4c100920038009400d001080000010a000000e00001'
+    '00e2000000e4000100e61f4000e8000100ea3e8000ec000100ee5dc000f0000100f27d0000f4000100f69c4001200004'
+    '0122018e012400040126039e01280004012a022a012c0004012e029201300004013202fa013400040136039e01380004'
+    '013a039e013c0004013e039e0180000001820f00018400f00186000f01880ff0018a0f0f018c00ff018e0fff01900800'
+    '01920080019400080196088001980808019a0088019c0888019e044401a00a5001a205a001a4050a01a60a0501a80c30'
+    '01aa03c001ac030c01ae0c0301b00e7101b2017e01b407e101b60e1701b80d4201ba024d01bc042d01be0d246c07fffe'
+    '010400098c07fffe01040052a007fffe010062000102000001040012c007fffe01005200fffffffe40805400f00f0ff0'
+    'f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0'
+    'f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff060907000aaaa5555aaaa5555aaaa5555aaaa5555'
+    'aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555'
+    '0000000050a068003c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff'
+    '3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff'
+    '3c3c00ff3c3c00ff0000000050a068800f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff00'
+    '0f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff00'
+    '0f0fff000f0fff000f0fff000f0fff000000000070b89800ffffffffffffffffffffffffffffffffffffffffffffffff'
+    'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+    'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+    'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000')
+
+
+def display_disk():
+    """The display self-test ADF image (boot code copies ``selftest_display.s`` to $40000)."""
+    return _boot_disk(DISPLAY_BOOT)
+
+
+def display(conf, timeout=300, keep=None):
+    """Render the self-test frame with ``arek.display`` and compare it with the emulator's
+    screenshot: ``{'pixels': differing, 'total': n, 'box': ..., 'dir': folder}``."""
+    from .. import display as dsp
+    from . import bpstate
+    tmp = keep or tempfile.mkdtemp(prefix='arek-selftest')
+    path = os.path.join(tmp, 'display.adf')
+    with open(path, 'wb') as f:
+        f.write(display_disk())
+    meta = bpstate.capture(conf, os.path.join(tmp, 'cap'), DISPLAY_LOOP, 0, 12, t_set=6, adf=path,
+                           timeout=timeout, screenshot=True)
+    cap = os.path.join(tmp, 'cap')
+    with open(os.path.join(cap, meta['ram_file']), 'rb') as f:
+        ram = f.read()
+    with open(os.path.join(cap, 'stable.raw'), 'rb') as f:
+        ref = f.read()
+    d = dsp.diff(dsp.to_screenshot(dsp.render(ram, DISPLAY_COPPER)), ref)
+    d['dir'] = tmp
+    return d
 
 
 def keys_of(joy, cia):

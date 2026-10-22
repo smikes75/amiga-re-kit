@@ -265,6 +265,33 @@ def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = No
 
 
 @mcp.tool()
+def render(capture: str = None, ram: str = None, cop: str = None, png: str = None,
+           compare: str = None) -> dict:
+    """The frame chip RAM shows (Copper, bitplanes, dual playfield, EHB, sprites) as a PNG
+    like vAmiga's screenshot (716 x 285). ``capture``: a bpstate folder (cpu.json "chips" gives
+    COP1LC; its stable.raw is compared when present); or ``ram`` + ``cop``. ``compare``: an
+    RGB24 screenshot. Returns the PNG path, Copper writes and the differing pixels."""
+    from . import display
+    from .headless import shot
+    meta, folder = {}, Path(capture) if capture else None
+    if folder and (folder / 'cpu.json').exists():
+        meta = json.loads((folder / 'cpu.json').read_text())
+    path = ram or (str(folder / meta['ram_file']) if 'ram_file' in meta else None)
+    if not path:
+        raise ValueError('no chip RAM: give a bpstate capture folder or ram')
+    frame = display.render(_bytes(path), _addr(cop) if cop else None, chips=meta.get('chips'))
+    rgb = display.to_screenshot(frame)
+    out = png or (str(folder / 'render.png') if folder else 'render.png')
+    shot.write_png(out, display.SHOT_W, display.SHOT_H, rgb)
+    res = {'png': out, 'copper_writes': len(frame.writes)}
+    ref = compare or (str(folder / 'stable.raw') if folder and (folder / 'stable.raw').exists() else None)
+    if ref:
+        d = display.diff(rgb, _bytes(ref))
+        res['diff'] = {'pixels': d['pixels'], 'total': d['total'], 'box': d['box'], 'rows': len(d['rows'])}
+    return res
+
+
+@mcp.tool()
 def xref(prog_txt: str, syms_json: str = None, callers_of: str = None, top: int = 40,
          callees_in: list = None) -> dict:
     """Cross references from an m68k objdump listing: most called routines,

@@ -173,6 +173,16 @@ bytes). Records are read-only snapshots (`spypeek`): a trace never changes
 the run it records, so its frames line up with a plain `arek shot` of the
 same script.
 
+## The picture: `--screenshot`, `arek render`, `selftest display`
+
+`arek bpstate ... --screenshot` also saves the picture at the stop (`stable.raw`,
+RGB24 716 × 285, and `stable.png`; the last frame Denise finished). `arek render
+CAPTURE` draws the frame that the captured chip RAM shows with `arek.display` (Copper
+from COP1LC in `cpu.json` "chips", bitplanes, sprites, vAmiga's colours) and compares it
+with that picture pixel by pixel. `arek selftest display` does the same on a synthetic boot
+disk (dual playfield, scroll, EHB, sprites; `src/arek/headless/selftest_display.s`) and
+expects 0 differing pixels - a check of both the model and the emulator build.
+
 ## Input frame by frame, register and audio logs
 
 RetroShell events are placed by `wait`, and `wait 1 frames` waits 1.4 frames

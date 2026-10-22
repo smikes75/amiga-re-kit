@@ -22,7 +22,8 @@
     arek trace       regs REGLOG [--reg NAME..] | audio AUDLOG
                      (run: --inputs FILE --reglog F --audlog F --skip N --from-frame F)
     arek diff        DIR_A DIR_B [--range LO HI]
-    arek selftest    inputs [--vahl BINARY]   (needs only the Kickstart ROM)
+    arek render      CAPTURE [--ram F --cop A] [--png OUT] [--compare RAW]
+    arek selftest    inputs|display [--vahl BINARY]   (needs only the Kickstart ROM)
     arek init        [DIR]
 
 All addresses accept ``0x`` or ``$`` hex, or decimal; the flow specs of ``recomp``
@@ -313,7 +314,7 @@ def cmd_bpstate(a):
     regions = [tuple(A(x) for x in r.split(':')) for r in a.region or []]
     meta = bpstate.capture(conf, a.out, a.address, a.npass, a.end, events=events,
                            t_set=a.set_at, ram_len=a.ram_len, regions=regions,
-                           adf=conf.get('ADF%d' % a.adf), timeout=a.timeout)
+                           adf=conf.get('ADF%d' % a.adf), timeout=a.timeout, screenshot=a.screenshot)
     print('%s/cpu.json  pc=%06x  frame=%s' % (a.out, meta['pc'], meta['beam']['frame']))
 
 
@@ -362,11 +363,42 @@ local.conf
 '''
 
 
+def cmd_render(a):
+    from . import display
+    from .headless import shot
+    folder = Path(a.capture) if a.capture else None
+    meta = json.loads((folder / 'cpu.json').read_text()) if folder and (folder / 'cpu.json').exists() else {}
+    ram_path = a.ram or (folder / meta['ram_file'] if 'ram_file' in meta else None)
+    if ram_path is None and folder:
+        found = sorted(folder.glob('ram_*_*.bin'))
+        ram_path = next((p for p in found if p.name.count('_') == 2), None)
+    if ram_path is None:
+        raise ValueError('no chip RAM: give a bpstate capture folder or --ram FILE')
+    frame = display.render(rd(ram_path), a.cop, chips=meta.get('chips'))
+    rgb = display.to_screenshot(frame, display.plain_rgb if a.plain else display.vamiga_rgb)
+    out = a.png or (str(folder / 'render.png') if folder else 'render.png')
+    shot.write_png(out, display.SHOT_W, display.SHOT_H, rgb)
+    print('%s: %d copper writes' % (out, len(frame.writes)))
+    ref = a.compare or (folder / 'stable.raw' if folder and (folder / 'stable.raw').exists() else None)
+    if ref:
+        d = display.diff(rgb, rd(ref))
+        print('against %s: %d of %d pixels differ%s' % (ref, d['pixels'], d['total'],
+                                                       ', box %s, rows %d' % (d['box'], len(d['rows'])) if d['pixels'] else ''))
+        if d['pixels'] and a.fail:
+            raise RuntimeError('the render differs from the screenshot')
+
+
 def cmd_selftest(a):
     from .headless import config, selftest
     conf = config.load(a.conf)
     if a.vahl:
         conf['VAHL'] = os.path.abspath(a.vahl)
+    if a.what == 'display':
+        r = selftest.display(conf, timeout=a.timeout)
+        print('%s: arek.display against the screenshot: %d of %d pixels differ' % (conf['VAHL'], r['pixels'], r['total']))
+        if r['pixels']:
+            raise RuntimeError('the display model and this emulator disagree (files in %s)' % r['dir'])
+        return
     r = selftest.inputs(conf, frames=a.frames, timeout=a.timeout)
     print('%s: inputs %d/%d frames exact%s' % (conf['VAHL'], r['match'], r['frames'],
                                                '' if not r['mismatch'] else ', first wrong: %s' % (r['mismatch'][:3],)))
@@ -587,6 +619,7 @@ def build_parser():
     s.add_argument('--adf', type=int, default=1)
     s.add_argument('--conf', default='local.conf')
     s.add_argument('--timeout', type=int, default=900, help='seconds of wall time before giving up')
+    s.add_argument('--screenshot', action='store_true', help='also the picture at the stop (stable.raw/png)')
     s.add_argument('--out', required=True)
     s.set_defaults(fn=cmd_bpstate)
 
@@ -620,8 +653,18 @@ def build_parser():
     s.add_argument('--timeout', type=int, default=1200, help='run: seconds of wall time before giving up')
     s.set_defaults(fn=cmd_trace)
 
-    s = sp.add_parser('selftest', help='check a VAHeadless build (inputs frame by frame) on a synthetic disk')
-    s.add_argument('what', choices=['inputs'])
+    s = sp.add_parser('render', help='the frame chip RAM shows (Copper, bitplanes, sprites) as PNG, vs a screenshot')
+    s.add_argument('capture', nargs='?', help='a bpstate folder (cpu.json chips, RAM, stable.raw)')
+    s.add_argument('--ram', help='chip RAM dump instead of the capture folder')
+    s.add_argument('--cop', type=A, help='Copper list (default: COP1LC from cpu.json)')
+    s.add_argument('--png', help='output (default: CAPTURE/render.png)')
+    s.add_argument('--compare', help='RGB24 716x285 screenshot (default: CAPTURE/stable.raw)')
+    s.add_argument('--plain', action='store_true', help='colours as nibble x 17 instead of the vAmiga monitor')
+    s.add_argument('--fail', action='store_true', help='exit 1 when the render differs from the screenshot')
+    s.set_defaults(fn=cmd_render)
+
+    s = sp.add_parser('selftest', help='check a VAHeadless build on a synthetic disk: inputs frame by frame, display model')
+    s.add_argument('what', choices=['inputs', 'display'])
     s.add_argument('--conf', default='local.conf', help='needs ROM (and VAHL unless --vahl)')
     s.add_argument('--vahl', help='the binary to test instead of VAHL from the conf')
     s.add_argument('--frames', type=int, default=240)

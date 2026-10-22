@@ -6,9 +6,10 @@ The kit's own code (`src/arek`, `tests`, `docs`) is MIT (see `LICENSE`).
 |---|---|---|
 | [vAmiga](https://github.com/dirkwhoffmann/vAmiga) emulator core (`Core/`), Dirk W. Hoffmann | MPL-2.0 | **not included**. `src/arek/headless/patches/*.patch` are modifications of its source files; MPL-2.0 requires the modified sources to be made available, which these patch files do. You build `VAHeadless` yourself (see `docs/HEADLESS.md`). |
 | vAmiga CPU core Moira (`Core/CPU/Moira`), Dirk W. Hoffmann | MIT | not included. `arek.m68k.timing` follows the form of its `cyclesDiv` for DIVU/DIVS (after Jorge Cwik's analysis of the 68000 microcode); `tests/data/moira68000_cycles.tsv` holds clock counts measured by running Moira |
+| vAmiga colour pipeline (`PixelEngine`), Dirk W. Hoffmann | MPL-2.0 | not included. `arek.display.vamiga_rgb` computes the same conversion (YUV matrix, gamma 2.8 / 2.2, default monitor settings) so a render can be compared with a vAmiga screenshot; the formula came to the kit through the Turrican II and Alien Breed projects and was checked on 97 colours measured in the Superfrog Sonnet project |
 | vAmiga macOS application | GPL-3.0 | not used |
 | [mcp](https://pypi.org/project/mcp/) Python SDK | MIT | optional dependency (`arek-mcp`) |
-| Pillow | MIT-CMU | optional dependency (PNG screenshots) |
+| Pillow | MIT-CMU | no longer used (PNG is written with the standard library since 0.4.4) |
 
 ## What is deliberately absent
 

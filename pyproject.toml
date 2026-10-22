@@ -41,7 +41,7 @@ where = ["src"]
 version = {attr = "arek.__version__"}
 
 [tool.setuptools.package-data]
-"arek.headless" = ["patches/*.patch"]
+"arek.headless" = ["patches/*.patch", "selftest_display.s"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

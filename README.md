@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 1248 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 1266 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -61,6 +61,8 @@ arek walk   main.bin --base 0x20700 --start 0x20700    # call tree + frontiers
 arek walk   main.bin --base 0x20700 --start 0x20700 --inline 21800:until=8000  # data stored after bsr
 arek hwscan main.bin --base 0x20700 --roots 0x20700    # the hardware boundary
 arek copper ram.bin --base 0x0 --limit 200             # a copper list from a RAM dump
+arek bpstate --address 0x21234 --end 20 --out cap/f --screenshot   # RAM, chip registers and the picture
+arek render  cap/f                                     # the frame RAM shows, compared with the picture
 arek xref   prog.txt --syms syms.json                  # from an objdump listing
 arek dis    main.bin --base 0x20700 --dcw              # linear, undecodable words as dc.w
 arek dis    main.bin --base 0x20700 --walk 0x21234 --cycles   # 68000 clock count per instruction
@@ -98,6 +100,7 @@ asks for (see `examples/profile.example.json`).
 | `arek.packers.scan` | brute-force scan: signatures (PP20, RNC, ATN!, IMP!, …) + verified blocks | S.W.I.V. |
 | `arek.hunk` | bounded HUNK reader: CODE/DATA/BSS, RELOC32, split streams; `build()` for probes | Superfrog |
 | `arek.copper` | copper list disassembler with custom register names | S.W.I.V. |
+| `arek.display` | the frame chip RAM shows: Copper timing, bitplanes, dual playfield, EHB, sprites; vAmiga's colours; 0 differing pixels on vAmiga screenshots (`arek selftest display`) | Superfrog (Sonnet), Alien Breed, Turrican II |
 | `arek.m68k.decoder` | strict 68000 decoder: raises `Unsupported` instead of guessing; accepts only addressing modes the 68000 accepts (checked opcode by opcode against Moira) | Superfrog (fixed ADDA/SUBA/CMPA); LINK/UNLK/PEA/EXG from Alien Breed; memory shifts, CMPM, ABCD/SBCD, MULS/DIVS new |
 | `arek.m68k.disasm` | linear and flow-walk listings straight from the decoder | new |
 | `arek.m68k.hwscan` | which routines are pure RAM and which touch custom chips / CIA / ROM | Turrican II |

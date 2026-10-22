@@ -144,16 +144,18 @@ def parse_beam(out):
 
 
 def capture(conf, folder, addr, npass, t_end, events=(), t_set=0, ram_len=524288,
-            regions=(), setup=(), adf=None, timeout=900):
+            regions=(), setup=(), adf=None, timeout=900, screenshot=False):
     """``state`` + write ``cpu.json``, ``capture.log`` and the RAM dumps into
-    a fresh ``folder``. Returns the metadata dict."""
+    a fresh ``folder``. ``screenshot``: also the picture at the stop (``stable.raw`` /
+    ``stable.png``, the last frame Denise finished) for ``arek render --compare``.
+    Returns the metadata dict."""
     folder = Path(folder).resolve()
     if folder.exists():
         raise FileExistsError('choose a new output directory for each capture: %s' % folder)
     folder.mkdir(parents=True)
     st, log = state(conf, list(events), addr, npass, t_end, t_set=t_set, ram_len=ram_len,
                     keep=str(folder), ram_regions=regions, setup=setup, adf=adf,
-                    timeout=timeout)
+                    timeout=timeout, screenshot=screenshot)
     (folder / 'capture.log').write_text(log)
     if st is None or st['pc'] != addr:
         raise RuntimeError('breakpoint not captured; see %s' % (folder / 'capture.log'))
@@ -161,7 +163,7 @@ def capture(conf, folder, addr, npass, t_end, events=(), t_set=0, ram_len=524288
     adf = adf or conf.get('ADF1')
     meta.update(machine=conf.get('MACHINE', 'A500_OCS_1MB'), events=list(events),
                 breakpoint=addr, skip=npass, set_at=t_set, end=t_end,
-                ram_base=0, ram_bytes=len(st['ram']),
+                ram_base=0, ram_bytes=len(st['ram']), ram_file='ram_%x_%d.bin' % (addr, npass),
                 ram_sha256=hashlib.sha256(st['ram']).hexdigest(),
                 assets={k: hashlib.sha256(Path(p).read_bytes()).hexdigest()
                         for k, p in (('VAHL', conf['VAHL']), ('ROM', conf['ROM']), ('ADF', adf))})
@@ -169,5 +171,10 @@ def capture(conf, folder, addr, npass, t_end, events=(), t_set=0, ram_len=524288
         p = Path(region['file'])
         region['sha256'] = hashlib.sha256(p.read_bytes()).hexdigest()
         region['file'] = p.name
+    raw = folder / 'stable.raw'
+    if screenshot and raw.exists():
+        shot.raw_to_png(str(raw), str(folder / 'stable.png'))
+        meta['screenshot'] = {'raw': raw.name, 'png': 'stable.png',
+                              'sha256': hashlib.sha256(raw.read_bytes()).hexdigest()}
     (folder / 'cpu.json').write_text(json.dumps(meta, indent=2) + '\n')
     return meta
