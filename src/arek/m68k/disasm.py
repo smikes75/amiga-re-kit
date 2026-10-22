@@ -33,16 +33,16 @@ def _clk(i):
     return '%-32s ; %s clk' % (i.text, timing.describe(i))
 
 
-def listing_walk(data, base, start, lo, hi, cycles=False):
+def listing_walk(data, base, start, lo, hi, cycles=False, flow=decoder.NOFLOW):
     """Reachable instructions from ``start`` (plus directly called routines)."""
-    tree = decoder.call_tree(data, base, [start], lo, hi)
+    tree = decoder.call_tree(data, base, [start], lo, hi, flow)
     out = {}
     frontiers = []
     for entry, (ins, calls, bad, ind) in tree.items():
         for a, i in ins.items():
             out[a] = (a, data[a - base:i.end - base].hex(), _clk(i) if cycles else i.text)
         frontiers += [(a, 'undecodable: ' + why) for a, why in bad]
-        frontiers += [(a, 'indirect: ' + why) for a, why in ind]
+        frontiers += [(a, why if why.startswith('data after') else 'indirect: ' + why) for a, why in ind]
     return [out[a] for a in sorted(out)], sorted(frontiers)
 
 

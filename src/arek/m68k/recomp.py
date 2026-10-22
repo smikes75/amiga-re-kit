@@ -15,8 +15,8 @@ state and diff registers, CCR and every written address against the second.
 import re
 
 from . import decoder
-from .decoder import (SZ_B, SZ_W, SZ_L, SZNAME, FLOW_MODES, NOFLOW, Flow, JumpTable, jtab_targets,
-                      Unsupported, decode, successors, call_tree)
+from .decoder import (SZ_B, SZ_W, SZ_L, SZNAME, FLOW_MODES, NOFLOW, Flow, Inline, JumpTable,
+                      jtab_targets, Unsupported, decode, successors, call_tree)
 from .timing import cycles, ea_class, ea_time
 
 # ---------------------------------------------------------------- generator
@@ -430,6 +430,7 @@ static int cond(M68 *m, int c) {
 }
 static void push32(M68 *m, uint32_t v) { m->a[7] -= 4; wr32(m->a[7], v); }
 static void unknown_call(uint32_t a) { fprintf(stderr, "unknown routine %06x\n", a); exit(4); }
+static uint32_t INLINE_RET = 0;     /* where a routine with data after its call returned to */
 '''
 
 
@@ -448,6 +449,7 @@ class Gen:
             self.entries.setdefault(e, None)
         self.out = []
         self.stats = {}
+        self.cur = None                     # entry of the routine being generated
 
     def emit(self, s=''):
         self.out.append(s)
@@ -473,6 +475,7 @@ class Gen:
         """Telo z grafu toku: emituji se jen dosazitelne instrukce, propad na
         dalsi adresu se v poradi hlida a jinak se doplni `goto`."""
         ins = self.cfg[entry]
+        self.cur = entry
         order = sorted(ins)
         idx = {a: k for k, a in enumerate(order)}
         self.emit('/* vstup $%06x, %d instrukci z grafu toku */' % (entry, len(ins)))
@@ -487,7 +490,7 @@ class Gen:
                 self.emit('    ' + self.tick(i))
             for line in self.body(i, None, None, ins):
                 self.emit('    ' + line)
-            nxt = successors(i)
+            nxt = [] if self.inline_target(i) is not None else successors(i)
             if i.end in nxt and (k + 1 >= len(order) or order[k + 1] != i.end):
                 self.emit('    goto L%06x;' % i.end)
         self.emit('    return;')
@@ -497,6 +500,7 @@ class Gen:
     def gen_func(self, start, end, entry):
         self.emit('/* $%06x - $%06x, vstup $%06x */' % (start, end, entry))
         self.emit('void %s(M68 *m) {' % self.flow.fname(entry))
+        self.cur = entry
         if entry != start:
             self.emit('    goto L%06x;' % entry)
         addr = start
@@ -767,6 +771,8 @@ class Gen:
             L.append('    if ((uint16_t)m->d[%d] != 0xffff) { %s } }'
                      % (i.reg, self.br(i.target, start, end, ins)))
         elif k == 'bsr':
+            if i.target in self.flow.inline:
+                return L + self.inline_call(i, i.target, start, end, ins)
             L.append(self.callseq(i.target, i.end))
         elif k == 'jsr':
             nm = self.stub_name(i.ea)
@@ -785,6 +791,8 @@ class Gen:
                 L.append('  default: unknown_call(t); } }')
                 return L
             if getattr(i.ea, 'mode', None) in FLOW_MODES:
+                if i.ea.absval in self.flow.inline:
+                    return L + self.inline_call(i, i.ea.absval, start, end, ins)
                 L.append(self.callseq(i.ea.absval, i.end))
             else:
                 L.append('push32(m, 0x%xu);' % i.end)
@@ -811,6 +819,8 @@ class Gen:
                 return L
             if mode in FLOW_MODES:
                 L.append(self.br(i.ea.absval, start, end, ins))
+            elif self.cur in self.flow.inline and mode in (2, 5):
+                L.append('INLINE_RET = %s; return;' % i.ea.addr)     # back behind the caller's data
             else:
                 raise Unsupported('neprimy jmp @%x' % i.addr)
         elif k in ('mulu', 'divu', 'muls', 'divs') and self.timing:
@@ -889,12 +899,38 @@ class Gen:
         """bsr/jsr: push the return address and call. A callee that removed more than its
         return address (``addq.l #4,a7 ; rts`` = return to the caller's caller) makes
         this routine return at once, as the 68000 would."""
+        if target in self.flow.inline:
+            raise Unsupported('routine $%x reads data after its call; only a direct call has a known '
+                              'place to go on' % target)
         if target in self.flow.exits:
             return 'exit_point(m, 0x%xu);' % target
         if target in self.flow.externs:
             return ('{ uint32_t sp0 = m->a[7]; push32(m, 0x%xu); %s(m); if (m->a[7] > sp0) return; }'
                     % (ret, self.flow.externs[target]))
         return '{ uint32_t sp0 = m->a[7]; push32(m, 0x%xu); %s if (m->a[7] > sp0) return; }' % (ret, self.call(target))
+
+    def inline_target(self, i):
+        """The routine a direct call ``i`` goes to when that routine has data after its call."""
+        if i.kind == 'bsr':
+            t = i.target
+        elif i.kind == 'jsr' and getattr(i.ea, 'mode', None) in FLOW_MODES:
+            t = i.ea.absval
+        else:
+            return None
+        return t if t in self.flow.inline else None
+
+    def inline_call(self, i, target, start, end, ins):
+        """A direct call to a routine that reads the data stored after the call (Flow.inline)
+        and returns behind it with ``jmp (An)``: the callee leaves its return point in
+        INLINE_RET, which must be the end of the data (an --extern replacement sets it too)."""
+        nxt = self.flow.inline[target].end(self.data, self.base, i.end, self.base + len(self.data))
+        if nxt is None:
+            raise Unsupported('data after call $%x @%x runs past the end' % (target, i.addr))
+        return ['{ uint32_t sp0 = m->a[7]; push32(m, 0x%xu); INLINE_RET = 0; %s if (m->a[7] > sp0) return;'
+                % (i.end, ('%s(m);' % self.flow.externs[target]) if target in self.flow.externs
+                   else self.call(target)),
+                '  if (INLINE_RET != 0x%xu) unknown_call(INLINE_RET); }' % nxt,
+                self.br(nxt, start, end, ins)]
 
     def call(self, target):
         if target in self.entries:
@@ -961,13 +997,15 @@ def _hex(x):
 
 
 def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern=(), ret=(),
-                    prefix=None, lib=False):
+                    prefix=None, lib=False, inline=()):
     """Build a decoder.Flow from the command-line spellings (all addresses hex):
 
     jtab     'SITE[,SITE..]:TABLE:COUNT:STRIDE:bra|ptr[:AN]' - jsr/jmp (d8,An,Dn) into a table;
              AN = the value of An at the jump when the table starts below it
     indirect 'SITE=T1,T2,...' - possible targets of jsr/jmp (An), or of a rewritten jmp abs
     stop, exitat, ret   addresses;   extern 'ADDR=c_name';   prefix 'NAME:LO:HI'
+    inline   'ROUTINE[,ROUTINE..]:until=HHHH|words=N|longs=N|string' - the routine reads data
+             stored after its call and returns behind it (decoder.Inline)
     """
     jtabs = {}
     for spec in jtab:
@@ -990,8 +1028,14 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
     if prefix:
         name, plo, phi = prefix.split(':')
         pf = (name, _hex(plo), _hex(phi))
+    inl = {}
+    for spec in inline:
+        sites, _, kind = spec.partition(':')
+        it = Inline.parse(kind)
+        for site in sites.split(','):
+            inl[_hex(site)] = it
     return Flow(stops=map(_hex, stop), rets=map(_hex, ret), exits=map(_hex, exitat), externs=ext,
-                jtabs=jtabs, indirect=ind, prefix=pf, lib=lib)
+                jtabs=jtabs, indirect=ind, prefix=pf, lib=lib, inline=inl)
 
 
 def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow=NOFLOW,
@@ -1014,7 +1058,8 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
             if bad:
                 raise Unsupported('routine $%x, %s @%x' % (e, bad[0][1], bad[0][0]))
             if ind:
-                raise Unsupported('routine $%x, indirect jump: %s @%x' % (e, ind[0][1], ind[0][0]))
+                what = '' if ind[0][1].startswith('data after') else 'indirect jump: '
+                raise Unsupported('routine $%x, %s%s @%x' % (e, what, ind[0][1], ind[0][0]))
             cfg[e] = ins
     g = Gen(data, base, list(funcs), cfg, flow, timing)
     src = g.gen()

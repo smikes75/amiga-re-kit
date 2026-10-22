@@ -192,32 +192,37 @@ def disassemble(path: str, base: str, lo: str = None, hi: str = None,
 
 
 @mcp.tool()
-def walk(path: str, base: str, start: str, lo: str = None, hi: str = None) -> dict:
+def walk(path: str, base: str, start: str, lo: str = None, hi: str = None,
+         inline: list = None) -> dict:
     """Follow the flow graph from ``start``: reachable instructions per routine
-    (listing) plus explicit frontiers (undecodable words, indirect jumps)."""
-    from .m68k import disasm
+    (listing) plus explicit frontiers (undecodable words, indirect jumps, data after a
+    call). ``inline``: 'ROUTINE[,..]:until=HHHH|words=N|longs=N|string' for routines that
+    read data stored after their call and return behind it."""
+    from .m68k import disasm, recomp as rc
     data = _bytes(path)
     b = _addr(base)
     rows, fr = disasm.listing_walk(data, b, _addr(start), _addr(lo) if lo else b,
-                                   _addr(hi) if hi else b + len(data))
+                                   _addr(hi) if hi else b + len(data),
+                                   flow=rc.flow_from_specs(data, b, inline=inline or []))
     return {'listing': disasm.format_listing(rows), 'instructions': len(rows),
             'frontiers': [{'addr': '%06x' % a, 'why': w} for a, w in fr]}
 
 
 @mcp.tool()
 def hwscan(path: str, base: str, roots: list, lo: str = None, hi: str = None,
-           abase: dict = None, chip: str = None) -> dict:
+           abase: dict = None, chip: str = None, inline: list = None) -> dict:
     """Which routines reachable from ``roots`` are pure RAM and which touch
     custom chips / CIA / ROM - the hardware boundary. ``abase`` maps address
     registers known at entry to addresses, e.g. {"a5": "0xdff000"}. ``chip`` =
-    chip RAM size of the machine (default 2 MB)."""
-    from .m68k import hwscan as hs
+    chip RAM size of the machine (default 2 MB). ``inline`` as in ``walk``."""
+    from .m68k import hwscan as hs, recomp as rc
     data = _bytes(path)
     b = _addr(base)
     ab = {int(k.lower().lstrip('a')): _addr(v) for k, v in (abase or {}).items()}
     routines = hs.scan(data, b, [_addr(r) for r in roots], _addr(lo) if lo else b,
                        _addr(hi) if hi else b + len(data), abase=ab,
-                       chip=_addr(chip) if chip else hs.CHIP_MAX)
+                       chip=_addr(chip) if chip else hs.CHIP_MAX,
+                       flow=rc.flow_from_specs(data, b, inline=inline or []))
     ok = hs.closure(routines)
     rep = hs.report(routines, ok)
     rep['text'] = hs.format_report(rep)
@@ -231,7 +236,7 @@ def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = No
     bodies are discovered by walking; ``funcs``: 'START:END[:ENTRY]' linear
     ranges; ``stubs``: 'An:DISP:NAME' for jsr through jump tables. ``flow``: what
     the bytes do not say, as lists of the CLI spellings under the keys jtab,
-    indirect, stop, exitat, extern, ret, plus prefix 'NAME:LO:HI' and lib (bool).
+    indirect, stop, exitat, extern, ret, inline, plus prefix 'NAME:LO:HI' and lib (bool).
     ``timing`` counts 68000 clocks per instruction into CYCLES (or the host's tick_hook).
     Raises on anything the decoder does not support - nothing is silently skipped."""
     from .m68k import recomp as rc
@@ -242,7 +247,7 @@ def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = No
     f = flow or {}
     fl = rc.flow_from_specs(data, b, f.get('jtab', []), f.get('indirect', []), f.get('stop', []),
                             f.get('exitat', []), f.get('extern', []), f.get('ret', []),
-                            f.get('prefix'), bool(f.get('lib')))
+                            f.get('prefix'), bool(f.get('lib')), f.get('inline', []))
     src, stats, entries = rc.generate(data, b, fs, [_addr(a) for a in auto or []],
                                       with_main=with_main, flow=fl, timing=timing)
     Path(out_c).write_text(src)

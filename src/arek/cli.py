@@ -8,9 +8,9 @@
     arek t2          FILE -o OUT
     arek atn         FILE -o OUT [--offset N]
     arek hunk        info|load  FILE ...
-    arek dis         FILE --base B [--lo --hi | --walk START] [--syms J] [--dcw]
-    arek walk        FILE --base B --start S [--lo --hi]
-    arek hwscan      FILE --base B --roots A.. [--abase An=ADDR] [--chip SIZE] [--json]
+    arek dis         FILE --base B [--lo --hi | --walk START] [--syms J] [--dcw] [--cycles]
+    arek walk        FILE --base B --start S [--lo --hi] [--inline R:SPEC]
+    arek hwscan      FILE --base B --roots A.. [--abase An=ADDR] [--chip SIZE] [--inline R:SPEC] [--json]
     arek audit       PROFILE.json [--root DIR]
     arek xref        PROG.txt [--syms J] [--callers A] [--callees LO HI] [--range LO HI]
     arek recomp      FILE --base B [--func S:E[:ENTRY]] [--auto A] [--stub An:D:NAME] -o OUT.c
@@ -158,7 +158,7 @@ def cmd_dis(a):
     syms = _syms(a.syms)
     if a.walk is not None:
         rows, fr = disasm.listing_walk(data, a.base, a.walk, a.lo or a.base, a.hi or a.base + len(data),
-                                       cycles=a.cycles)
+                                       cycles=a.cycles, flow=_inline_flow(a))
         print(disasm.format_listing(rows, syms))
         for addr, why in fr:
             print('; frontier %06x: %s' % (addr, why))
@@ -168,11 +168,17 @@ def cmd_dis(a):
         print(disasm.format_listing(rows, syms))
 
 
+def _inline_flow(a):
+    """decoder.Flow with only the --inline descriptions (dis --walk, walk, hwscan)."""
+    from .m68k import recomp
+    return recomp.flow_from_specs(b'', 0, inline=a.inline or [])
+
+
 def cmd_walk(a):
     from .m68k import decoder
     data = rd(a.file)
     lo, hi = a.lo or a.base, a.hi or a.base + len(data)
-    tree = decoder.call_tree(data, a.base, [a.start], lo, hi)
+    tree = decoder.call_tree(data, a.base, [a.start], lo, hi, _inline_flow(a))
     for e, (ins, calls, bad, ind) in sorted(tree.items()):
         print('routine %06x: %d instructions, calls %s' % (e, len(ins), ', '.join('%06x' % c for c in sorted(calls))))
         for addr, why in bad:
@@ -189,7 +195,7 @@ def cmd_hwscan(a):
     for s in a.abase or []:
         reg, val = s.split('=')
         abase[int(reg.lower().lstrip('a'))] = A(val)
-    routines = hwscan.scan(data, a.base, a.roots, lo, hi, abase=abase, chip=a.chip)
+    routines = hwscan.scan(data, a.base, a.roots, lo, hi, abase=abase, chip=a.chip, flow=_inline_flow(a))
     ok = hwscan.closure(routines)
     rep = hwscan.report(routines, ok, per_frame=a.per_frame or ())
     print(json.dumps(rep, indent=2) if a.json else hwscan.format_report(rep))
@@ -224,7 +230,8 @@ def cmd_recomp(a):
         recomp.add_stub(s)
     funcs = [recomp.parse_func_spec(s) for s in a.func or []]
     flow = recomp.flow_from_specs(data, a.base, a.jtab or [], a.indirect or [], a.stop or [],
-                                  a.exitat or [], a.extern or [], a.ret or [], a.prefix, a.lib)
+                                  a.exitat or [], a.extern or [], a.ret or [], a.prefix, a.lib,
+                                  a.inline or [])
     impl = None
     if a.stub_impl:
         impl = 'notes' if a.stub_impl == 'notes' else Path(a.stub_impl).read_text()
@@ -380,6 +387,8 @@ def build_parser():
     s.add_argument('--cycles', action='store_true', help='append the 68000 clock count of each instruction')
     s.add_argument('--limit', type=int)
     s.add_argument('--syms')
+    s.add_argument('--inline', nargs='*', metavar='ROUTINE[,..]:until=HHHH|words=N|longs=N|string',
+                   help='the routine reads data stored after its call and returns behind it (hex)')
     s.set_defaults(fn=cmd_dis)
 
     s = sp.add_parser('walk', help='call tree + frontiers from an entry')
@@ -388,6 +397,8 @@ def build_parser():
     s.add_argument('--start', type=A, required=True)
     s.add_argument('--lo', type=A)
     s.add_argument('--hi', type=A)
+    s.add_argument('--inline', nargs='*', metavar='ROUTINE[,..]:until=HHHH|words=N|longs=N|string',
+                   help='the routine reads data stored after its call and returns behind it (hex)')
     s.set_defaults(fn=cmd_walk)
 
     s = sp.add_parser('hwscan', help='which routines touch hardware vs pure RAM')
@@ -400,6 +411,8 @@ def build_parser():
     s.add_argument('--per-frame', type=A, nargs='*', help='per-frame routines to tag')
     s.add_argument('--chip', type=A, default=0x200000, help='chip RAM size of the machine (default 2 MB); addresses between it and 2 MB count as other')
     s.add_argument('--json', action='store_true')
+    s.add_argument('--inline', nargs='*', metavar='ROUTINE[,..]:until=HHHH|words=N|longs=N|string',
+                   help='the routine reads data stored after its call and returns behind it (hex)')
     s.set_defaults(fn=cmd_hwscan)
 
     s = sp.add_parser('audit', help='profile-driven inventory + reachability (JSON)')
@@ -437,6 +450,8 @@ def build_parser():
     s.add_argument('--lib', action='store_true', help='functions only, sharing the runtime of another translation')
     s.add_argument('--stub-impl', metavar='FILE|notes', help='C bodies of the stubs, or "notes" for empty ones')
     s.add_argument('--timing', action='store_true', help='count 68000 clocks per instruction (TICK / CYCLES)')
+    s.add_argument('--inline', nargs='*', metavar='ROUTINE[,..]:until=HHHH|words=N|longs=N|string',
+                   help='the routine reads data stored after its call and returns behind it (hex)')
     s.add_argument('--main', action='store_true', help='append the verification driver main()')
     s.add_argument('--stats', action='store_true')
     s.add_argument('-o', '--out', required=True)

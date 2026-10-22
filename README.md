@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,png,dev]"     # or without extras: pip install -e .
-python -m pytest                    # 1177 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 1195 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -57,6 +57,7 @@ arek hunk info  prog && arek hunk load prog --base 0x20000 -o h   # AmigaDOS exe
 # 3. read the code - flow graph, not linear
 arek dis    main.bin --base 0x20700 --walk 0x20700     # only reachable code
 arek walk   main.bin --base 0x20700 --start 0x20700    # call tree + frontiers
+arek walk   main.bin --base 0x20700 --start 0x20700 --inline 21800:until=8000  # data stored after bsr
 arek hwscan main.bin --base 0x20700 --roots 0x20700    # the hardware boundary
 arek copper ram.bin --base 0x0 --limit 200             # a copper list from a RAM dump
 arek xref   prog.txt --syms syms.json                  # from an objdump listing
@@ -96,7 +97,7 @@ asks for (see `examples/profile.example.json`).
 | `arek.m68k.decoder` | strict 68000 decoder: raises `Unsupported` instead of guessing; accepts only addressing modes the 68000 accepts (checked opcode by opcode against Moira) | Superfrog (fixed ADDA/SUBA/CMPA); LINK/UNLK/PEA/EXG from Alien Breed; memory shifts, CMPM, ABCD/SBCD, MULS/DIVS new |
 | `arek.m68k.disasm` | linear and flow-walk listings straight from the decoder | new |
 | `arek.m68k.hwscan` | which routines are pure RAM and which touch custom chips / CIA / ROM | Turrican II |
-| `arek.m68k.recomp` | static 68k → C recompiler with a verification driver (`MEM[]`, write log, blitter incl. line and fill modes); jump tables, indirect targets, external routines, overlay modules (`Flow`); optional clock counting | Superfrog; extensions from Alien Breed |
+| `arek.m68k.recomp` | static 68k → C recompiler with a verification driver (`MEM[]`, write log, blitter incl. line and fill modes); jump tables, indirect targets, external routines, overlay modules, data stored after a call (`Flow`); optional clock counting | Superfrog; extensions from Alien Breed |
 | `arek.m68k.timing` | 68000 clock counts per instruction, data-dependent ones included (MUL/DIV operands, shift counts, branch outcome); matches Moira on all 42 247 decodable opcodes | new |
 | `arek.m68k.xref` | call / data cross references from `m68k-elf-objdump` text | Superfrog |
 | `arek.m68k.audit` | profile-driven inventory + conservative reachability, JSON in / JSON out | Superfrog |

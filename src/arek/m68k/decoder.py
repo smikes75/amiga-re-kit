@@ -12,6 +12,8 @@ decode(data, base, addr) -> Insn       one instruction, or raise Unsupported
 successors(insn) -> [addr, ...]        where execution can continue
 walk(data, base, start, lo, hi)        instructions reachable from ``start``
 call_tree(data, base, roots, lo, hi)   same, transitively over bsr/jsr targets
+Flow, Inline, JumpTable                what the bytes do not say (data after a call, tables...)
+after_call(...)                        where execution goes on after a direct call
 STUBS                                   {(An, disp): name} indirect-call stubs
 """
 import struct
@@ -483,16 +485,19 @@ class Flow:
     prefix    (name, lo, hi) - functions in [lo, hi) are called f_<name><addr> (an overlay
               module loaded at addresses another module also uses)
     lib       translate only the functions; the runtime comes from another translation
+    inline    {routine: Inline} - the routine reads data stored right after its call and
+              returns behind it (``movea.l (a7)+,An`` ... ``jmp (An)``)
     """
 
     def __init__(self, stops=(), rets=(), exits=(), externs=None, jtabs=None, indirect=None,
-                 prefix=None, lib=False):
+                 prefix=None, lib=False, inline=None):
         self.stops, self.rets, self.exits = set(stops), set(rets), set(exits)
         self.externs = dict(externs or {})
         self.jtabs = dict(jtabs or {})
         self.indirect = {a: list(t) for a, t in (indirect or {}).items()}
         self.prefix = prefix or ('', 0, 0)
         self.lib = lib
+        self.inline = dict(inline or {})
 
     def fname(self, addr):
         name, lo, hi = self.prefix
@@ -541,21 +546,124 @@ def jtab_targets(data, base, table, count, stride, kind):
     return out
 
 
+class Inline:
+    """The data a program stores right after a call (``bsr sub ; dc.w ... ; code``) for a
+    routine that takes the return address as a pointer and returns behind the data:
+
+        until=HHHH   words up to and including the word HHHH
+        words=N      N words;  longs=N  N longs
+        string       bytes up to and including a zero byte, padded to an even address
+    """
+
+    KINDS = ('until', 'words', 'longs', 'string')
+
+    def __init__(self, kind, value=0):
+        if kind not in self.KINDS:
+            raise ValueError('inline data kind is one of %s, not %r' % ('/'.join(self.KINDS), kind))
+        self.kind, self.value = kind, value
+
+    @classmethod
+    def parse(cls, spec):
+        """'until=8000', 'words=3', 'longs=1', 'string'."""
+        kind, _, val = spec.partition('=')
+        if kind == 'until':
+            return cls(kind, int(val, 16))
+        return cls(kind, int(val) if val else 0)
+
+    def end(self, data, base, at, hi):
+        """Address after the data that starts at ``at``, or None when it runs past ``hi``."""
+        hi = min(hi, base + len(data))
+        if self.kind == 'words':
+            e = at + 2 * self.value
+        elif self.kind == 'longs':
+            e = at + 4 * self.value
+        elif self.kind == 'string':
+            e = at
+            while e < hi and data[e - base]:
+                e += 1
+            e = e + 1 + ((e + 1) & 1) if e < hi else hi + 1
+        else:
+            e = at
+            while e + 2 <= hi and struct.unpack_from('>H', data, e - base)[0] != self.value:
+                e += 2
+            e += 2
+        return e if e <= hi else None
+
+
+def pops_return(data, base, entry, lo, hi):
+    """True when the routine at ``entry`` starts by taking its return address
+    (``movea.l (a7)+,An`` before any branch) and leaves through ``jmp (An)`` - the shape of a
+    routine that reads data stored after its call. Code after such a call is not code until
+    the data is described (Flow.inline)."""
+    a, reg = entry, None
+    for _ in range(16):
+        if not (lo <= a < hi):
+            return False
+        try:
+            i = decode(data, base, a)
+        except Unsupported:
+            return False
+        if i.kind == 'move' and getattr(i, 'movea', False) and i.sz == SZ_L and i.src.text == '(a7)+':
+            reg = i.dst.reg
+            break
+        if successors(i) != [i.end] or i.kind in ('bsr', 'jsr'):
+            return False
+        a = i.end
+    if reg is None:
+        return False
+    seen, work = set(), [entry]
+    while work and len(seen) < 4096:
+        a = work.pop()
+        if a in seen or not (lo <= a < hi):
+            continue
+        seen.add(a)
+        try:
+            i = decode(data, base, a)
+        except Unsupported:
+            continue
+        if i.kind == 'jmp' and getattr(i.ea, 'mode', None) == 2 and i.ea.areg == reg:
+            return True
+        work.extend(successors(i))
+    return False
+
+
+def after_call(data, base, call_end, target, lo, hi, flow=NOFLOW, cache=None):
+    """Where execution goes on after a direct call that ends at ``call_end``:
+    ``(address, None)``, or ``(None, why)`` when the callee returns behind data the flow
+    does not describe."""
+    spec = flow.inline.get(target)
+    if spec is not None:
+        e = spec.end(data, base, call_end, hi)
+        return (e, None) if e is not None else (None, 'data after call $%x runs past the end' % target)
+    if cache is None:
+        cache = {}
+    if target not in cache:
+        cache[target] = pops_return(data, base, target, lo, hi)
+    if cache[target]:
+        return None, 'data after call $%x (describe it with inline)' % target
+    return call_end, None
+
+
 def stub_for(ea):
     if getattr(ea, 'mode', None) in (2, 5) and getattr(ea, 'areg', None) is not None:
         return STUBS.get((ea.areg, ea.disp or 0))
     return None
 
 
-def walk(data, base, start, lo, hi, flow=NOFLOW):
+def walk(data, base, start, lo, hi, flow=NOFLOW, cache=None):
     """Instructions reachable from ``start`` plus the routines it calls. The
     flow graph is followed (branches, falls through, bsr/jsr targets), so data
     stored between code is never read as instructions.
 
     Returns ``(ins, calls, bad, indirect)``: decoded instructions by address,
     direct call targets, undecodable words and indirect jumps (both as
-    ``(addr, why)`` - the frontiers that stay explicit)."""
+    ``(addr, why)`` - the frontiers that stay explicit). A call to a routine that
+    returns behind data stored after the call (``after_call``) continues behind the
+    data when ``flow.inline`` describes it and is a frontier otherwise; in such a routine
+    ``jmp (An)`` is its return."""
     ins, calls, bad, indirect = {}, set(), [], []
+    cache = {} if cache is None else cache
+    inline_ret = start in flow.inline
     seen, work = set(), [start]
     while work:
         a = work.pop()
@@ -569,12 +677,17 @@ def walk(data, base, start, lo, hi, flow=NOFLOW):
             continue
         ins[a] = i
         mode = getattr(getattr(i, 'ea', None), 'mode', None)
-        if i.kind == 'bsr':
-            calls.add(i.target)
+        if i.kind == 'bsr' or (i.kind == 'jsr' and mode in FLOW_MODES):
+            t = i.target if i.kind == 'bsr' else i.ea.absval
+            calls.add(t)
+            nxt, why = after_call(data, base, i.end, t, lo, hi, flow, cache)
+            if why:
+                indirect.append((a, why))
+            else:
+                work.append(nxt)
+            continue
         elif i.kind == 'jsr':
-            if mode in FLOW_MODES:
-                calls.add(i.ea.absval)
-            elif a in flow.jtabs:
+            if a in flow.jtabs:
                 calls.update(t for t in flow.jtabs[a].targets if t is not None)
             elif a in flow.indirect:
                 calls.update(flow.indirect[a])
@@ -590,6 +703,8 @@ def walk(data, base, start, lo, hi, flow=NOFLOW):
             elif a in flow.indirect:
                 work.extend(flow.indirect[a])
                 calls.update(flow.indirect[a])
+            elif inline_ret and mode in (2, 5):
+                pass                                      # returns behind the inline data
             elif not stub_for(i.ea):
                 indirect.append((a, 'jmp ' + i.ea.text))
         work.extend(successors(i))
@@ -598,12 +713,12 @@ def walk(data, base, start, lo, hi, flow=NOFLOW):
 
 def call_tree(data, base, roots, lo, hi, flow=NOFLOW):
     """Entry address -> ``walk`` result, transitively over the whole call tree."""
-    out, work = {}, list(roots)
+    out, work, cache = {}, list(roots), {}
     while work:
         s = work.pop()
         if s in out or not (lo <= s < hi) or s in flow.exits or s in flow.externs:
             continue
-        ins, calls, bad, ind = walk(data, base, s, lo, hi, flow)
+        ins, calls, bad, ind = walk(data, base, s, lo, hi, flow, cache)
         out[s] = (ins, calls, bad, ind)
         work.extend(calls)
     return out

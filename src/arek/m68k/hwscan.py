@@ -73,8 +73,9 @@ class Routine:
         }
 
 
-def body(data, base, start, lo, hi):
-    """Instructions reachable from ``start`` (branches both ways, rts ends a path)."""
+def body(data, base, start, lo, hi, flow=decoder.NOFLOW, cache=None):
+    """Instructions reachable from ``start`` (branches both ways, rts ends a path; a call
+    goes on behind the data stored after it, see decoder.after_call)."""
     out, seen, work = [], set(), [start]
     while work:
         a = work.pop()
@@ -86,6 +87,11 @@ def body(data, base, start, lo, hi):
         except decoder.Unsupported:
             continue
         out.append(i)
+        if i.kind == 'bsr' or (i.kind == 'jsr' and i.ea.mode in decoder.FLOW_MODES):
+            t = i.target if i.kind == 'bsr' else i.ea.absval
+            nxt, _ = decoder.after_call(data, base, i.end, t, lo, hi, flow, cache)
+            work.extend([nxt] if nxt is not None else [])
+            continue
         work.extend(decoder.successors(i))
     return out
 
@@ -141,10 +147,13 @@ def resolve_bases(ins, abase, ram):
     return consts
 
 
-def scan_routine(data, base, start, lo, hi, abase, ram=None, chip=CHIP_MAX):
-    """``abase`` = global convention for address registers, e.g. ``{6: 0xdff000}``."""
+def scan_routine(data, base, start, lo, hi, abase, ram=None, chip=CHIP_MAX, flow=decoder.NOFLOW,
+                 cache=None):
+    """``abase`` = global convention for address registers, e.g. ``{6: 0xdff000}``.
+    ``flow``: only its ``inline`` descriptions are used (data stored after a call)."""
     r = Routine(start)
-    consts = resolve_bases(body(data, base, start, lo, hi), abase, ram)
+    cache = {} if cache is None else cache
+    consts = resolve_bases(body(data, base, start, lo, hi, flow, cache), abase, ram)
     seen, work = set(), [start]
     while work:
         a = work.pop()
@@ -173,15 +182,20 @@ def scan_routine(data, base, start, lo, hi, abase, ram=None, chip=CHIP_MAX):
                     k = classify_addr(v + (e.disp or 0), chip)
                     if k != 'ram':
                         r.areg_hw[k] += 1
-        if i.kind == 'bsr':
-            r.calls.add(i.target)
-        elif i.kind == 'jsr':
-            if i.ea.mode in decoder.FLOW_MODES:
-                r.calls.add(i.ea.absval)
+        if i.kind == 'bsr' or (i.kind == 'jsr' and i.ea.mode in decoder.FLOW_MODES):
+            t = i.target if i.kind == 'bsr' else i.ea.absval
+            r.calls.add(t)
+            nxt, why = decoder.after_call(data, base, i.end, t, lo, hi, flow, cache)
+            if why:
+                r.indirect.append((a, why))
             else:
-                r.indirect.append((a, 'jsr ' + i.ea.text))
+                work.append(nxt)
+            continue
+        elif i.kind == 'jsr':
+            r.indirect.append((a, 'jsr ' + i.ea.text))
         elif i.kind == 'jmp' and i.ea.mode not in decoder.FLOW_MODES:
-            r.indirect.append((a, 'jmp ' + i.ea.text))
+            if not (start in flow.inline and i.ea.mode in (2, 5)):   # return behind inline data
+                r.indirect.append((a, 'jmp ' + i.ea.text))
         work.extend(decoder.successors(i))
     return r
 
@@ -202,15 +216,17 @@ def measured_bases(entry, addr, abase):
     return out
 
 
-def scan(data, base, roots, lo, hi, abase=None, ram=None, entry=None, chip=CHIP_MAX):
-    """Return {start: Routine} for everything reachable from ``roots``."""
+def scan(data, base, roots, lo, hi, abase=None, ram=None, entry=None, chip=CHIP_MAX,
+         flow=decoder.NOFLOW):
+    """Return {start: Routine} for everything reachable from ``roots``. ``flow.inline``
+    describes data stored after calls (decoder.Inline)."""
     abase = abase or {}
-    routines, work = {}, list(roots)
+    routines, work, cache = {}, list(roots), {}
     while work:
         s = work.pop()
         if s in routines or not (lo <= s < hi):
             continue
-        r = scan_routine(data, base, s, lo, hi, measured_bases(entry, s, abase), ram, chip)
+        r = scan_routine(data, base, s, lo, hi, measured_bases(entry, s, abase), ram, chip, flow, cache)
         routines[s] = r
         work.extend(r.calls)
     return routines
