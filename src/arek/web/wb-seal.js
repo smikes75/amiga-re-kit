@@ -5,7 +5,9 @@
 //   const box = await WBSEAL.open(await (await fetch('sealed/seal.json')).json(), [adf1, adf2]);
 //   const wasm = await box.fetch('engine.wasm', 'sealed/');        // ArrayBuffer of the plain file
 //
-// WBSEAL.ids(disks) gives the sha256 of each disk (hex), as seal.json lists them - for messages.
+// Files sealed with --gzip are inflated here (DecompressionStream), so a page always gets the plain bytes.
+// WBSEAL.ids(disks) gives the sha256 of each disk (hex), as seal.json lists them - for messages;
+// manifest.keys[i].label names the accepted version of the disk.
 'use strict';
 const WBSEAL = (() => {
     const enc = new TextEncoder();
@@ -47,7 +49,10 @@ const WBSEAL = (() => {
         async function get(path, sealed) {
             const f = files.get(path);
             if (!f) throw new Error('not sealed here: ' + path);
-            return subtle().decrypt({ name: 'AES-GCM', iv: b64(f.iv), additionalData: enc.encode(path) }, key, sealed);
+            const plain = await subtle().decrypt({ name: 'AES-GCM', iv: b64(f.iv), additionalData: enc.encode(path) }, key, sealed);
+            if (f.encoding !== 'gzip') return plain;
+            const ds = new DecompressionStream('gzip');
+            return new Response(new Blob([plain]).stream().pipeThrough(ds)).arrayBuffer();
         }
         return {
             get,

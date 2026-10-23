@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 1297 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 1299 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -92,7 +92,8 @@ arek selftest inputs                                   # is this VAHeadless fram
 arek web copy web/                                     # the reference wb-obraz.js into the game's page
 arek web demo                                          # a page built on it (http://127.0.0.1:8920/demo.html)
 arek web test http://localhost:8911/?test=1            # §5.1-5.4b in Chromium (needs playwright)
-arek web seal build/present/engine.wasm --set disk1.adf --out build/present/sealed   # opened only by the disk
+arek web seal build/present/engine.wasm --set disk1.adf --label "disk 1, retail" --gzip --out build/present/sealed
+arek web check build/present                           # a bundle: no game data, derived files sealed, manifest right
 arek --version                                         # version + decoder/recompiler hashes
 ```
 

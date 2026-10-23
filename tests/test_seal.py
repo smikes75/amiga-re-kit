@@ -81,3 +81,55 @@ const S = require(%s), fs = require('fs');
 def test_web_copy_brings_both_modules(tmp_path, capsys):
     assert cli.main(['web', 'copy', str(tmp_path)]) == 0
     assert (tmp_path / 'wb-seal.js').exists() and (tmp_path / 'wb-obraz.js').exists()
+
+
+def test_gzip_and_labels(tmp_path):
+    big = {'engine.wasm': b'\0asm' + bytes(200000) + b'end'}
+    manifest, blobs = seal.seal(big, [[D1], [D1B]], labels=['disk 1, retail', 'disk 1, crack'], compress=True)
+    f = manifest['files'][0]
+    assert f['encoding'] == 'gzip' and f['stored'] < 5000 and f['size'] == len(big['engine.wasm'])
+    assert len(blobs['engine.wasm']) < 5000
+    assert [k['label'] for k in manifest['keys']] == ['disk 1, retail', 'disk 1, crack']
+    assert seal.unseal(manifest, blobs, [D1B]) == big
+    out = tmp_path / 's'
+    seal.write_dir(out, manifest, blobs)
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('no node')
+    script = """
+const S = require(%s), fs = require('fs');
+(async () => {
+  const m = JSON.parse(fs.readFileSync(%s, 'utf8'));
+  const box = await S.open(m, [fs.readFileSync(%s)]);
+  const plain = Buffer.from(await box.get('engine.wasm', fs.readFileSync(%s)));
+  console.log(JSON.stringify({len: plain.length, head: plain.subarray(0, 4).toString(), tail: plain.subarray(-3).toString()}));
+})();
+""" % tuple(json.dumps(str(x)) for x in (WEB / 'wb-seal.js', out / 'seal.json', tmp_path / 'd1.adf', out / 'engine.wasm.sealed'))
+    (tmp_path / 'd1.adf').write_bytes(D1)
+    r = json.loads(subprocess.run([node, '-e', script], capture_output=True, text=True, check=True).stdout)
+    assert r == {'len': len(big['engine.wasm']), 'head': '\0asm', 'tail': 'end'}
+
+
+def test_bundle_check(tmp_path, capsys):
+    b = tmp_path / 'present'
+    (b / 'sealed').mkdir(parents=True)
+    (b / 'index.html').write_bytes(b'<html>')
+    manifest, blobs = seal.seal({'engine.wasm': b'\0asm'}, [[D1]], labels=['disk 1'])
+    seal.write_dir(b / 'sealed', manifest, blobs)
+    entries = []
+    for rel in ('index.html', 'sealed/seal.json', 'sealed/engine.wasm.sealed'):
+        data = (b / rel).read_bytes()
+        entries.append({'path': rel, 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest(),
+                        'derived': rel.endswith('.sealed'), 'sealed': rel.endswith('.sealed')})
+    (b / 'manifest.json').write_text(json.dumps({'files': entries}))
+    r = seal.check_bundle(b)
+    assert r['problems'] == [] and r['sealed'] == ['engine.wasm'] and r['files'] == 4
+    assert cli.main(['web', 'check', str(b)]) == 0
+    # game data, a derived file in the clear, a stale manifest size
+    (b / 'game.adf').write_bytes(bytes(901120))
+    (b / 'engine.wasm').write_bytes(b'\0asm')
+    (b / 'index.html').write_bytes(b'<html><body>')
+    p = seal.check_bundle(b)['problems']
+    assert any('game data' in x for x in p) and any('also present in the clear' in x for x in p)
+    assert any('manifest size' in x for x in p) and any('not in the manifest' in x for x in p)
+    assert cli.main(['web', 'check', str(b)]) == 1

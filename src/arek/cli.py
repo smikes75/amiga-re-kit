@@ -27,7 +27,8 @@
     arek selftest    inputs|display [--vahl BINARY]   (needs only the Kickstart ROM)
     arek profile     PROFILE [--by clocks|calls|bytes] [--top N] [--frame F]
     arek web         copy DIR | demo [--port N] | test URL [--quick]   (display contract)
-    arek web         seal FILE... --set D1.adf[,D2.adf] --out DIR      (code derived from a game, opened by the disk)
+    arek web         seal FILE... --set D1.adf[,D2.adf] [--label TEXT] [--gzip] --out DIR   (derived code, opened by the disk)
+    arek web         check DIR                                          (a presentation bundle: no game data, derived = sealed)
     arek init        [DIR]
 
 All addresses accept ``0x`` or ``$`` hex, or decimal; the flow specs of ``recomp``
@@ -414,6 +415,18 @@ def cmd_web(a):
             shutil.copyfile(web / name, out)
             print('%s  sha256 %s' % (out, hashlib.sha256(out.read_bytes()).hexdigest()))
         print('(wb-obraz %s)' % _wb_version(web))
+    elif a.what == 'check':
+        from . import seal
+        if not a.target:
+            raise ValueError('web check DIR (a presentation bundle)')
+        r = seal.check_bundle(a.target)
+        print('%s: %d files, %.2f MB, sealed: %s' % (a.target, r['files'], r['bytes'] / 1e6, ', '.join(r['sealed']) or 'nothing'))
+        for rel, n in r['big']:
+            print('large: %s (%.1f MB)' % (rel, n / 1e6))
+        for p in r['problems']:
+            print('PROBLEM: ' + p)
+        if r['problems']:
+            raise RuntimeError('%d problems' % len(r['problems']))
     elif a.what == 'seal':
         from . import seal
         files = [f for f in [a.target] + (a.rest or []) if f]
@@ -422,7 +435,7 @@ def cmd_web(a):
         root = Path(a.root or '.')
         plain = {str(Path(f).resolve().relative_to(root.resolve())): rd(f) for f in files}
         sets = [[rd(p) for p in spec.split(',')] for spec in a.set]
-        manifest, blobs = seal.seal(plain, sets)
+        manifest, blobs = seal.seal(plain, sets, labels=a.label or [], compress=a.gzip)
         path = seal.write_dir(a.out, manifest, blobs)
         print('%s: %d files sealed for %d disk sets (%s)' % (path, len(blobs), len(sets),
                                                             '; '.join(','.join(d[:12] for d in k['disks']) for k in manifest['keys'])))
@@ -809,14 +822,16 @@ def build_parser():
     s.set_defaults(fn=cmd_profile)
 
     s = sp.add_parser('web', help='display contract: reference wb-obraz.js, demo page, Chromium tests (WB-OBRAZ-CRT.md)')
-    s.add_argument('what', choices=['copy', 'demo', 'test', 'seal'])
+    s.add_argument('what', choices=['copy', 'demo', 'test', 'seal', 'check'])
     s.add_argument('target', nargs='?', help='copy: destination folder; test: URL of a page with window.wbObrazTest; '
-                   'seal: the first file')
+                   'seal: the first file; check: a presentation bundle folder')
     s.add_argument('rest', nargs='*', help='seal: more files')
     s.add_argument('--set', action='append', metavar='DISK.adf[,DISK2.adf]',
                    help='seal: a disk set that opens the files (repeat for other versions)')
     s.add_argument('--out', help='seal: output folder (seal.json + FILE.sealed)')
     s.add_argument('--root', help='seal: paths in seal.json are relative to this folder (default .)')
+    s.add_argument('--label', action='append', metavar='TEXT', help='seal: a name for each --set, in order')
+    s.add_argument('--gzip', action='store_true', help='seal: gzip the files before sealing (wb-seal.js inflates)')
     s.add_argument('--port', type=int, default=8920, help='demo: port')
     s.add_argument('--quick', action='store_true', help='test: fewer combinations')
     s.set_defaults(fn=cmd_web)

@@ -16,6 +16,7 @@ data, so files cannot be swapped. Needs the optional ``cryptography`` package (`
 This is a lock, not a licence: the files are still derived from the original.
 """
 import base64
+import gzip
 import hashlib
 import json
 import os
@@ -47,8 +48,10 @@ def _b64(b):
     return base64.b64encode(b).decode()
 
 
-def seal(files, disk_sets, content_key=None):
-    """files: {path: bytes}; disk_sets: [[adf bytes, ...], ...] - each set that may open them.
+def seal(files, disk_sets, content_key=None, labels=None, compress=False):
+    """files: {path: bytes}; disk_sets: [[adf bytes, ...], ...] - each set that may open them,
+    ``labels`` one text per set (which version of the disk); ``compress``: gzip before sealing
+    (wb-seal.js inflates on open; ``size``/``sha256`` describe the plain file).
     Returns (manifest, {path: sealed bytes})."""
     if not disk_sets or any(not s for s in disk_sets):
         raise ValueError('seal needs at least one set of disks')
@@ -58,13 +61,20 @@ def seal(files, disk_sets, content_key=None):
     blobs = {}
     for path, data in files.items():
         iv = os.urandom(12)
-        blobs[path] = aes.encrypt(iv, bytes(data), path.encode())
-        manifest['files'].append({'path': path, 'iv': _b64(iv), 'size': len(data),
-                                  'sha256': hashlib.sha256(data).hexdigest()})
-    for disks in disk_sets:
+        body = gzip.compress(bytes(data), 9, mtime=0) if compress else bytes(data)
+        blobs[path] = aes.encrypt(iv, body, path.encode())
+        entry = {'path': path, 'iv': _b64(iv), 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+        if compress:
+            entry['encoding'] = 'gzip'
+            entry['stored'] = len(body)
+        manifest['files'].append(entry)
+    for k, disks in enumerate(disk_sets):
         iv = os.urandom(12)
-        manifest['keys'].append({'disks': [hashlib.sha256(bytes(d)).hexdigest() for d in disks], 'iv': _b64(iv),
-                                 'wrapped': _b64(_aes(set_key(disks)).encrypt(iv, ck, KEY_AAD))})
+        entry = {'disks': [hashlib.sha256(bytes(d)).hexdigest() for d in disks], 'iv': _b64(iv),
+                 'wrapped': _b64(_aes(set_key(disks)).encrypt(iv, ck, KEY_AAD))}
+        if labels and k < len(labels) and labels[k]:
+            entry['label'] = labels[k]
+        manifest['keys'].append(entry)
     return manifest, blobs
 
 
@@ -78,8 +88,11 @@ def unseal(manifest, blobs, disks):
     try:
         ck = _aes(set_key(disks)).decrypt(base64.b64decode(entry['iv']), base64.b64decode(entry['wrapped']), KEY_AAD)
         aes = _aes(ck)
-        return {f['path']: aes.decrypt(base64.b64decode(f['iv']), blobs[f['path']], f['path'].encode())
-                for f in manifest['files']}
+        out = {}
+        for f in manifest['files']:
+            body = aes.decrypt(base64.b64decode(f['iv']), blobs[f['path']], f['path'].encode())
+            out[f['path']] = gzip.decompress(body) if f.get('encoding') == 'gzip' else body
+        return out
     except InvalidTag:
         raise ValueError('the disks or the sealed files do not match') from None
 
@@ -100,3 +113,62 @@ def read_dir(folder):
     folder = Path(folder)
     manifest = json.loads((folder / 'seal.json').read_text())
     return manifest, {f['path']: (folder / (f['path'] + '.sealed')).read_bytes() for f in manifest['files']}
+
+
+GAME_DATA = ('.adf', '.adz', '.dms', '.ipf', '.rom')
+BIG = 10 * 1024 * 1024
+
+
+def check_bundle(folder):
+    """A presentation bundle (PREZENTACE-WEB.md): no game data, every derived file sealed and
+    listed in seal.json, manifest.json matching the files on disk. Returns
+    ``{'files': n, 'bytes': n, 'sealed': [...], 'problems': [...], 'big': [...]}``."""
+    folder = Path(folder)
+    problems, big, sealed = [], [], []
+    present = {str(p.relative_to(folder)): p for p in folder.rglob('*') if p.is_file()}
+    for rel, p in present.items():
+        if p.suffix.lower() in GAME_DATA:
+            problems.append('game data in the bundle: %s' % rel)
+        if p.stat().st_size > BIG:
+            big.append((rel, p.stat().st_size))
+    seal_json = folder / 'sealed' / 'seal.json'
+    if seal_json.exists():
+        m = json.loads(seal_json.read_text())
+        if m.get('seal') != VERSION:
+            problems.append('sealed/seal.json: not %s' % VERSION)
+        for f in m.get('files', []):
+            sealed.append(f['path'])
+            if not (folder / 'sealed' / (f['path'] + '.sealed')).exists():
+                problems.append('sealed/seal.json lists %s but sealed/%s.sealed is missing' % (f['path'], f['path']))
+            if (folder / f['path']).exists():
+                problems.append('%s is sealed and also present in the clear' % f['path'])
+        if not m.get('keys'):
+            problems.append('sealed/seal.json has no disk sets')
+    manifest = folder / 'manifest.json'
+    if manifest.exists():
+        mf = json.loads(manifest.read_text())
+        entries = mf.get('files', mf if isinstance(mf, list) else [])
+        listed = set()
+        for e in entries:
+            rel = e['path']
+            listed.add(rel)
+            p = present.get(rel)
+            if p is None:
+                problems.append('manifest lists %s, not in the bundle' % rel)
+                continue
+            if 'size' in e and e['size'] != p.stat().st_size:
+                problems.append('%s: manifest size %d, file %d' % (rel, e['size'], p.stat().st_size))
+            if 'sha256' in e and e['sha256'] != hashlib.sha256(p.read_bytes()).hexdigest():
+                problems.append('%s: sha256 differs from the manifest' % rel)
+            if e.get('derived') and not (rel.startswith('sealed/') and rel.endswith('.sealed')):
+                problems.append('%s is derived from the game but not sealed' % rel)
+        for rel in present:
+            if rel not in listed and rel != 'manifest.json':
+                problems.append('%s is in the bundle but not in the manifest' % rel)
+    else:
+        problems.append('no manifest.json')
+    for rel in present:
+        if rel.startswith('sealed/') and rel.endswith('.sealed') and rel[len('sealed/'):-len('.sealed')] not in sealed:
+            problems.append('%s is not listed in sealed/seal.json' % rel)
+    return {'files': len(present), 'bytes': sum(p.stat().st_size for p in present.values()),
+            'sealed': sealed, 'problems': problems, 'big': big}
