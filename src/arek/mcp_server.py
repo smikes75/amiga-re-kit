@@ -232,7 +232,7 @@ def hwscan(path: str, base: str, roots: list, lo: str = None, hi: str = None,
 @mcp.tool()
 def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = None,
            stubs: list = None, with_main: bool = False, flow: dict = None, timing: bool = False,
-           memsz: str = None, slow: str = None) -> dict:
+           memsz: str = None, slow: str = None, profile: bool = False) -> dict:
     """Statically recompile 68k routines to C. ``auto``: entry addresses whose
     bodies are discovered by walking; ``funcs``: 'START:END[:ENTRY]' linear
     ranges; ``stubs``: 'An:DISP:NAME' for jsr through jump tables. ``flow``: what
@@ -242,6 +242,7 @@ def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = No
     ``timing`` counts 68000 clocks per instruction into CYCLES (or the host's tick_hook).
     ``memsz``: chip RAM bytes (default "0x80000"); ``slow``: slow RAM "BASE:SIZE" in hex,
     e.g. "c00000:80000" (the driver then takes SLOW.bin SLOWOUT.bin as arguments 5 and 6).
+    ``profile``: the runtime counts per routine calls, clocks and written pages (recomp_profile).
     Anything the decoder does not support is refused, never skipped: the result is then
     {"refused": {"message", "frontiers": [{routine, site, kind, insn, operand, target, why}]}}
     with every place that needs a ``flow`` entry (addresses as hex strings)."""
@@ -259,7 +260,8 @@ def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = No
         src, stats, entries = rc.generate(data, b, fs, [_addr(a) for a in auto or []],
                                           with_main=with_main, flow=fl, timing=timing,
                                           memsz=_addr(memsz) if memsz else None,
-                                          slow=tuple(int(x, 16) for x in slow.split(':')) if slow else None)
+                                          slow=tuple(int(x, 16) for x in slow.split(':')) if slow else None,
+                                      profile=profile)
     except rc.Unsupported as e:
         return {'refused': rc.refusal_json(e)}
     Path(out_c).write_text(src)
@@ -407,6 +409,16 @@ def trace_compare(original: str, rebuild: str, ranges: list = None, ignore: list
                            for s, e, n in parity.best_shift(ta, tb, range(-best_shift, best_shift + 1), rng, ign)]}
     r = parity.compare(ta, tb, rng, ign, shift, regs, limit)
     return json.loads(json.dumps(r, default=str))
+
+
+@mcp.tool()
+def recomp_profile(path: str, by: str = 'clocks', top: int = 20, frame: int = None) -> list:
+    """The routines that matter most in a profile a translation wrote (recomp profile=True,
+    AREK_PROFILE / prof_dump): per routine calls, 68000 clocks, bytes written, its share of
+    the total and the address ranges it writes - what to rewrite or replace (--extern) first."""
+    from .m68k import profile
+    return [{**a, 'addr': '%06x' % a['addr'], 'pages': ['%x-%x' % p for p in a['pages']]}
+            for a in profile.summary(profile.read(path), by, top, frame)]
 
 
 @mcp.tool()

@@ -27,12 +27,15 @@ TIMING_RT = r'''
 /* 68000 clocks of the translated code (generate(timing=True); arek.m68k.timing, no DMA
    contention). Compile with -DTICK_HOOK to route every instruction to the host instead. */
 uint64_t CYCLES = 0;
+#ifndef PROF_TICK
+#define PROF_TICK(n) ((void)0)
+#endif
 #ifndef TICK                    /* a host may define its own TICK(pc, n) before this */
 #ifdef TICK_HOOK
 void tick_hook(M68 *m, uint32_t pc, uint32_t clocks);
-#define TICK(pc, n) tick_hook(m, (pc), (n))
+#define TICK(pc, n) (PROF_TICK(n), tick_hook(m, (pc), (n)))
 #else
-#define TICK(pc, n) (CYCLES += (n))
+#define TICK(pc, n) (PROF_TICK(n), CYCLES += (n))
 #endif
 #endif
 static uint32_t mulu_t(uint32_t s) { return 38 + 2 * (uint32_t)__builtin_popcount(s & 0xffff); }
@@ -60,6 +63,45 @@ static uint32_t divs_t(uint32_t dividend, uint32_t divisor) {
     return 2 * mc;
 }
 #endif
+'''
+
+PROFILE_RT = r'''
+/* Routine profile (generate(profile=True)): per translated entry the calls, the 68000 clocks
+   (with timing) and the bytes and 1 KB pages it wrote - chip RAM pages first, slow RAM pages
+   from MEMSZ/1024. prof_dump(f, frame) appends one row per entry, prof_reset() starts over:
+   a host calls them per frame, the verification driver at exit (AREK_PROFILE=file).
+   Attribution follows the translated call tree: a routine's own instructions and writes. */
+#define PROF_N %(n)du
+#define PROF_PAGEBYTES (((MEMSZ + SLOWSZ) / 1024 + 7) / 8)
+static const uint32_t PROF_ADDR[PROF_N] = { %(addrs)s };
+static uint64_t PROF_CALLS[PROF_N], PROF_CYC[PROF_N], PROF_WR[PROF_N];
+static uint8_t PROF_PAGES[PROF_N][PROF_PAGEBYTES];
+static int PROF_CUR = -1, PROF_STACK[512], PROF_SP = 0;
+#define PROF_TICK(n) (PROF_CUR >= 0 ? (void)(PROF_CYC[PROF_CUR] += (n)) : (void)0)
+#define PROF_WRITE(a) do { if (PROF_CUR >= 0) { PROF_WR[PROF_CUR]++; \
+    PROF_PAGES[PROF_CUR][(a) >> 13] |= (uint8_t)(1u << (((a) >> 10) & 7)); } } while (0)
+static void prof_enter(int i) { PROF_CALLS[i]++; if (PROF_SP < 512) PROF_STACK[PROF_SP++] = PROF_CUR; PROF_CUR = i; }
+static void prof_leave(void) { PROF_CUR = PROF_SP ? PROF_STACK[--PROF_SP] : -1; }
+void prof_reset(void) {
+    memset(PROF_CALLS, 0, sizeof PROF_CALLS); memset(PROF_CYC, 0, sizeof PROF_CYC);
+    memset(PROF_WR, 0, sizeof PROF_WR); memset(PROF_PAGES, 0, sizeof PROF_PAGES);
+}
+void prof_dump(FILE *f, long frame) {
+    static int header = 0;
+    if (!header) { header = 1; fprintf(f, "H %%x %%x %%x\n", (unsigned)MEMSZ, (unsigned)SLOWBASE, (unsigned)SLOWSZ); }
+    for (unsigned i = 0; i < PROF_N; i++) {
+        if (!PROF_CALLS[i] && !PROF_WR[i]) continue;
+        fprintf(f, "R %%ld %%x %%llu %%llu %%llu", frame, PROF_ADDR[i], (unsigned long long)PROF_CALLS[i],
+                (unsigned long long)PROF_CYC[i], (unsigned long long)PROF_WR[i]);
+        int run = -1;
+        for (unsigned p = 0; p <= 8 * PROF_PAGEBYTES; p++) {
+            int on = p < 8 * PROF_PAGEBYTES && (PROF_PAGES[i][p >> 3] >> (p & 7)) & 1;
+            if (on && run < 0) run = (int)p;
+            if (!on && run >= 0) { if ((int)p - 1 == run) fprintf(f, " %%x", run); else fprintf(f, " %%x-%%x", run, p - 1); run = -1; }
+        }
+        fputc('\n', f);
+    }
+}
 '''
 
 WAIT_RT = r'''
@@ -98,6 +140,7 @@ uint8_t SLOWLOG[SLOWSZ];
 typedef struct { uint32_t d[8], a[8]; int x, n, z, v, c; uint32_t srhi; } M68;
 void exit_point(M68 *m, uint32_t at);   /* a Flow.exits routine was called: the host ends the run */
 
+%%PROFILE%%
 %%TIMING%%
 
 static void oob(uint32_t a) {
@@ -173,12 +216,13 @@ static uint32_t rd16(uint32_t a) {
 static uint32_t rd32(uint32_t a) { return (rd16(a) << 16) | rd16(a + 2); }
 static void wr8(uint32_t a, uint32_t v) {
     if (CUSTOM(a)) { v &= 0xff; hw_write(a & 0x1fe, (v << 8) | v); return; }   /* 68000: the byte on both halves of the bus */
-    if (a < MEMSZ) { MEM[a] = v; WRLOG[a] = 1; return; }
+    if (a < MEMSZ) { MEM[a] = v; WRLOG[a] = 1; PROF_WRITE(a); return; }
     uint8_t *p = slow_at(a);
     if (!p) oob(a);
     *p = v;
 #if SLOWSZ
     SLOWLOG[a - SLOWBASE] = 1;
+    PROF_WRITE(MEMSZ + (a - SLOWBASE));
 #endif
 }
 static void wr16(uint32_t a, uint32_t v) {
@@ -497,6 +541,7 @@ static uint64_t overlay_fp(uint32_t base, uint32_t n) {
 }
 '''
 RUNTIME = RUNTIME.replace('%%TIMING%%', TIMING_RT + WAIT_RT)
+PROFILE_OFF = '#define PROF_WRITE(a) ((void)0)\n'
 
 
 class Gen:
@@ -505,8 +550,9 @@ class Gen:
     def STUBS(self):
         return decoder.STUBS
 
-    def __init__(self, data, base, funcs, cfg=None, flow=NOFLOW, timing=False):
+    def __init__(self, data, base, funcs, cfg=None, flow=NOFLOW, timing=False, profile=False):
         self.data, self.base, self.flow, self.timing = data, base, flow, timing
+        self.profile = profile and not flow.lib          # the profile lives in the main runtime
         self.funcs = funcs                  # [(start, end, entry)] - linearni useky
         self.cfg = cfg or {}                # entry -> {adresa: Insn} z grafu toku
         self.entries = {e: (s, en) for s, en, e in funcs}
@@ -521,13 +567,20 @@ class Gen:
 
     def gen(self):
         if not self.flow.lib:
-            self.emit(RUNTIME)
+            prof = ''
+            if self.profile:
+                entries = sorted(set(self.all_entries()))
+                prof = PROFILE_RT % {'n': max(1, len(entries)), 'addrs': ', '.join('0x%xu' % e for e in entries) or '0'}
+                self.prof_index = {e: k for k, e in enumerate(entries)}
+            self.emit(RUNTIME.replace('%%PROFILE%%', prof or PROFILE_OFF))
         else:                               # guarded: a main translation included before wins
             self.emit((TIMING_RT if self.timing else '') + WAIT_RT)
         for name in sorted(set(self.flow.externs.values())):
             self.emit('void %s(M68 *m);' % name)
         for entry in self.all_entries():
             self.emit('void %s(M68 *m);' % self.flow.fname(entry))
+            if self.profile:
+                self.emit('static void %s_body(M68 *m);' % self.flow.fname(entry))
         self.emit('void overlay_call(M68 *m, uint32_t a);')
         self.emit('void call_addr(M68 *m, uint32_t a);')
         if self.flow.module:
@@ -592,6 +645,16 @@ class Gen:
     def all_entries(self):
         return [e for _, _, e in self.funcs] + sorted(self.cfg)
 
+    def func_head(self, entry):
+        """The function head; with the profile the body is a static function wrapped by the
+        entry, which counts the call and keeps the current routine for clocks and writes."""
+        name = self.flow.fname(entry)
+        if not self.profile:
+            return 'void %s' % name
+        self.emit('void %s(M68 *m) { prof_enter(%d); %s_body(m); prof_leave(); }'
+                  % (name, self.prof_index[entry], name))
+        return 'static void %s_body' % name
+
     def gen_cfg_func(self, entry):
         """Telo z grafu toku: emituji se jen dosazitelne instrukce, propad na
         dalsi adresu se v poradi hlida a jinak se doplni `goto`."""
@@ -600,7 +663,7 @@ class Gen:
         order = sorted(ins)
         idx = {a: k for k, a in enumerate(order)}
         self.emit('/* vstup $%06x, %d instrukci z grafu toku */' % (entry, len(ins)))
-        self.emit('void %s(M68 *m) {' % self.flow.fname(entry))
+        self.emit('%s(M68 *m) {' % self.func_head(entry))
         if order and order[0] != entry:
             self.emit('    goto L%06x;' % entry)
         for k, a in enumerate(order):
@@ -620,7 +683,7 @@ class Gen:
 
     def gen_func(self, start, end, entry):
         self.emit('/* $%06x - $%06x, vstup $%06x */' % (start, end, entry))
-        self.emit('void %s(M68 *m) {' % self.flow.fname(entry))
+        self.emit('%s(M68 *m) {' % self.func_head(entry))
         self.cur = entry
         if entry != start:
             self.emit('    goto L%06x;' % entry)
@@ -1131,6 +1194,9 @@ int main(int argc, char **argv) {
     fprintf(f, "blits %ld\n", BLITS);
     if (EXIT_AT) fprintf(f, "exit %x\n", EXIT_AT);
     fprintf(f, "cycles %llu\n", (unsigned long long)CYCLES);
+#ifdef PROF_N
+    if (getenv("AREK_PROFILE")) { FILE *pf = fopen(getenv("AREK_PROFILE"), "w"); if (pf) { prof_dump(pf, -1); fclose(pf); } }
+#endif
     for (int i = 0; i < HW_NOTES; i++) fprintf(f, "note %s\n", HW_NOTE[i]);
     for (int i = 0; i < 0x100; i++)
         if (HW_UNMODELLED[i]) fprintf(f, "hwreg %03x\n", i * 2);
@@ -1222,7 +1288,7 @@ def refusal_json(e):
 
 
 def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow=NOFLOW,
-             stub_impl=None, timing=False, memsz=None, slow=None):
+             stub_impl=None, timing=False, memsz=None, slow=None, profile=False):
     """Return (c_source, stats, entries). ``funcs`` are (start, end, entry) linear ranges,
     ``auto`` are entry addresses whose bodies are discovered by walking the
     flow graph (transitively over bsr/jsr). ``flow`` (a decoder.Flow) carries what the
@@ -1231,6 +1297,8 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
     stubs that record a hardware note, or C source with their bodies.
     ``timing``: every instruction adds its 68000 clocks (arek.m68k.timing, branch outcome and
     MUL/DIV operands included) through TICK(pc, n) into CYCLES or the host's tick_hook.
+    ``profile``: per routine the calls, clocks and written bytes/pages (prof_dump, prof_reset;
+    the driver writes it to $AREK_PROFILE) - what to rewrite first; not for lib modules.
     A refusal raises Unsupported with the first frontier as its text and all of them in
     ``.frontiers`` (decoder.frontier), so one run lists every place that needs a Flow entry.
     ``memsz``: chip RAM bytes from 0 (default 512 KB); ``slow``: (base, size) of slow RAM, e.g.
@@ -1256,7 +1324,7 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
             cfg[e] = ins
         if found:
             raise Unsupported(first, found)
-    g = Gen(data, base, list(funcs), cfg, flow, timing)
+    g = Gen(data, base, list(funcs), cfg, flow, timing, profile)
     src = g.gen()
     if stub_impl is not None and decoder.STUBS:
         names = sorted(set(decoder.STUBS.values()))

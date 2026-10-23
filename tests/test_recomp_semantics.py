@@ -3,6 +3,7 @@
 Each case is a tiny program (one instruction + rts) run on a zeroed RAM; the
 expected registers and flags are worked out by hand from the 68000 manual.
 """
+import os
 import shutil
 import subprocess
 
@@ -16,7 +17,7 @@ FLAGS = 'xnzvc'
 
 
 def run(tmp_path, hexcode, regs, flags='00000', auto=(BASE,), extra_c='', logs=None, pre_c='',
-        ram_init=None, **gen):
+        ram_init=None, env=None, **gen):
     """Run ``hexcode`` + rts at BASE (also placed in RAM); return (d, a, flags, RAM).
     ``gen`` goes to recomp.generate (flow=...), ``extra_c`` is appended to the source and
     ``pre_c`` put before it (host macros), ``ram_init`` = {address: bytes} written to RAM first,
@@ -40,7 +41,8 @@ def run(tmp_path, hexcode, regs, flags='00000', auto=(BASE,), extra_c='', logs=N
     line = ' '.join('%x' % r.get(n, 0) for n in ['d%d' % i for i in range(8)] + ['a%d' % i for i in range(8)])
     (tmp_path / 'regs.txt').write_text(line + '\n%s\nf_%06x\n' % (' '.join(flags), BASE))
     out, log = tmp_path / 'out.bin', tmp_path / 'log.txt'
-    subprocess.run([str(exe), str(tmp_path / 'ram.bin'), str(tmp_path / 'regs.txt'), str(out), str(log)], check=True)
+    subprocess.run([str(exe), str(tmp_path / 'ram.bin'), str(tmp_path / 'regs.txt'), str(out), str(log)], check=True,
+                   env={**os.environ, **(env or {})})
     rows = log.read_text().split('\n')
     if logs is not None:
         logs.append(log.read_text())
@@ -309,7 +311,7 @@ def test_timing_counts_the_path_actually_run(tmp_path):
 
 def test_timing_is_off_by_default_and_has_a_host_hook():
     src, _, _ = recomp.generate(bytes.fromhex('4e714e75'), BASE, auto=[BASE])
-    assert 'TICK(0x' not in src.split('#define TICK(pc, n) (CYCLES += (n))')[1]
+    assert 'TICK(0x' not in src.split('#define TICK(pc, n) (PROF_TICK(n), CYCLES += (n))')[1]
     assert '#ifdef TICK_HOOK' in src
     src, _, _ = recomp.generate(bytes.fromhex('4e714e75'), BASE, auto=[BASE], timing=True)
     assert 'TICK(0x1000u, 4);' in src and 'TICK(0x1002u, 16);' in src

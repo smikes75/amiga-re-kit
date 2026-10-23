@@ -25,6 +25,7 @@
     arek diff        DIR_A DIR_B [--range LO HI]
     arek render      CAPTURE [--ram F --cop A] [--png OUT] [--compare RAW]
     arek selftest    inputs|display [--vahl BINARY]   (needs only the Kickstart ROM)
+    arek profile     PROFILE [--by clocks|calls|bytes] [--top N] [--frame F]
     arek web         copy DIR | demo [--port N] | test URL [--quick]   (display contract)
     arek web         seal FILE... --set D1.adf[,D2.adf] --out DIR      (code derived from a game, opened by the disk)
     arek init        [DIR]
@@ -273,7 +274,7 @@ def cmd_recomp(a):
         src, stats, entries = recomp.generate(
             data, a.base, funcs, a.auto or [], a.lo or a.base, a.hi, with_main=a.main, flow=flow,
             stub_impl=impl, timing=a.timing, memsz=a.memsz,
-            slow=tuple(_hex(x) for x in a.slow.split(':')) if a.slow else None)
+            slow=tuple(_hex(x) for x in a.slow.split(':')) if a.slow else None, profile=a.profile)
     except recomp.Unsupported as e:
         if a.refusals:
             Path(a.refusals).write_text(json.dumps(recomp.refusal_json(e), indent=1) + '\n')
@@ -389,6 +390,16 @@ def cmd_render(a):
                                                        ', box %s, rows %d' % (d['box'], len(d['rows'])) if d['pixels'] else ''))
         if d['pixels'] and a.fail:
             raise RuntimeError('the render differs from the screenshot')
+
+
+def cmd_profile(a):
+    from .m68k import profile
+    rows = profile.read(a.file)
+    out = profile.summary(rows, a.by, a.top, a.frame)
+    if a.json:
+        print(json.dumps(out, indent=1))
+    else:
+        print(profile.format_summary(out, a.by))
 
 
 def cmd_web(a):
@@ -691,6 +702,8 @@ def build_parser():
                    help='jsr/jmp (An) resolved at run time by address over all entries (call_addr)')
     s.add_argument('--stub-impl', metavar='FILE|notes', help='C bodies of the stubs, or "notes" for empty ones')
     s.add_argument('--timing', action='store_true', help='count 68000 clocks per instruction (TICK / CYCLES)')
+    s.add_argument('--profile', action='store_true', help='per routine: calls, clocks, written bytes and pages '
+                   '(prof_dump; the driver writes $AREK_PROFILE)')
     s.add_argument('--inline', nargs='*', metavar='ROUTINE[,..]:until=HHHH|words=N|longs=N|string',
                    help='the routine reads data stored after its call and returns behind it (hex)')
     s.add_argument('--main', action='store_true', help='append the verification driver main()')
@@ -786,6 +799,14 @@ def build_parser():
     s.add_argument('--plain', action='store_true', help='colours as nibble x 17 instead of the vAmiga monitor')
     s.add_argument('--fail', action='store_true', help='exit 1 when the render differs from the screenshot')
     s.set_defaults(fn=cmd_render)
+
+    s = sp.add_parser('profile', help='routine profile of a translation run (recomp --profile): what to rewrite first')
+    s.add_argument('file', help='the profile the runtime wrote (AREK_PROFILE or prof_dump)')
+    s.add_argument('--by', choices=['clocks', 'calls', 'bytes'], default='clocks')
+    s.add_argument('--top', type=int, default=20)
+    s.add_argument('--frame', type=int, help='one frame of a per-frame dump')
+    s.add_argument('--json', action='store_true')
+    s.set_defaults(fn=cmd_profile)
 
     s = sp.add_parser('web', help='display contract: reference wb-obraz.js, demo page, Chromium tests (WB-OBRAZ-CRT.md)')
     s.add_argument('what', choices=['copy', 'demo', 'test', 'seal'])

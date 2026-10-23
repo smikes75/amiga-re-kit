@@ -90,7 +90,7 @@ def test_lib_with_timing_carries_its_helpers_and_shares_them(tmp_path):
     subprocess.run([cc, '-c', '-Werror', '-Wno-unused-function', '-o', str(tmp_path / 'both.o'), str(c)],
                    check=True)
     # a host that defines its own TICK first keeps it: the module only defines TICK when missing
-    assert msrc.index('#ifndef TICK') < msrc.index('#define TICK(pc, n) (CYCLES += (n))')
+    assert msrc.index('#ifndef TICK') < msrc.index('#define TICK(pc, n) (PROF_TICK(n), CYCLES += (n))')
 
 
 def test_address_spellings(capsys):
