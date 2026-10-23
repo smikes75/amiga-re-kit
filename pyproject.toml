@@ -25,7 +25,7 @@ dependencies = []
 png = []                # kept for old install lines: PNG output needs no extra package since 0.4.4
 mcp = ["mcp>=1.2"]
 dev = ["pytest>=8", "mcp>=1.2"]
-web = ["playwright>=1.40"]
+web = ["playwright>=1.40", "cryptography>=41"]
 
 [project.scripts]
 arek = "arek.cli:main"
@@ -43,7 +43,7 @@ version = {attr = "arek.__version__"}
 
 [tool.setuptools.package-data]
 "arek.headless" = ["patches/*.patch", "selftest_display.s"]
-"arek.web" = ["wb-obraz.js", "demo.html"]
+"arek.web" = ["wb-obraz.js", "wb-seal.js", "demo.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

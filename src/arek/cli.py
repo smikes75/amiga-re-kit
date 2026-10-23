@@ -26,6 +26,7 @@
     arek render      CAPTURE [--ram F --cop A] [--png OUT] [--compare RAW]
     arek selftest    inputs|display [--vahl BINARY]   (needs only the Kickstart ROM)
     arek web         copy DIR | demo [--port N] | test URL [--quick]   (display contract)
+    arek web         seal FILE... --set D1.adf[,D2.adf] --out DIR      (code derived from a game, opened by the disk)
     arek init        [DIR]
 
 All addresses accept ``0x`` or ``$`` hex, or decimal; the flow specs of ``recomp``
@@ -397,9 +398,23 @@ def cmd_web(a):
     if a.what == 'copy':
         dest = Path(a.target or '.')
         dest.mkdir(parents=True, exist_ok=True)
-        out = dest / 'wb-obraz.js'
-        shutil.copyfile(web / 'wb-obraz.js', out)
-        print('%s  sha256 %s (wb-obraz %s)' % (out, hashlib.sha256(out.read_bytes()).hexdigest(), _wb_version(web)))
+        for name in ('wb-obraz.js', 'wb-seal.js'):
+            out = dest / name
+            shutil.copyfile(web / name, out)
+            print('%s  sha256 %s' % (out, hashlib.sha256(out.read_bytes()).hexdigest()))
+        print('(wb-obraz %s)' % _wb_version(web))
+    elif a.what == 'seal':
+        from . import seal
+        files = [f for f in [a.target] + (a.rest or []) if f]
+        if not files or not a.set or not a.out:
+            raise ValueError('web seal FILE... --set DISK.adf[,DISK2.adf] [--set ...] --out DIR [--root DIR]')
+        root = Path(a.root or '.')
+        plain = {str(Path(f).resolve().relative_to(root.resolve())): rd(f) for f in files}
+        sets = [[rd(p) for p in spec.split(',')] for spec in a.set]
+        manifest, blobs = seal.seal(plain, sets)
+        path = seal.write_dir(a.out, manifest, blobs)
+        print('%s: %d files sealed for %d disk sets (%s)' % (path, len(blobs), len(sets),
+                                                            '; '.join(','.join(d[:12] for d in k['disks']) for k in manifest['keys'])))
     elif a.what == 'demo':
         import functools
         import http.server
@@ -773,8 +788,14 @@ def build_parser():
     s.set_defaults(fn=cmd_render)
 
     s = sp.add_parser('web', help='display contract: reference wb-obraz.js, demo page, Chromium tests (WB-OBRAZ-CRT.md)')
-    s.add_argument('what', choices=['copy', 'demo', 'test'])
-    s.add_argument('target', nargs='?', help='copy: destination folder; test: URL of a page with window.wbObrazTest')
+    s.add_argument('what', choices=['copy', 'demo', 'test', 'seal'])
+    s.add_argument('target', nargs='?', help='copy: destination folder; test: URL of a page with window.wbObrazTest; '
+                   'seal: the first file')
+    s.add_argument('rest', nargs='*', help='seal: more files')
+    s.add_argument('--set', action='append', metavar='DISK.adf[,DISK2.adf]',
+                   help='seal: a disk set that opens the files (repeat for other versions)')
+    s.add_argument('--out', help='seal: output folder (seal.json + FILE.sealed)')
+    s.add_argument('--root', help='seal: paths in seal.json are relative to this folder (default .)')
     s.add_argument('--port', type=int, default=8920, help='demo: port')
     s.add_argument('--quick', action='store_true', help='test: fewer combinations')
     s.set_defaults(fn=cmd_web)
