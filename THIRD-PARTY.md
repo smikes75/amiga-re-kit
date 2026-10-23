@@ -9,6 +9,7 @@ The kit's own code (`src/arek`, `tests`, `docs`) is MIT (see `LICENSE`).
 | vAmiga colour pipeline (`PixelEngine`), Dirk W. Hoffmann | MPL-2.0 | not included. `arek.display.vamiga_rgb` computes the same conversion (YUV matrix, gamma 2.8 / 2.2, default monitor settings) so a render can be compared with a vAmiga screenshot; the formula came to the kit through the Turrican II and Alien Breed projects and was checked on 97 colours measured in the Superfrog Sonnet project |
 | vAmiga macOS application | GPL-3.0 | not used |
 | [mcp](https://pypi.org/project/mcp/) Python SDK | MIT | optional dependency (`arek-mcp`) |
+| [cryptography](https://pypi.org/project/cryptography/) | Apache-2.0 / BSD | optional (`[web]` extra): AES-GCM for `arek web seal` |
 | Pillow | MIT-CMU | no longer used (PNG is written with the standard library since 0.4.4) |
 
 ## What is deliberately absent
