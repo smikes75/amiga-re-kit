@@ -281,6 +281,8 @@ arek trace audio build/l1_audio.bin
 - `--skip N`, `--from-frame F`: no records for the first N hits / before frame F.
 - Line k applies in frame OFF + k, OFF = the frame of the first breakpoint hit (measured in the
   Superfrog Sonnet project); the breakpoint must be hit first in each frame.
+- `arek trace compare` on game state: counters the VBL handler bumps every frame differ even when
+  the game matches - leave them out with `--ignore START:LEN` (hex), e.g. `--ignore c01978:4`.
 - `wait N frames` after `debugger` / `break at` / `commander` prints `std::exception` in
   the log; the wait still happens (Alien Breed project).
 

@@ -82,3 +82,10 @@ def test_png_decoder_reads_the_kits_png():
         shot.write_png(p, 2, 2, rgb)
         w, h, rows = webtest.png_rgb(open(p, 'rb').read())
     assert (w, h) == (2, 2) and rows == [[(10, 20, 30), (40, 50, 60)], [(70, 80, 90), (100, 110, 120)]]
+
+
+def test_global_name_for_es_modules():
+    # an ES module that imports nothing reads the module through globalThis (SF-sonet KIT-GAPS 15)
+    assert js("(() => { delete globalThis.WBOBRAZ; delete require.cache[require.resolve(%s)]; require(%s); "
+              "return typeof globalThis.WBOBRAZ.quantum; })()" % ((json.dumps(str(WEB / 'wb-obraz.js')),) * 2)) == 'function'
+    assert 'wbObrazTest.set(mode' in (WEB / 'wb-obraz.js').read_text()

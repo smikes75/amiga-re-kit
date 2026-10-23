@@ -417,7 +417,7 @@ def cmd_web(a):
         try:
             r = webtest.run(a.target, quick=a.quick)
         except ImportError as e:
-            raise RuntimeError('web test needs playwright (pip install playwright; playwright install chromium)') from e
+            raise RuntimeError('web test needs playwright: pip install amiga-re-kit[web] && python -m playwright install chromium') from e
         for f in r['fails'][:30]:
             print('FAIL', f)
         print('%d checks, %d failures' % (r['checks'], len(r['fails'])))

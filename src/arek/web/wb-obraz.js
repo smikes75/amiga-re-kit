@@ -2,8 +2,17 @@
 // (amiga-re-kit, WB-OBRAZ-CRT.md). Whole device pixels per game pixel (S), zoom = window width in
 // multiples of the Original's width W0, the CRT as a second canvas in device pixels, blur 0.8 game
 // pixel at 100 %, the content placed on a whole device pixel by layout (left/top) - never transform.
-// No game data. Works as a <script> (global WBOBRAZ), as CommonJS (require) and in Node for tests.
+// No game data. Works as a <script> (global WBOBRAZ, also globalThis.WBOBRAZ - an ES module that imports
+// nothing can read it there), as CommonJS (require) and in Node for tests.
 // Projects copy this file (`arek web copy DIR`) and keep its sha256 in their docs.
+//
+// Test hooks a page provides for `arek web test URL` (contract §5):
+//   window.wbObrazTest.set(mode, {zoom, crtDetail, crtShape, crt, blur}) -> info
+//       mode 'original' | 'enhanced'; zoom: window width in multiples of W0, 0 = fit; returns
+//       {scale: S, W, H, P, D, origin: [x, y] device px, backing: [w, h], content: [W*S, H*S],
+//        crtLayer: [w, h], crtOrigin: [x, y]}   (Screen.info() gives origin/backing/crtLayer/crtOrigin)
+//   window.wbObrazTest.fill(kind) -> true      kind 'grey' | 'rows' | 'cols' (testPattern)
+// arek web test needs `pip install amiga-re-kit[web]` and `python -m playwright install chromium`.
 'use strict';
 const WBOBRAZ = (() => {
     const VERSION = '1.3';
@@ -161,4 +170,5 @@ const WBOBRAZ = (() => {
     return { VERSION, CRT_DETAILS, CRT_SHAPES, CRT_ROW, CRT_SCREEN, CRT_LINE, CRT_RGB, MODE_MS, VIEW_DEFAULTS, WORDS,
              deviceScale, crtParams, drawCrt, filter, crtOn, smoothstep, zoomLabel, quantum, padded, snap, testPattern, Screen };
 })();
+if (typeof globalThis !== 'undefined') globalThis.WBOBRAZ = WBOBRAZ;
 if (typeof module !== 'undefined') module.exports = WBOBRAZ;
