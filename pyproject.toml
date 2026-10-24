@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE", "THIRD-PARTY.md"]
-authors = [{ name = "Štěpán Mikeš" }]
+authors = [{ name = "smikes75" }]
 keywords = ["amiga", "68000", "reverse-engineering", "adf", "powerpacker", "bytekiller", "vamiga", "mcp", "recompiler"]
 classifiers = [
   "Development Status :: 3 - Alpha",

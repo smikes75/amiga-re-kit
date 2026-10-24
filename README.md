@@ -146,7 +146,7 @@ Claude Code (`.mcp.json` in your project, or `claude mcp add arek -- arek-mcp`):
 {"mcpServers": {"arek": {"command": "arek-mcp"}}}
 ```
 
-The server exposes 22 tools (`kit_info`, `adf_info`, `adf_map`, `adf_ls`, `adf_file`, `scan_packed`, `unpack`,
+The server exposes 26 tools (`kit_info`, `adf_info`, `adf_map`, `adf_ls`, `adf_file`, `scan_packed`, `unpack`,
 `hunk_load`, `disassemble`, `walk`, `hwscan`, `recomp`, `xref`, `copper`,
 `headless_shot`, `headless_bpstate`, `trace_records`, `diff_captures`, `ram_at`, …).
 `kit_info` returns the version and the SHA-256 of the decoder and recompiler;

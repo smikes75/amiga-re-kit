@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>amiga-re-kit</title>
+<title>AREK: the kit</title>
+<link rel="alternate" hreflang="en" href="kit.html">
+<link rel="alternate" hreflang="cs" href="kit.cs.html">
 <meta name="description" content="Tools for measured reverse engineering of Amiga floppy games: entropy maps, packers, a strict 68000 decoder and recompiler, headless vAmiga captures, and an MCP server. Drop your own .adf to see the first measurement.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
@@ -46,6 +48,7 @@
   .wrap { width: min(1120px, 100% - 32px); margin: 0 auto; }
 
   header.top {
+    position: sticky; top: 0; z-index: 10; background: var(--blue);
     display: flex; justify-content: space-between; align-items: baseline; gap: 24px;
     padding: 22px 0; border-bottom: 2px solid var(--line);
   }
@@ -65,6 +68,9 @@
     background: var(--orange); color: var(--black); border: 0; padding: 10px 16px; font: inherit;
     font-weight: 600; cursor: pointer;
   }
+  #claude .btn { display: inline-block; margin: 0 8px 8px 0; }
+  .btn.quiet { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px var(--muted); }
+  .btn.quiet:hover { box-shadow: inset 0 0 0 2px var(--orange); color: var(--ink); }
   .btn:hover { background: var(--sand); }
   .drop small { color: var(--muted); flex: 1 1 220px; }
 
@@ -83,6 +89,10 @@
   .report .empty { color: var(--muted); }
 
   section { padding: 48px 0; border-top: 2px solid var(--line); }
+  section.lead { border-top: 0; padding: 56px 0 40px; }
+  section.lead h1 { margin-bottom: .5em; }
+  .hero.analyser { border-top: 2px solid var(--line); padding-top: 48px; }
+  .hero.analyser h2 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); }
   .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; max-width: 70ch; }
   .steps li { counter-increment: s; display: grid; grid-template-columns: 2.4em 1fr; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
   .steps li::before { content: counter(s); font-family: var(--mono); color: var(--orange); font-size: 1.3rem; line-height: 1.2; }
@@ -110,24 +120,56 @@
   @media (prefers-reduced-motion: no-preference) {
     .drop { transition: background .15s, border-color .15s; }
   }
+  /* the logo: a 3.5" floppy and a bitmap wordmark, 4 CSS px per cell, so every cell is whole device pixels */
+  header.top { align-items: center; }
+  header.top .name { display: block; line-height: 0; }
+  header.top .name svg { display: block; }
+  /* the header stays on screen; the page scrolls under it, anchors land below it */
+  html { scroll-padding-top: 84px; }
+  @media (max-width: 860px) {
+    html { scroll-padding-top: 96px; }
+    header.top { padding: 12px 0; gap: 6px 16px; }
+    header.top .name svg { width: 99px; height: 24px; }
+    header.top nav a { font-size: .9rem; white-space: nowrap; }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="top">
-    <a class="name" href="#">amiga-re-kit</a>
+    <a class="name" href="./" aria-label="AREK"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 37 8" width="148" height="32" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><path fill="#ff8a1f" d="M0 0h7v1h-7zM0 1h2v1h-2zM3 1h5v1h-5zM0 2h2v1h-2zM3 2h5v1h-5zM0 3h8v1h-8zM0 4h8v1h-8zM0 5h1v1h-1zM7 5h1v1h-1zM0 6h1v1h-1zM7 6h1v1h-1zM0 7h8v1h-8z"/><path fill="#ffd27a" d="M1 5h6v1h-6zM1 6h6v1h-6z"/><path fill="#ffffff" d="M11 1h4v1h-4zM10 2h1v1h-1zM15 2h1v1h-1zM10 3h1v1h-1zM15 3h1v1h-1zM10 4h6v1h-6zM10 5h1v1h-1zM15 5h1v1h-1zM10 6h1v1h-1zM15 6h1v1h-1zM10 7h1v1h-1zM15 7h1v1h-1zM17 1h5v1h-5zM17 2h1v1h-1zM22 2h1v1h-1zM17 3h1v1h-1zM22 3h1v1h-1zM17 4h5v1h-5zM17 5h1v1h-1zM20 5h1v1h-1zM17 6h1v1h-1zM21 6h1v1h-1zM17 7h1v1h-1zM22 7h1v1h-1zM24 1h6v1h-6zM24 2h1v1h-1zM24 3h1v1h-1zM24 4h5v1h-5zM24 5h1v1h-1zM24 6h1v1h-1zM24 7h6v1h-6zM31 1h1v1h-1zM36 1h1v1h-1zM31 2h1v1h-1zM35 2h1v1h-1zM31 3h1v1h-1zM34 3h1v1h-1zM31 4h3v1h-3zM31 5h1v1h-1zM34 5h1v1h-1zM31 6h1v1h-1zM35 6h1v1h-1zM31 7h1v1h-1zM36 7h1v1h-1z"/></svg></a>
     <nav>
+      <a href="./">The story</a>
+      <a href="#claude">For your Claude</a>
+      <a href="#try">Try it</a>
       <a href="#method">Method</a>
-      <a href="#inside">What's inside</a>
       <a href="#mcp">MCP</a>
+      <a href="#inside">What's inside</a>
       <a href="https://github.com/smikes75/amiga-re-kit">GitHub</a>
+      <a href="kit.cs.html" lang="cs" hreflang="cs">Česky</a>
     </nav>
   </header>
 
-  <div class="hero">
+  <section id="claude" class="lead">
+    <div class="two">
+      <div>
+        <h1>Don't know where to start? Hand it to your Claude</h1>
+        <p>The kit was built to be driven by an AI agent. A one-page brief tells the agent the rules (measure, never guess; game data stays out of git), how to set the kit up and the order of the steps. Claude Code reads it as <code>CLAUDE.md</code>; any other agent takes it as the first message.</p>
+        <p><a class="btn" href="arek-agent.md" download>Download the brief (arek-agent.md)</a></p>
+        <p class="note">Four steps, nothing else to configure. The agent asks you for the path to your disk image; the image stays on your machine.</p>
+      </div>
+      <pre><code>pip install "amiga-re-kit[mcp]"
+mkdir mygame && cd mygame && arek init .
+# put the .adf path into local.conf (ADF1=…)
+# save arek-agent.md here as CLAUDE.md
+claude      # "Read CLAUDE.md and measure the disk."</code></pre>
+    </div>
+  </section>
+
+  <div class="hero analyser" id="try">
     <div>
-      <h1>Measure the original before you touch it.</h1>
-      <p class="lede">Tools for reverse engineering Amiga floppy games, extracted from three finished projects. Entropy maps, packers, a strict 68000 decoder and recompiler, headless emulator captures — and an MCP server so an assistant can hold the same instruments.</p>
+      <h2>Measure the original before you touch it.</h2>
+      <p class="lede">Tools for reverse engineering Amiga floppy games, extracted from four game rebuilds. Entropy maps, packers, a strict 68000 decoder and recompiler, headless emulator captures — and an MCP server so an assistant can hold the same instruments.</p>
       <label class="drop" id="drop" tabindex="0">
         <input type="file" id="file" accept=".adf,.ADF,application/octet-stream">
         <span class="btn">Choose an .adf</span>
@@ -164,27 +206,6 @@
     <p style="margin-top:20px">The long version with commands: <a href="https://github.com/smikes75/amiga-re-kit/blob/main/docs/METHOD.md">docs/METHOD.md</a>. The headless vAmiga setup: <a href="https://github.com/smikes75/amiga-re-kit/blob/main/docs/HEADLESS.md">docs/HEADLESS.md</a>.</p>
   </section>
 
-  <section id="inside">
-    <h2>What's inside</h2>
-    <table>
-      <thead><tr><th>module</th><th>what it does</th><th>came from</th></tr></thead>
-      <tbody>
-        <tr><td>arek.adf</td><td>geometry, boot block checksum, entropy map and regions, inventory record</td><td>new</td></tr>
-        <tr><td>arek.packers</td><td>PowerPacker 2.0, Bytekiller B and the SWIV word-stream variant, Turrican II three-stage; brute-force scan with verification</td><td>SWIV, Turrican II</td></tr>
-        <tr><td>arek.hunk</td><td>bounded AmigaDOS HUNK reader: CODE/DATA/BSS, RELOC32, split streams; a builder for small probes</td><td>Superfrog</td></tr>
-        <tr><td>arek.copper</td><td>copper list disassembler with custom register names</td><td>SWIV</td></tr>
-        <tr><td>arek.m68k.decoder</td><td>strict 68000 decoder that raises on anything it does not model; flow-graph walker that reports frontiers</td><td>Superfrog</td></tr>
-        <tr><td>arek.m68k.hwscan</td><td>pure-RAM routines versus hardware routines, with unknown address-register bases kept explicit</td><td>Turrican II</td></tr>
-        <tr><td>arek.m68k.recomp</td><td>static 68k to C with a verification driver: RAM in, RAM and write log out</td><td>Superfrog</td></tr>
-        <tr><td>arek.m68k.xref, audit</td><td>cross references from objdump listings; profile-driven inventory and reachability as JSON</td><td>Superfrog</td></tr>
-        <tr><td>arek.headless</td><td>RetroShell scripts, screenshots, breakpoint captures through a patched VAHeadless; the patches are included</td><td>Turrican II, Superfrog</td></tr>
-        <tr><td>arek.contract</td><td>byte-level comparison of captures, register diffs, "must not touch" assertions</td><td>Superfrog</td></tr>
-        <tr><td>arek, arek-mcp</td><td>the command line (19 subcommands) and the MCP server (22 tools)</td><td>new</td></tr>
-      </tbody>
-    </table>
-    <p style="margin-top:18px">75 tests run on synthetic data only: a hand-assembled 20-byte program, random buffers, a generated boot block.</p>
-  </section>
-
   <section id="mcp">
     <div class="two">
       <div>
@@ -199,17 +220,45 @@
   }
 }
 
-// tools, in the order you will use them
-adf_info      adf_map       adf_regions    adf_extract
-scan_packed   unpack        hunk_info      hunk_load
-disassemble   walk          hwscan         recomp
-xref          copper        ram_at
-headless_shot headless_bpstate  diff_captures</code></pre>
+// the 26 tools, in the order you will use them
+kit_info       adf_info       adf_map        adf_regions
+adf_ls         adf_file       adf_extract    scan_packed
+unpack         hunk_info      hunk_load      disassemble
+walk           hwscan         xref           copper
+recomp         recomp_profile ram_at         headless_shot
+headless_bpstate diff_captures render       trace_records
+trace_compare  trace_bus</code></pre>
     </div>
   </section>
 
+  <section id="inside">
+    <h2>What's inside</h2>
+    <table>
+      <thead><tr><th>module</th><th>what it does</th><th>came from</th></tr></thead>
+      <tbody>
+        <tr><td>arek.adf</td><td>geometry, boot block checksum, entropy map and regions, inventory record</td><td>new</td></tr>
+        <tr><td>arek.amigados</td><td>OFS/FFS file system reader: directory listing, file extraction, safe paths</td><td>Alien Breed</td></tr>
+        <tr><td>arek.packers</td><td>PowerPacker 2.0, Bytekiller B and the SWIV word-stream variant, Turrican II three-stage, Atomik (ATN!); brute-force scan with verification</td><td>SWIV, Turrican II, Superfrog</td></tr>
+        <tr><td>arek.hunk</td><td>bounded AmigaDOS HUNK reader: CODE/DATA/BSS, RELOC32, split streams; a builder for small probes</td><td>Superfrog</td></tr>
+        <tr><td>arek.copper</td><td>copper list disassembler with custom register names</td><td>SWIV</td></tr>
+        <tr><td>arek.m68k.decoder</td><td>strict 68000 decoder that raises on anything it does not model; flow-graph walker that reports frontiers</td><td>Superfrog</td></tr>
+        <tr><td>arek.m68k.hwscan</td><td>pure-RAM routines versus hardware routines, with unknown address-register bases kept explicit</td><td>Turrican II</td></tr>
+        <tr><td>arek.m68k.recomp</td><td>static 68k to C with a verification driver: RAM in, RAM and write log out; jump tables, indirect targets, external routines, overlay modules, optional clock counting</td><td>Superfrog, Alien Breed</td></tr>
+        <tr><td>arek.m68k.timing</td><td>68000 clock count of every instruction, data-dependent ones included; matches Moira on all 42 247 decodable opcodes</td><td>new</td></tr>
+        <tr><td>arek.m68k.xref, audit</td><td>cross references from objdump listings; profile-driven inventory and reachability as JSON</td><td>Superfrog</td></tr>
+        <tr><td>arek.headless</td><td>RetroShell scripts, screenshots, breakpoint captures and continuous traces through a patched VAHeadless; the patches are included</td><td>Turrican II, Superfrog, Alien Breed</td></tr>
+        <tr><td>arek.contract</td><td>byte-level comparison of captures, register diffs, "must not touch" assertions</td><td>Superfrog</td></tr>
+        <tr><td>arek.m68k.profile</td><td>per-routine calls, clocks and memory pages from a profiled recompilation: which routines an enhancement has to touch</td><td>new</td></tr>
+        <tr><td>arek.display, parity</td><td>a frame rendered from chip RAM with vAmiga's colour pipeline, 0 pixels off; long-run parity of a rebuild against the emulator's register and input logs</td><td>Turrican II, Alien Breed, Superfrog</td></tr>
+        <tr><td>arek.seal, web</td><td>what a playable page needs: the display contract (whole device pixels, CRT, tests), code sealed to the visitor's own disk, a checker for the published bundle</td><td>Alien Breed, Superfrog</td></tr>
+        <tr><td>arek, arek-mcp</td><td>the command line (23 subcommands) and the MCP server (26 tools)</td><td>new</td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:18px">1301 tests: synthetic data (hand-assembled programs, random buffers, generated boot blocks and disk images) and 68000 clock counts measured on Moira.</p>
+  </section>
+
   <footer>
-    <p>MIT. The kit ships no disk image, no Kickstart ROM and no game-specific knowledge; you supply the image you own, and the path to it lives in a git-ignored <code>local.conf</code>. The vAmiga patches modify MPL-2.0 sources and are published as that licence requires. Game projects built with this method: <a href="https://github.com/smikes75/swiv-amiga-re">S.W.I.V.</a>, <a href="https://github.com/smikes75/turrican2-amiga-re-claude">Turrican II</a>, <a href="https://github.com/smikes75/superfrog-amiga-re">Superfrog</a>.</p>
+    <p>MIT. The kit ships no disk image, no Kickstart ROM and no game-specific knowledge; you supply the image you own, and the path to it lives in a git-ignored <code>local.conf</code>. The vAmiga patches modify MPL-2.0 sources and are published as that licence requires. The games rebuilt with this method are playable on <a href="https://smikes75.github.io/arek-play/">arek-play</a>.</p>
   </footer>
 </div>
 

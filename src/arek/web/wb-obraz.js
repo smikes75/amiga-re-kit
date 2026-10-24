@@ -11,7 +11,8 @@
 //       mode 'original' | 'enhanced'; zoom: window width in multiples of W0, 0 = fit; returns
 //       {scale: S, W, H, P, D, origin: [x, y] device px, backing: [w, h], content: [W*S, H*S],
 //        crtLayer: [w, h], crtOrigin: [x, y]}   (Screen.info() gives origin/backing/crtLayer/crtOrigin)
-//   window.wbObrazTest.fill(kind) -> true      kind 'grey' | 'rows' | 'cols' (testPattern)
+//   window.wbObrazTest.fill(kind) -> true      kind 'grey' | 'rows' | 'cols' (testPattern); the pattern must stay
+//       on the canvas until the next set() - a running game must not paint over it (pause it, or hold the pattern)
 // arek web test needs `pip install amiga-re-kit[web]` and `python -m playwright install chromium`.
 'use strict';
 const WBOBRAZ = (() => {
