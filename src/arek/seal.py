@@ -13,6 +13,14 @@ Keys: disk key = SHA-256("arek-seal-v1\\0" + ADF bytes); a set of several disks 
 two) = SHA-256("arek-seal-v1-set\\0" + disk keys in order). Each file's path is its associated
 data, so files cannot be swapped. Needs the optional ``cryptography`` package (``[web]`` extra).
 
+A **payload key** (0.5.12) is computed from the game's own content instead of the raw disk:
+SHA-256("arek-seal-v1-payload\\0" + payload), where the payload is what the rebuild actually reads
+(the unpacked game files in a fixed order, built by the page's own loader). Every disk version
+that yields the same files opens it, whichever group cracked the boot block; a version with
+different game data opens nothing - and would not run the rebuild correctly anyway.
+
+    manifest, blobs = seal({'engine.wasm': data}, [[disk1]], payloads=[payload], payload_labels=['retail or crack, same files'])
+
 This is a lock, not a licence: the files are still derived from the original.
 """
 import base64
@@ -44,17 +52,26 @@ def set_key(disks):
     return hashlib.sha256(b'arek-seal-v1-set\0' + b''.join(disk_key(d) for d in disks)).digest()
 
 
+def payload_key(payload):
+    return hashlib.sha256(b'arek-seal-v1-payload\0' + bytes(payload)).digest()
+
+
 def _b64(b):
     return base64.b64encode(b).decode()
 
 
-def seal(files, disk_sets, content_key=None, labels=None, compress=False):
+def seal(files, disk_sets, content_key=None, labels=None, compress=False, payloads=None, payload_labels=None):
     """files: {path: bytes}; disk_sets: [[adf bytes, ...], ...] - each set that may open them,
     ``labels`` one text per set (which version of the disk); ``compress``: gzip before sealing
-    (wb-seal.js inflates on open; ``size``/``sha256`` describe the plain file).
+    (wb-seal.js inflates on open; ``size``/``sha256`` describe the plain file); ``payloads``:
+    game contents that open them too (see ``payload_key``), ``payload_labels`` one text each.
     Returns (manifest, {path: sealed bytes})."""
-    if not disk_sets or any(not s for s in disk_sets):
-        raise ValueError('seal needs at least one set of disks')
+    disk_sets = list(disk_sets or [])
+    payloads = list(payloads or [])
+    if any(not s for s in disk_sets) or any(not p for p in payloads):
+        raise ValueError('an empty disk set or payload cannot open anything')
+    if not disk_sets and not payloads:
+        raise ValueError('seal needs at least one set of disks or one payload')
     ck = content_key or os.urandom(32)
     aes = _aes(ck)
     manifest = {'seal': VERSION, 'files': [], 'keys': []}
@@ -75,18 +92,34 @@ def seal(files, disk_sets, content_key=None, labels=None, compress=False):
         if labels and k < len(labels) and labels[k]:
             entry['label'] = labels[k]
         manifest['keys'].append(entry)
+    for k, payload in enumerate(payloads):
+        iv = os.urandom(12)
+        entry = {'payload': hashlib.sha256(bytes(payload)).hexdigest(), 'iv': _b64(iv),
+                 'wrapped': _b64(_aes(payload_key(payload)).encrypt(iv, ck, KEY_AAD))}
+        if payload_labels and k < len(payload_labels) and payload_labels[k]:
+            entry['label'] = payload_labels[k]
+        manifest['keys'].append(entry)
     return manifest, blobs
 
 
-def unseal(manifest, blobs, disks):
-    """The plain files for ``disks`` (ValueError when no key entry takes them or a file was altered)."""
+def unseal(manifest, blobs, disks=None, payload=None):
+    """The plain files for ``disks``, or for a game ``payload`` (ValueError when no key entry takes
+    them or a file was altered)."""
     from cryptography.exceptions import InvalidTag
-    ids = [hashlib.sha256(bytes(d)).hexdigest() for d in disks]
-    entry = next((k for k in manifest['keys'] if k['disks'] == ids), None)
-    if entry is None:
-        raise ValueError('no key for these disks (%s)' % ', '.join(i[:12] for i in ids))
+    if payload is not None:
+        pid = hashlib.sha256(bytes(payload)).hexdigest()
+        entry = next((k for k in manifest['keys'] if k.get('payload') == pid), None)
+        if entry is None:
+            raise ValueError('no key for this game content (%s)' % pid[:12])
+        wrap = payload_key(payload)
+    else:
+        ids = [hashlib.sha256(bytes(d)).hexdigest() for d in disks or []]
+        entry = next((k for k in manifest['keys'] if k.get('disks') == ids), None)
+        if entry is None:
+            raise ValueError('no key for these disks (%s)' % ', '.join(i[:12] for i in ids))
+        wrap = set_key(disks)
     try:
-        ck = _aes(set_key(disks)).decrypt(base64.b64decode(entry['iv']), base64.b64decode(entry['wrapped']), KEY_AAD)
+        ck = _aes(wrap).decrypt(base64.b64decode(entry['iv']), base64.b64decode(entry['wrapped']), KEY_AAD)
         aes = _aes(ck)
         out = {}
         for f in manifest['files']:

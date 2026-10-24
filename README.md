@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 1301 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 1303 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -94,6 +94,7 @@ arek web copy web/                                     # the reference wb-obraz.
 arek web demo                                          # a page built on it (http://127.0.0.1:8920/demo.html)
 arek web test http://localhost:8911/?test=1            # §5.1-5.4b in Chromium (needs playwright)
 arek web seal build/present/engine.wasm --set disk1.adf --label "disk 1, retail" --gzip --out build/present/sealed
+arek web seal build/present/engine.wasm --payload build/payload.bin --payload-label "the game files" --out build/present/sealed  # any disk version with the same game data opens it
 arek web check build/present                           # a bundle: no game data, derived files sealed, manifest right
 arek --version                                         # version + decoder/recompiler hashes
 ```
@@ -116,7 +117,7 @@ asks for (see `examples/profile.example.json`).
 | `arek.hunk` | bounded HUNK reader: CODE/DATA/BSS, RELOC32, split streams; `build()` for probes | Superfrog |
 | `arek.copper` | copper list disassembler with custom register names | S.W.I.V. |
 | `arek.webtest`, `web/wb-obraz.js` | display contract 1.3: reference module (whole device pixels, CRT canvas, layout quantum of Chromium's 1/64 px), demo page, Chromium tests incl. the row test | Turrican II, Alien Breed, Superfrog (Sonnet) |
-| `arek.seal`, `web/wb-seal.js` | code derived from a game on a public page, encrypted (AES-GCM) under a key computed from the contents of the original disk; opened in the browser with WebCrypto | presentation pages |
+| `arek.seal`, `web/wb-seal.js` | code derived from a game on a public page, encrypted (AES-GCM) under a key computed from the contents of the original disk, or from the game's own content as the page's loader rebuilds it (a payload key: every disk version with the same game files opens it); opened in the browser with WebCrypto | presentation pages |
 | `arek.parity` | long parity: record by record against the original's trace (first difference, addresses, phase shift); traces packed as XOR + zlib | Alien Breed, Turrican II, Superfrog (Sonnet) |
 | `arek.display` | the frame chip RAM shows: Copper timing, bitplanes, dual playfield, EHB, sprites; vAmiga's colours; 0 differing pixels on vAmiga screenshots (`arek selftest display`) | Superfrog (Sonnet), Alien Breed, Turrican II |
 | `arek.m68k.decoder` | strict 68000 decoder: raises `Unsupported` instead of guessing; accepts only addressing modes the 68000 accepts (checked opcode by opcode against Moira) | Superfrog (fixed ADDA/SUBA/CMPA); LINK/UNLK/PEA/EXG from Alien Breed; memory shifts, CMPM, ABCD/SBCD, MULS/DIVS new |

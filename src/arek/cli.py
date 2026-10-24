@@ -28,7 +28,7 @@
     arek selftest    inputs|display [--vahl BINARY]   (needs only the Kickstart ROM)
     arek profile     PROFILE [--by clocks|calls|bytes] [--top N] [--frame F]
     arek web         copy DIR | demo [--port N] | test URL [--quick]   (display contract)
-    arek web         seal FILE... --set D1.adf[,D2.adf] [--label TEXT] [--gzip] --out DIR   (derived code, opened by the disk)
+    arek web         seal FILE... --set D1.adf[,D2.adf] [--payload FILE] [--label TEXT] [--gzip] --out DIR   (derived code, opened by the disk or by the game's content)
     arek web         check DIR                                          (a presentation bundle: no game data, derived = sealed)
     arek init        [DIR]
 
@@ -431,15 +431,17 @@ def cmd_web(a):
     elif a.what == 'seal':
         from . import seal
         files = [f for f in [a.target] + (a.rest or []) if f]
-        if not files or not a.set or not a.out:
-            raise ValueError('web seal FILE... --set DISK.adf[,DISK2.adf] [--set ...] --out DIR [--root DIR]')
+        if not files or not (a.set or a.payload) or not a.out:
+            raise ValueError('web seal FILE... --set DISK.adf[,DISK2.adf] [--set ...] [--payload FILE ...] --out DIR [--root DIR]')
         root = Path(a.root or '.')
         plain = {str(Path(f).resolve().relative_to(root.resolve())): rd(f) for f in files}
-        sets = [[rd(p) for p in spec.split(',')] for spec in a.set]
-        manifest, blobs = seal.seal(plain, sets, labels=a.label or [], compress=a.gzip)
+        sets = [[rd(p) for p in spec.split(',')] for spec in a.set or []]
+        payloads = [rd(f) for f in a.payload or []]
+        manifest, blobs = seal.seal(plain, sets, labels=a.label or [], compress=a.gzip,
+                                    payloads=payloads, payload_labels=a.payload_label or [])
         path = seal.write_dir(a.out, manifest, blobs)
-        print('%s: %d files sealed for %d disk sets (%s)' % (path, len(blobs), len(sets),
-                                                            '; '.join(','.join(d[:12] for d in k['disks']) for k in manifest['keys'])))
+        keys = ['disks ' + ','.join(d[:12] for d in k['disks']) if 'disks' in k else 'payload ' + k['payload'][:12] for k in manifest['keys']]
+        print('%s: %d files sealed for %d disk sets and %d payloads (%s)' % (path, len(blobs), len(sets), len(payloads), '; '.join(keys)))
     elif a.what == 'demo':
         import functools
         import http.server
@@ -837,6 +839,10 @@ def build_parser():
     s.add_argument('--out', help='seal: output folder (seal.json + FILE.sealed)')
     s.add_argument('--root', help='seal: paths in seal.json are relative to this folder (default .)')
     s.add_argument('--label', action='append', metavar='TEXT', help='seal: a name for each --set, in order')
+    s.add_argument('--payload', action='append', metavar='FILE',
+                   help="seal: the game's content as the page's loader builds it (unpacked files in a fixed order); "
+                        'every disk version that yields the same bytes opens the files (repeat for other contents)')
+    s.add_argument('--payload-label', action='append', metavar='TEXT', help='seal: a name for each --payload, in order')
     s.add_argument('--gzip', action='store_true', help='seal: gzip the files before sealing (wb-seal.js inflates)')
     s.add_argument('--port', type=int, default=8920, help='demo: port')
     s.add_argument('--quick', action='store_true', help='test: fewer combinations')

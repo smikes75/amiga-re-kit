@@ -133,3 +133,56 @@ def test_bundle_check(tmp_path, capsys):
     assert any('game data' in x for x in p) and any('also present in the clear' in x for x in p)
     assert any('manifest size' in x for x in p) and any('not in the manifest' in x for x in p)
     assert cli.main(['web', 'check', str(b)]) == 1
+
+
+PAYLOAD = b'MAIN' + bytes(range(200)) * 3 + b'LEVEL1' + bytes(3000)      # what the rebuild reads, in a fixed order
+
+
+def test_payload_key_opens_any_disk_with_the_same_content():
+    manifest, blobs = seal.seal(FILES, [[D1]], labels=['disk 1, one crack'], payloads=[PAYLOAD], payload_labels=['the game files'])
+    assert [('disks' in k, 'payload' in k) for k in manifest['keys']] == [(True, False), (False, True)]
+    assert manifest['keys'][1]['payload'] == hashlib.sha256(PAYLOAD).hexdigest() and manifest['keys'][1]['label'] == 'the game files'
+    assert seal.unseal(manifest, blobs, [D1]) == FILES                     # the disk still opens it
+    assert seal.unseal(manifest, blobs, payload=PAYLOAD) == FILES          # so does the content, from any disk
+    with pytest.raises(ValueError, match='no key for this game content'):
+        seal.unseal(manifest, blobs, payload=PAYLOAD[:-1] + b'\x01')      # a trainer that patched one byte
+    assert seal.payload_key(PAYLOAD) != hashlib.sha256(PAYLOAD).digest()   # the public id is not the key
+    only, blobs2 = seal.seal(FILES, [], payloads=[PAYLOAD])                # payload keys alone are enough
+    assert seal.unseal(only, blobs2, payload=PAYLOAD) == FILES
+    with pytest.raises(ValueError):
+        seal.seal(FILES, [], payloads=[])
+
+
+def test_cli_payload_and_browser_side(tmp_path, capsys):
+    root = tmp_path / 'present'
+    root.mkdir()
+    (root / 'engine.wasm').write_bytes(FILES['engine.wasm'])
+    (tmp_path / 'd1.adf').write_bytes(D1)
+    (tmp_path / 'payload.bin').write_bytes(PAYLOAD)
+    out = tmp_path / 'sealed'
+    assert cli.main(['web', 'seal', str(root / 'engine.wasm'), '--root', str(root), '--set', str(tmp_path / 'd1.adf'),
+                     '--payload', str(tmp_path / 'payload.bin'), '--payload-label', 'game files', '--out', str(out)]) == 0
+    assert '1 files sealed for 1 disk sets and 1 payloads' in capsys.readouterr().out
+    manifest, blobs = seal.read_dir(out)
+    assert seal.unseal(manifest, blobs, payload=PAYLOAD) == {'engine.wasm': FILES['engine.wasm']}
+    assert cli.main(['web', 'seal', str(root / 'engine.wasm'), '--root', str(root), '--payload', str(tmp_path / 'payload.bin'),
+                     '--out', str(tmp_path / 'only')]) == 0                 # no --set at all
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('no node')
+    script = """
+const S = require(%s), fs = require('fs');
+(async () => {
+  const m = JSON.parse(fs.readFileSync(%s, 'utf8')), sealed = fs.readFileSync(%s), payload = fs.readFileSync(%s);
+  const a = await S.open(m, [fs.readFileSync(%s)], { payload });            // the known disk wins
+  const b = await S.open(m, [Buffer.from('some other crack')], { payload }); // unknown disk, same content
+  const c = await S.openPayload(m, payload);
+  let refused = false;
+  try { await S.open(m, [Buffer.from('other')], { payload: Buffer.concat([payload, Buffer.from('x')]) }); } catch (e) { refused = e.message; }
+  console.log(JSON.stringify({a: a.key, b: b.key, bl: b.label, c: Buffer.from(await c.get('engine.wasm', sealed)).length, refused, id: await S.payloadId(payload)}));
+})();
+""" % tuple(json.dumps(str(x)) for x in (WEB / 'wb-seal.js', out / 'seal.json', out / 'engine.wasm.sealed', tmp_path / 'payload.bin', tmp_path / 'd1.adf'))
+    r = json.loads(subprocess.run([node, '-e', script], capture_output=True, text=True, check=True).stdout)
+    pid = hashlib.sha256(PAYLOAD).hexdigest()
+    assert r['a'] == {'disks': [hashlib.sha256(D1).hexdigest()]} and r['b'] == {'payload': pid} and r['bl'] == 'game files'
+    assert r['c'] == len(FILES['engine.wasm']) and 'no key' in r['refused'] and r['id'] == pid
