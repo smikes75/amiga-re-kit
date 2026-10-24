@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 1299 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 1301 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -86,6 +86,7 @@ arek trace   run build/l1.vtr --arm 3 --end 60 --break 0xc01106 --inputs l1.txt 
 arek trace   compare build/orig.vtr build/native.vtr --best-shift 3   # long parity: where the rebuild leaves the original
 arek trace   bus build/bus.bin --frame 8600            # who had the chip bus in every slot (buslog patch)
 arek trace   run build/s.vtr --arm 3 --end 176 --shots build/f --shot-frames 8600:8619   # 20 frames, one run
+arek trace   run build/w.vtr --arm 3 --end 200 --break 0xc01b06 --poke c01b06:c00faa=00000002  # write into the machine, go on
 arek selftest inputs                                   # is this VAHeadless frame exact? (synthetic disk)
 
 # 5. the web page: display contract wb-shell obraz 1.3 (WB-OBRAZ-CRT.md)
@@ -121,7 +122,7 @@ asks for (see `examples/profile.example.json`).
 | `arek.m68k.decoder` | strict 68000 decoder: raises `Unsupported` instead of guessing; accepts only addressing modes the 68000 accepts (checked opcode by opcode against Moira) | Superfrog (fixed ADDA/SUBA/CMPA); LINK/UNLK/PEA/EXG from Alien Breed; memory shifts, CMPM, ABCD/SBCD, MULS/DIVS new |
 | `arek.m68k.disasm` | linear and flow-walk listings straight from the decoder | new |
 | `arek.m68k.hwscan` | which routines are pure RAM and which touch custom chips / CIA / ROM | Turrican II |
-| `arek.m68k.recomp` | static 68k → C recompiler with a verification driver (`MEM[]`, write log, blitter incl. line and fill modes); jump tables, indirect targets, external routines, overlay modules recognised at run time by fingerprint, run-time targets (`--dynamic`), data stored after a call (`Flow`); optional clock counting; a `WAIT_LOOP(m, pc, addr)` hook in loops that poll memory or hardware; chip RAM size and slow RAM (`--memsz`, `--slow c00000:80000`); a routine profile (`--profile`: calls, clocks, written pages per routine - the map for rewriting a recompiled game routine by routine) | Superfrog; extensions from Alien Breed |
+| `arek.m68k.recomp` | static 68k → C recompiler with a verification driver (`MEM[]`, write log, blitter incl. line and fill modes); jump tables (also with a base register known only at run time), indirect targets, external routines, overlay modules recognised at run time by fingerprint, run-time targets (`--dynamic`), data stored after a call (`Flow`); optional clock counting; a `WAIT_LOOP(m, pc, addr)` hook in loops that poll memory or hardware; chip RAM size and slow RAM (`--memsz`, `--slow c00000:80000`); a routine profile (`--profile`: calls, clocks, written pages per routine - the map for rewriting a recompiled game routine by routine) | Superfrog; extensions from Alien Breed |
 | `arek.m68k.timing` | 68000 clock counts per instruction, data-dependent ones included (MUL/DIV operands, shift counts, branch outcome); matches Moira on all 42 247 decodable opcodes | new |
 | `arek.m68k.xref` | call / data cross references from `m68k-elf-objdump` text | Superfrog |
 | `arek.m68k.audit` | profile-driven inventory + conservative reachability, JSON in / JSON out | Superfrog |

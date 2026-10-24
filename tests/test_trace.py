@@ -295,3 +295,20 @@ def test_capture_with_only_pictures_needs_no_breakpoint(tmp_path, monkeypatch):
     n = trace.capture(conf, str(tmp_path / 'r.vtr'), [], 1, 8, shots=str(tmp_path / 'f'), shot_frames=(300, 300))
     assert n == 0 and 'debugger' not in seen['script']
     assert (tmp_path / 'f_000300.png').read_bytes()[:4] == b'\x89PNG'
+
+
+# --- vamiga-poke-899da5d.patch: writes into the machine at a frame or a PC
+
+def test_poke_specs_and_file(tmp_path):
+    blob = tmp_path / 'w.bin'
+    blob.write_bytes(b'\x00\x02')
+    assert trace.parse_poke('F8600:c00ffc=0002') == ('F', 8600, 0xc00ffc, b'\x00\x02')
+    assert trace.parse_poke('c01b06:$c00faa=@%s' % blob) == ('P', 0xc01b06, 0xc00faa, b'\x00\x02')
+    with pytest.raises(trace.TraceError):
+        trace.parse_poke('c01b06=0002')
+    p = trace.write_pokes(['F8600:c00ffc=0002', 'c01b06:c00faa=00000002'], str(tmp_path / 'x.poke'))
+    assert open(p).read() == 'F 2198 c00ffc 0002\nP c01b06 c00faa 00000002\n'
+    e = trace.env('/t.vtr', poke=p)
+    assert e['VAHL_POKE'] == p
+    with pytest.raises(trace.TraceError, match='vamiga-poke-899da5d.patch'):
+        trace.require_patch('/bin/ls', ['VAHL_POKE'])

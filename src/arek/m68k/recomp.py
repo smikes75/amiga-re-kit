@@ -1100,9 +1100,14 @@ class Gen:
         jt = self.flow.jtabs[i.addr]
         reg = ('m->a[%d]' if i.ea.xa else 'm->d[%d]') % i.ea.xr
         ix = ('(int32_t)%s' if i.ea.xl else '(int32_t)(int16_t)%s') % reg
-        origin = i.ea.pcbase if i.ea.mode == 73 else jt.origin
-        L = ['{ int32_t off = %s + (%d) + (%d); if (off < 0 || off %% %d) unknown_call((uint32_t)off); '
-             'switch (off / %d) {' % (ix, i.ea.disp, origin - jt.table, jt.stride, jt.stride)]
+        if i.ea.mode == 73:
+            base = '(%d)' % (i.ea.pcbase - jt.table)
+        elif jt.base_reg:                                  # An = table + an offset the program chose
+            base = '(int32_t)(m->a[%d] - 0x%xu)' % (i.ea.areg, jt.table)
+        else:
+            base = '(%d)' % (jt.origin - jt.table)
+        L = ['{ int32_t off = %s + (%d) + %s; if (off < 0 || off %% %d) unknown_call((uint32_t)off); '
+             'switch (off / %d) {' % (ix, i.ea.disp, base, jt.stride, jt.stride)]
         for k, t in enumerate(jt.targets):
             L.append('  case %d: %s' % (k, empty if t is None else case(t)))
         L.append('  default: unknown_call((uint32_t)off); } }')
@@ -1231,8 +1236,9 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
                     prefix=None, lib=False, inline=(), overlay=(), dynamic=(), module=None):
     """Build a decoder.Flow from the command-line spellings (all addresses hex):
 
-    jtab     'SITE[,SITE..]:TABLE:COUNT:STRIDE:bra|ptr[:AN]' - jsr/jmp (d8,An,Dn) into a table;
-             AN = the value of An at the jump when the table starts below it
+    jtab     'SITE[,SITE..]:TABLE:COUNT:STRIDE:bra|ptr[:AN|an]' - jsr/jmp (d8,An,Dn) into a table;
+             AN = the value of An at the jump when the table starts below it, 'an' = An is
+             only known at run time (slot = (An - TABLE + Dn) / STRIDE)
     indirect 'SITE=T1,T2,...' - possible targets of jsr/jmp (An), or of a rewritten jmp abs
     stop, exitat, ret   addresses;   extern 'ADDR=c_name';   prefix 'NAME:LO:HI'
     inline   'ROUTINE[,ROUTINE..]:until=HHHH|words=N|longs=N|string' - the routine reads data
@@ -1246,8 +1252,9 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
         p = spec.split(':')
         sites, table, count, stride, kind = p[:5]
         table, stride = _hex(table), int(stride)
+        origin = p[5] if len(p) > 5 else None
         jt = JumpTable(jtab_targets(data, base, table, int(count), stride, kind), stride, table,
-                       _hex(p[5]) if len(p) > 5 else None)
+                       None if origin in (None, 'an') else _hex(origin), base_reg=origin == 'an')
         for site in sites.split(','):
             jtabs[_hex(site)] = jt
     ind = {}

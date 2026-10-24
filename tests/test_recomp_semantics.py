@@ -315,3 +315,19 @@ def test_timing_is_off_by_default_and_has_a_host_hook():
     assert '#ifdef TICK_HOOK' in src
     src, _, _ = recomp.generate(bytes.fromhex('4e714e75'), BASE, auto=[BASE], timing=True)
     assert 'TICK(0x1000u, 4);' in src and 'TICK(0x1002u, 16);' in src
+
+
+def test_jump_table_with_the_base_register_known_only_at_run_time(tmp_path):
+    # 1000 jsr (0,a0,d0.w) ; rts ; nops ; 1010: bra.w x3 (slots) ; 1020/1024/1028: moveq #1/2/3,d1 ; rts
+    prog = ('4eb0 0000 4e75 4e71 4e71 4e71 4e71 4e71' '6000 000e 6000 000e 6000 000e 4e71 4e71'
+            '7201 4e75 7202 4e75 7203').replace(' ', '')
+    data = bytes.fromhex(prog + '4e75')
+    targets = jtab_targets(data, BASE, 0x1010, 3, 4, 'bra')
+    assert targets == [0x1020, 0x1024, 0x1028]
+    regs = {'a0': 0x1014, 'd0': 4}                        # the program moved a0 one slot past the table
+    d, *_ = run(tmp_path, prog, regs, flow=Flow(jtabs={BASE: JumpTable(targets, 4, 0x1010, base_reg=True)}))
+    assert d[1] == 3                                      # slot (a0 - table + d0) / 4 = 2
+    d, *_ = run(tmp_path, prog, regs, flow=Flow(jtabs={BASE: JumpTable(targets, 4, 0x1010)}))
+    assert d[1] == 2                                      # a fixed origin = the table ignores a0
+    fl = recomp.flow_from_specs(data, BASE, jtab=['1000:1010:3:4:bra:an'])
+    assert fl.jtabs[BASE].base_reg and fl.jtabs[BASE].targets == targets

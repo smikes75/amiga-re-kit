@@ -59,6 +59,7 @@ Optional patches on top of the headless one:
 | `vamiga-trace.patch` | c59425d | `VAHL_TRACE`: every breakpoint hit writes a VTR1 record (registers, beam, chip RAM) and the run continues |
 | `vamiga-trace-ranges-899da5d.patch` | 899da5d | the same, plus `VAHL_TRACE_RANGES=start:len,...` (VTR2: only chosen ranges, incl. slow RAM, custom registers, CIA) and watchpoints (VTW2: + PC of the accessing instruction) |
 | `vamiga-shots-regset-899da5d.patch` | 899da5d + the four above | `VAHL_SHOTS` + `VAHL_SHOTS_FRAMES`: the picture of every frame in a window, the run goes on; `VAHL_REGLOG_REGS`: which registers `VAHL_REGLOG` records (from the Alien Breed project's requests) |
+| `vamiga-poke-899da5d.patch` | 899da5d + the five above | `VAHL_POKE`: write into the machine's memory when a frame begins or at the first breakpoint hit at a PC, then go on (`arek trace run --poke`); also fixes the frame number of `VAHL_SHOTS` pictures (they were labelled one too high) and makes `VAHL_REGLOG` see the Copper's colour writes |
 | `vamiga-buslog-899da5d.patch` | 899da5d + headless + trace-ranges + inputs-reglog | `VAHL_BUSLOG` (+ `VAHL_BUSLOG_FRAMES=first:last`): the owner of every DMA slot of every line, CPU waits with their PC, every blit with its registers and end (`arek trace bus`) |
 | `vamiga-inputs-reglog-899da5d.patch` | 899da5d + headless + trace-ranges | `VAHL_INPUTS` (input per frame, frame exact), `VAHL_REGLOG` (DMACON/INTENA/INTREQ/ADKCON/AUDx writes), `VAHL_AUDLOG` (Paula output samples), `VAHL_TRACE_SKIP`, `VAHL_TRACE_FROM_FRAME`, hashed ranges `start:lenh` (from the Alien Breed project) |
 | `vamiga-regtrace.patch` | c59425d | ring buffer of every custom register write (WASM builds) |
@@ -223,6 +224,26 @@ sprites, `c` Copper, `b` blitter. A lowres line with 6 planes reads `462C351C` p
 (Superfrog, frame 8600): 95 blits, 9 940 blitter slots, the CPU waited 29 557 slots - against
 12 663 in the next frame without blits. `trace.read_buslog`, `bus_summary`, `bus_line`; MCP
 `trace_bus`. The patch only records; the run is the same as without it.
+
+## Writing into the running machine: `--poke`
+
+To put the original into a later state without playing there (a game's own password or level
+bytes, a counter), `vamiga-poke-899da5d.patch` writes into memory at a chosen moment and the
+run goes on - RetroShell could only do that stopped, and its `wait` is not frame exact:
+
+```sh
+arek trace run build/w2.vtr --arm 3 --end 200 --break 0xc01b06 --poke c01b06:c00faa=00000002 \
+    F8600:c00ffc=0002 --shots build/w2 --shot-frames 8600:8603
+```
+
+`F<frame>:ADDR=HEX` writes when that frame (decimal) begins; `PC:ADDR=HEX` at the first
+breakpoint hit at PC (hex; give the PC with `--break`); `=@FILE` writes a file's bytes. The
+writes go through `Memory::patch` (no bus cycles) and each applies once; the log says
+`vahl poke ...` for each. Checked on the synthetic display disk: a COLOR00 word poked when
+frame 300 begins is written by the Copper in frame 300 (`--reglog`) and picture 300 shows it.
+Builds with the shots patch alone label a picture one frame too high; with the poke patch the
+label is the frame that was drawn. Copper colour writes (COLOR00-31) reach the register log
+only with the poke patch (vAmiga writes them past `pokeCustom16`).
 
 ## Consecutive pictures, chosen registers
 

@@ -557,11 +557,14 @@ NOFLOW = Flow()
 
 class JumpTable:
     """``targets`` per slot (None = an rts slot), ``stride`` bytes per slot, ``table`` its
-    address and ``origin`` the value of An at the jump (when the table starts below it)."""
+    address and ``origin`` the value of An at the jump (when the table starts below it);
+    ``base_reg``: An is only known at run time (the program adds an offset to the table's
+    address), the slot is then (An - table + Dn) / stride."""
 
-    def __init__(self, targets, stride, table, origin=None):
+    def __init__(self, targets, stride, table, origin=None, base_reg=False):
         self.targets, self.stride, self.table = list(targets), stride, table
         self.origin = table if origin is None else origin
+        self.base_reg = base_reg
 
 
 def jtab_targets(data, base, table, count, stride, kind):

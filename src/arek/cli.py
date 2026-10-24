@@ -20,6 +20,7 @@
     arek trace       run OUT --arm T --end T --break A.. [--watch A..] [--range S:L..] [--at T CMD]
     arek trace       show TRACE [--field NAME=ADDR:FMT ..] [--every N] [--json]
     arek trace       regs REGLOG [--reg NAME..] | audio AUDLOG | pack IN OUT | bus BUSLOG [--frame F]
+                     (run: --poke F<frame>:ADDR=HEX | PC:ADDR=HEX|@FILE  writes into the machine and goes on)
     arek trace       compare ORIGINAL REBUILD [--range S:L..] [--ignore S:L..] [--shift N | --best-shift N] [--regs]
                      (run: --inputs FILE --reglog F --audlog F --skip N --from-frame F)
     arek diff        DIR_A DIR_B [--range LO HI]
@@ -502,7 +503,8 @@ def cmd_trace(a):
                           skip=a.skip, from_frame=a.from_frame, buslog=a.buslog,
                           bus_frames=[int(x) for x in a.bus_frames.split(':')] if a.bus_frames else None,
                           reglog_regs=a.reglog_regs, shots=a.shots,
-                          shot_frames=[int(x) for x in a.shot_frames.split(':')] if a.shot_frames else None)
+                          shot_frames=[int(x) for x in a.shot_frames.split(':')] if a.shot_frames else None,
+                          pokes=a.poke)
         if a.shots:
             print('%d pictures: %s_<frame>.png' % (len(trace.shot_files(a.shots)), a.shots))
         print('%s: %d records' % (a.file, n))
@@ -696,8 +698,9 @@ def build_parser():
     s.add_argument('--stub', nargs='*', metavar='An:DISP:NAME')
     s.add_argument('--lo', type=AH)
     s.add_argument('--hi', type=AH)
-    s.add_argument('--jtab', nargs='*', metavar='SITE[,..]:TABLE:COUNT:STRIDE:bra|ptr[:AN]',
-                   help='jsr/jmp (d8,An,Dn) into a table of bra.w slots or pointers')
+    s.add_argument('--jtab', nargs='*', metavar='SITE[,..]:TABLE:COUNT:STRIDE:bra|ptr[:AN|an]',
+                   help='jsr/jmp (d8,An,Dn) into a table of bra.w slots or pointers; AN = the value of An at the jump, '
+                        'an = An known only at run time (slot = (An - TABLE + Dn) / STRIDE)')
     s.add_argument('--indirect', nargs='*', metavar='SITE=T1,T2',
                    help='possible targets of jsr/jmp (An), or of a jmp abs the program rewrites')
     s.add_argument('--stop', nargs='*', metavar='ADDR', help='never translate (a branch into data)')
@@ -795,6 +798,9 @@ def build_parser():
     s.add_argument('--reglog-regs', metavar='SPEC', help='run: registers --reglog records, hex, e.g. 0e0-0f6,08e,090,180-1be')
     s.add_argument('--shots', metavar='PREFIX', help='run: the picture of every frame in --shot-frames (PREFIX_<frame>.png)')
     s.add_argument('--shot-frames', metavar='FIRST:LAST', help='run: frames --shots covers')
+    s.add_argument('--poke', nargs='*', metavar='F<frame>|PC:ADDR=HEX|@FILE',
+                   help='run: write into the machine when frame F begins (decimal) or at the first breakpoint hit '
+                        'at PC (hex, give it with --break), then go on; e.g. F8600:c00ffc=0002, c01b06:c00faa=@world.bin')
     s.add_argument('--at', nargs=2, action='append', default=[], metavar=('T', 'CMD'), help='input event')
     s.add_argument('--field', nargs='*', default=[], metavar='NAME=ADDR:FMT', help='show: value to read, e.g. px=0xc0599e:h')
     s.add_argument('--every', type=int, default=1)

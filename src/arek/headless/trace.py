@@ -28,6 +28,10 @@ Needs a VAHeadless built with one of the trace patches:
     the window as ``<prefix>_<frame>.raw`` (converted to PNG by ``capture``), the run goes on;
     ``VAHL_REGLOG_REGS=0e0-0f6,08e,090``: which registers ``VAHL_REGLOG`` records (CPU and Copper
     writes with the beam) instead of DMACON/INTENA/INTREQ/ADKCON/AUDx.
+``vamiga-poke-899da5d.patch`` (on top of shots-regset)
+    ``VAHL_POKE=<file>``: write into the running machine when a frame begins or at the first
+    breakpoint hit at a PC, then go on (``write_pokes``, ``arek trace run --poke``) - e.g. a game's
+    own password bytes, to reach a later world without playing there.
 ``vamiga-buslog-899da5d.patch`` (on top of inputs-reglog)
     ``VAHL_BUSLOG=<file>``, ``VAHL_BUSLOG_FRAMES=first:last``: who used the chip bus in every DMA
     slot of every line, the cycles the CPU waited for it (with its PC) and every blit
@@ -206,7 +210,8 @@ def check_inputs(path):
 
 
 def env(path, ranges=None, length=None, inputs=None, reglog=None, audlog=None, skip=None,
-        from_frame=None, buslog=None, bus_frames=None, reglog_regs=None, shots=None, shot_frames=None):
+        from_frame=None, buslog=None, bus_frames=None, reglog_regs=None, shots=None, shot_frames=None,
+        poke=None):
     """Environment for a traced run of the patched VAHeadless."""
     e = {'VAHL_TRACE': str(path)}
     if ranges:
@@ -235,7 +240,32 @@ def env(path, ranges=None, length=None, inputs=None, reglog=None, audlog=None, s
             raise TraceError('shots need a frame window (first, last)')
         e['VAHL_SHOTS'] = os.path.abspath(shots)
         e['VAHL_SHOTS_FRAMES'] = '%d:%d' % tuple(shot_frames)
+    if poke:
+        e['VAHL_POKE'] = os.path.abspath(poke)
     return e
+
+
+def parse_poke(spec):
+    """'F<frame>:ADDR=HEX' (when frame <frame>, decimal, begins) or 'PC:ADDR=HEX' (at the first
+    breakpoint hit at PC, hex) -> (kind, when, addr, bytes); HEX may be @FILE (its bytes)."""
+    left, _, value = spec.partition('=')
+    when, _, addr = left.partition(':')
+    if not (when and addr and value):
+        raise TraceError('poke %r: F<frame>:ADDR=HEX or PC:ADDR=HEX' % spec)
+    if when[0] in 'Ff' and when[1:].isdigit():
+        kind, at = 'F', int(when[1:])
+    else:
+        kind, at = 'P', int(when.lstrip('$'), 16)
+    data = open(value[1:], 'rb').read() if value.startswith('@') else bytes.fromhex(value)
+    return kind, at, int(addr.lstrip('$'), 16), data
+
+
+def write_pokes(specs, path):
+    """The VAHL_POKE file for ``specs`` (numbers in hex, as the patch reads them)."""
+    with open(path, 'w') as f:
+        for kind, at, addr, data in (parse_poke(s) for s in specs):
+            f.write('%s %x %x %s\n' % (kind, at, addr, data.hex()))
+    return path
 
 
 def shot_files(prefix):
@@ -374,7 +404,7 @@ PATCH_OF = {'VAHL_TRACE': 'vamiga-trace*.patch', 'VAHL_TRACE_RANGES': 'vamiga-tr
             'VAHL_TRACE_FROM_FRAME': 'vamiga-inputs-reglog-899da5d.patch',
             'VAHL_BUSLOG': 'vamiga-buslog-899da5d.patch', 'VAHL_BUSLOG_FRAMES': 'vamiga-buslog-899da5d.patch',
             'VAHL_REGLOG_REGS': 'vamiga-shots-regset-899da5d.patch', 'VAHL_SHOTS': 'vamiga-shots-regset-899da5d.patch',
-            'VAHL_SHOTS_FRAMES': 'vamiga-shots-regset-899da5d.patch'}
+            'VAHL_SHOTS_FRAMES': 'vamiga-shots-regset-899da5d.patch', 'VAHL_POKE': 'vamiga-poke-899da5d.patch'}
 
 
 def require_patch(vahl, variables):
@@ -390,17 +420,19 @@ def require_patch(vahl, variables):
 
 def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None, adf=None,
             timeout=1200, setup=(), inputs=None, reglog=None, audlog=None, skip=None, from_frame=None,
-            buslog=None, bus_frames=None, reglog_regs=None, shots=None, shot_frames=None):
+            buslog=None, bus_frames=None, reglog_regs=None, shots=None, shot_frames=None, pokes=None):
     """Run the original with ``events`` (``[(second, retroshell command)]``),
     arm the trace at ``t_arm`` and stop at ``t_end``. Writes ``out`` (the
     trace), ``out + '.retrosh'`` (the script) and ``out + '.log'``; returns
     the number of records."""
     from . import shot
-    if not breaks and not watches and not (buslog or reglog or audlog or shots):
-        raise TraceError('nothing to trace: give breakpoints and/or watchpoints (or only logs/shots)')
+    if not breaks and not watches and not (buslog or reglog or audlog or shots or pokes):
+        raise TraceError('nothing to trace: give breakpoints and/or watchpoints (or only logs/shots/pokes)')
+    poke = write_pokes(pokes, out + '.poke') if pokes else None
     adf = shot.check_disk(conf, adf or conf.get('ADF1'))
     e = env(out, ranges, inputs=inputs, reglog=reglog, audlog=audlog, skip=skip, from_frame=from_frame,
-            buslog=buslog, bus_frames=bus_frames, reglog_regs=reglog_regs, shots=shots, shot_frames=shot_frames)
+            buslog=buslog, bus_frames=bus_frames, reglog_regs=reglog_regs, shots=shots, shot_frames=shot_frames,
+            poke=poke)
     needed = [k for k in e if k != 'VAHL_TRACE_LEN']
     if any(len(r) > 2 and r[2] for r in ranges or ()):
         needed.append('VAHL_TRACE_SKIP')            # hashed ranges came with the inputs/reglog patch
@@ -417,7 +449,7 @@ def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None,
     with open(out + '.log', 'w') as f:
         f.write(log)
     if not os.path.exists(out):
-        if not (buslog or reglog or audlog or shots):
+        if not (buslog or reglog or audlog or shots or pokes):
             raise TraceError('no trace written - is VAHL a build with a trace patch? (see %s.log)' % out)
         open(out, 'wb').close()                      # only logs or pictures were wanted; no breakpoint was hit
     for frame, raw in shot_files(shots) if shots else ():

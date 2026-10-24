@@ -1,0 +1,176 @@
+diff --git a/Core/Components/Agnus/Agnus.cpp b/Core/Components/Agnus/Agnus.cpp
+index 9fc9f38..f73d6fb 100644
+--- a/Core/Components/Agnus/Agnus.cpp
++++ b/Core/Components/Agnus/Agnus.cpp
+@@ -11,6 +11,7 @@
+ #include "Agnus.h"
+ #include "VahlBus.h"
+ #include "VahlShots.h"
++#include "VahlPoke.h"
+ #include <fstream>
+ #include "Emulator.h"
+ 
+@@ -936,6 +937,7 @@ Agnus::eofHandler()
+     assert(denise.lace() == pos.lofToggle);
+ 
+     scheduleStrobe0Event();
++    vahlpoke::apply(mem, 'F', (long long)pos.frame, (long long)pos.frame);
+ 
+     cpu.eofHandler();
+     denise.eofHandler();
+@@ -949,9 +951,6 @@ Agnus::eofHandler()
+     mem.eofHandler();
+     logicAnalyzer.eofHandler();
+ 
+-    // VAHL_SHOTS: the frame that just finished (Denise swapped it to the stable buffer above)
+-    { std::string path; if (vahlshots::wanted(pos.frame - 1, path)) { std::ofstream f(path, std::ios::binary); amiga.regressionTester.dumpTexture(amiga, f); } }
+-
+     // Update statistics
+     updateStats();
+ }
+@@ -977,6 +976,8 @@ void
+ Agnus::vsyncHandler()
+ {
+     denise.vsyncHandler();
++    // VAHL_SHOTS: the frame that just finished - Denise swapped it to the stable buffer a line above
++    { std::string path; if (vahlshots::wanted(pos.frame - 1, path)) { std::ofstream f(path, std::ios::binary); amiga.regressionTester.dumpTexture(amiga, f); } }
+     
+     amiga.setFlag(RL::SYNC_THREAD);
+ }
+diff --git a/Core/Components/Agnus/Copper/Copper.cpp b/Core/Components/Agnus/Copper/Copper.cpp
+index 4089ccc..ef80fb5 100644
+--- a/Core/Components/Agnus/Copper/Copper.cpp
++++ b/Core/Components/Agnus/Copper/Copper.cpp
+@@ -13,6 +13,7 @@
+ #include "CopperDebugger.h"
+ #include "Denise.h"
+ 
++namespace vamiga { void vahl_reglog_record(u32 frame, u32 v, u32 h, u32 r, u16 value, u32 pc, bool agnusSrc); }
+ namespace vamiga {
+ 
+ Copper::Copper(Amiga& ref) : SubComponent(ref)
+@@ -207,6 +208,7 @@ Copper::move(u32 addr, u16 value)
+               "pokeCustom16(%X [%s], %X)\n", addr, MemoryDebugger::regName(addr), value);
+ 
+         // Color registers
++        vahl_reglog_record(u32(agnus.pos.frame), u32(agnus.pos.v), u32(agnus.pos.h), addr, value, cpu.getPC0(), true);
+         denise.recordColorChange((addr - 0x180) >> 1, value);
+ 
+         // auto reg = Reg(isize(Reg::COLOR00) + ((addr - 0x180) >> 1));
+diff --git a/Core/Components/Agnus/VahlPoke.h b/Core/Components/Agnus/VahlPoke.h
+new file mode 100644
+index 0000000..dfa7c87
+--- /dev/null
++++ b/Core/Components/Agnus/VahlPoke.h
+@@ -0,0 +1,58 @@
++// VAHL_POKE=<file>: write into the memory of the running machine at a chosen moment and go on
++// (amiga-re-kit, arek trace run --poke). One poke per line:
++//   F <frame> <addr> <hex bytes>      when frame <frame> begins
++//   P <pc> <addr> <hex bytes>         at the first breakpoint hit at <pc> (set a breakpoint there)
++// <hex bytes> may be @<file> (the file's bytes). Memory::patch writes without bus cycles; each line
++// applies once. The record of what was written goes to stderr ("vahl poke ...").
++#pragma once
++#include <cstdio>
++#include <cstdlib>
++#include <fstream>
++#include <sstream>
++#include <string>
++#include <vector>
++
++namespace vahlpoke {
++
++struct Poke { char kind; long long when; unsigned addr; std::vector<unsigned char> bytes; bool done; };
++
++inline std::vector<Poke> &list()
++{
++    static std::vector<Poke> pokes;
++    static bool probed = false;
++    if (!probed) {
++        probed = true;
++        if (const char *p = std::getenv("VAHL_POKE")) {
++            std::ifstream in(p);
++            std::string line;
++            while (std::getline(in, line)) {
++                std::istringstream ss(line);
++                Poke k{}; std::string hex;
++                if (!(ss >> k.kind >> std::hex >> k.when >> k.addr >> hex)) continue;
++                if (k.kind != 'F' && k.kind != 'P') continue;
++                if (!hex.empty() && hex[0] == '@') {
++                    std::ifstream f(hex.substr(1), std::ios::binary);
++                    k.bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
++                } else {
++                    for (size_t i = 0; i + 1 < hex.size(); i += 2)
++                        k.bytes.push_back((unsigned char)std::strtoul(hex.substr(i, 2).c_str(), nullptr, 16));
++                }
++                pokes.push_back(k);
++            }
++        }
++    }
++    return pokes;
++}
++
++template <typename Mem> inline void apply(Mem &mem, char kind, long long when, long long frame)
++{
++    for (auto &k : list()) {
++        if (k.done || k.kind != kind || k.when != when) continue;
++        k.done = true;
++        mem.patch(k.addr, k.bytes.data(), (long)k.bytes.size());
++        std::fprintf(stderr, "vahl poke %c %llx: %zu bytes at %06x (frame %lld)\n", kind, (unsigned long long)when,
++                     k.bytes.size(), k.addr, frame);
++    }
++}
++
++}
+diff --git a/Core/Components/CPU/CPU.cpp b/Core/Components/CPU/CPU.cpp
+index 01207f9..10d3c77 100644
+--- a/Core/Components/CPU/CPU.cpp
++++ b/Core/Components/CPU/CPU.cpp
+@@ -18,6 +18,7 @@
+ #include "utl/support.h"
+ #include "utl/io.h"
+ #include <fstream>
++#include "../Agnus/VahlPoke.h"
+ 
+ 
+ //
+@@ -344,6 +345,7 @@ static void vahl_apply_inputs(Amiga &amiga, u16 vpos)
+ void
+ Moira::didReachBreakpoint(u32 addr)
+ {
++    vahlpoke::apply(amiga.mem, 'P', (long long)addr, (long long)agnus.pos.frame);
+     vahl_apply_inputs(amiga, u16(agnus.pos.v));
+     if (vahl_trace_open()) { vahl_trace_write(addr, 0, 0); return; }
+     amiga.setFlag(RL::BREAKPOINT_REACHED);
+diff --git a/Core/Components/Memory/Memory.cpp b/Core/Components/Memory/Memory.cpp
+index 92e927f..aa893ca 100644
+--- a/Core/Components/Memory/Memory.cpp
++++ b/Core/Components/Memory/Memory.cpp
+@@ -2669,19 +2669,20 @@ static bool vahl_reglog_wants(u32 r)
+     }
+     return want[(r >> 1) & 255];
+ }
++void vahl_reglog_record(u32 frame, u32 v, u32 h, u32 r, u16 value, u32 pc, bool agnusSrc)
++{
++    if (!vahl_reglog_wants(r)) return;
++    if (!vahl_reglog_probed) { vahl_reglog_probed = true; if (const char *p = getenv("VAHL_REGLOG")) vahl_reglog = fopen(p, "wb"); }
++    if (!vahl_reglog) return;
++    u32 rec[4] = { frame, (v << 16) | h, (r << 16) | value, (pc & 0xffffff) | (agnusSrc ? 0x1000000u : 0u) };
++    fwrite(rec, 4, 4, vahl_reglog);
++}
+ template <Accessor s> void
+ Memory::pokeCustom16(u32 addr, u16 value)
+ {
+     {
+         u32 r = addr & 0x1FE;
+-        if (vahl_reglog_wants(r)) {
+-            if (!vahl_reglog_probed) { vahl_reglog_probed = true; if (const char *p = getenv("VAHL_REGLOG")) vahl_reglog = fopen(p, "wb"); }
+-            if (vahl_reglog) {
+-                u32 rec[4] = { u32(agnus.pos.frame), (u32(agnus.pos.v) << 16) | u32(agnus.pos.h), (r << 16) | value,
+-                               (cpu.getPC0() & 0xffffff) | (s == Accessor::AGNUS ? 0x1000000u : 0u) };
+-                fwrite(rec, 4, 4, vahl_reglog);
+-            }
+-        }
++        vahl_reglog_record(u32(agnus.pos.frame), u32(agnus.pos.v), u32(agnus.pos.h), r, value, cpu.getPC0(), s == Accessor::AGNUS);
+     }
+     if ((addr & 0xFFF) == 0x30) {
+         logmsg(LOG_OCSREG, "pokeCustom16(SERDAT, '%c')\n", (char)value);
