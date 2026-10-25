@@ -85,3 +85,26 @@ def test_oob_zero_reads_zero_and_drops_writes(tmp_path):
     assert r.stderr.count('outside the modelled RAM') == 1               # one note per KB
     with pytest.raises(ValueError):
         recomp.generate(OOB, BASE, auto=[BASE], oob='maybe')
+
+
+def test_cover_in_tick_keeps_bodies_and_marks(tmp_path):
+    cov = {}
+    plain, _, _ = recomp.generate(PROG, BASE, auto=[BASE, BASE + 4], with_main=True, timing=True)
+    src, _, _ = recomp.generate(PROG, BASE, auto=[BASE, BASE + 4], with_main=True, timing=True, cover=cov, cover_in_tick=True)
+    assert 'COV_MARK(0x1000u);' not in src and '#define COV_TICK(pc) cov_mark(pc)' in src
+    # every line of the plain translation's bodies is in the covered one, unchanged
+    bodies = [l for l in plain.splitlines() if l.startswith('L00') or l.startswith('    ')]
+    assert all(l in src for l in bodies)
+    log, cov, _ = build_run(tmp_path, PROG, (BASE, BASE + 4), env={'AREK_COVER': str(tmp_path / 'run.cov')},
+                            timing=True, cover_in_tick=True)
+    assert cover.read(tmp_path / 'run.cov') == {0x1000, 0x1002}
+
+
+def test_cover_union_of_runs_cli(tmp_path, capsys):
+    (tmp_path / 'a.cov').write_text('H 1000 5\n1000-1000\n')
+    (tmp_path / 'b.cov').write_text('H 1000 5\n1004-1006\n')
+    assert cover.read([tmp_path / 'a.cov', tmp_path / 'b.cov']) == {0x1000, 0x1004, 0x1006}
+    side = {'lo': BASE, 'routines': {'1000': [[0x1000, 0x1002]], '1004': [[0x1004, 0x1008]]}}
+    (tmp_path / 'p.c.cover.json').write_text(__import__('json').dumps(side))
+    assert cli.main(['cover', str(tmp_path / 'a.cov'), str(tmp_path / 'b.cov'), str(tmp_path / 'p.c.cover.json')]) == 0
+    assert '3 of 5 translated instructions ran' in capsys.readouterr().out

@@ -149,7 +149,10 @@ def _audio_frames(path, regs=AUDIO_REGS):
 
 def compare_audio(orig, rebuild, shifts=range(-60, 61)):
     """Frames whose audio writes agree, with the one shift (rebuild frame = original + shift)
-    that fits the whole scenario best: ``{'frames', 'equal', 'shift', 'first'}``."""
+    that fits the whole scenario best: ``{'frames', 'equal', 'shift', 'first'}``. ``frames`` is
+    the union of the frames either side wrote in (before the shift), so a frame the rebuild
+    writes at ``f + shift`` counts once under ``f``; a frame only one side wrote in counts as
+    unequal. The rebuild's side comes from ``trace.encode_reglog``."""
     a, b = _audio_frames(orig), _audio_frames(rebuild)
     frames = sorted(set(a) | set(b))
     if not frames:
@@ -219,8 +222,11 @@ def suite(cfg, base='.', run=True):
             n = sc.get('shifts', 4)
             shifts = best_shift(ta, tb, range(-n, n + 1), rng, ign)
             c0 = compare(ta, tb, rng, ign, 0)
+            f = c0['first']
             row['state'] = {'pairs': c0['pairs'], 'equal': c0['equal'],
-                            'first': c0['first']['index'] if c0['first'] else None,
+                            'first': f['index'] if f else None,                 # record index (0-based)
+                            'first_frame': f['a']['frame'] if f else None,      # the original's frame and hit there
+                            'first_hit': f['a']['hit'] if f else None,
                             'best_shift': shifts[0][0], 'equal_shifted': shifts[0][1]}
         if path('shots', o) and path('shots', r):
             row['picture'] = compare_shots(path('shots', o), path('shots', r), sc.get('tolerance', 0), sc.get('shot_shift', 0))
@@ -232,15 +238,15 @@ def suite(cfg, base='.', run=True):
 
 
 def format_suite(rows):
-    L = ['%-14s %18s %7s %10s %16s %20s' % ('scenario', 'state equal', 'first', 'shift:eq', 'picture equal', 'sound equal')]
+    L = ['%-14s %18s %11s %10s %16s %20s' % ('scenario', 'state equal', 'first/frame', 'shift:eq', 'picture equal', 'sound equal')]
     for r in rows:
         st, pic, snd = r['state'], r['picture'], r['sound']
         s1 = '%d/%d (%.1f%%)' % (st['equal'], st['pairs'], 100 * st['equal'] / st['pairs']) if st and st['pairs'] else '-'
-        s2 = '%s' % st['first'] if st and st['first'] is not None else '-'
+        s2 = ('%d/f%d' % (st['first'], st['first_frame'])) if st and st['first'] is not None else '-'
         s3 = '%d:%d' % (st['best_shift'], st['equal_shifted']) if st else '-'
         s4 = '%d/%d' % (pic['equal'], pic['pairs']) if pic else '-'
         if pic and pic['pixels']:
             s4 += ' (%.2f%%)' % (100 * (1 - pic['differing'] / pic['pixels']))
         s5 = '%d/%d (%.1f%%) s%+d' % (snd['equal'], snd['frames'], 100 * snd['equal'] / snd['frames'], snd['shift']) if snd and snd['frames'] else '-'
-        L.append('%-14s %18s %7s %10s %16s %20s' % (r['name'][:14], s1, s2, s3, s4, s5))
+        L.append('%-14s %18s %11s %10s %16s %20s' % (r['name'][:14], s1, s2, s3, s4, s5))
     return '\n'.join(L)

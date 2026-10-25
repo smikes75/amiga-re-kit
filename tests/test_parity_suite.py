@@ -79,3 +79,17 @@ def test_make_runs_once_and_cli(tmp_path, capsys):
     assert '5/5 (100.0%)' in capsys.readouterr().out and (tmp_path / 'o.vtr').exists()
     assert cli.main(['parity', str(tmp_path / 'suite.json'), '--base', str(tmp_path), '--json']) == 0
     assert json.loads(capsys.readouterr().out)[0]['state']['equal'] == 5
+
+
+def test_first_difference_carries_frame_and_hit_and_reglog_round_trip(tmp_path):
+    write_trace(tmp_path / 'o.vtr', ramp(6))
+    write_trace(tmp_path / 'r.vtr', ramp(6, at=4, value=1))
+    rows = parity.suite({'scenarios': [{'name': 's', 'original': {'trace': 'o.vtr'}, 'rebuild': {'trace': 'r.vtr'}}]}, base=str(tmp_path))
+    st = rows[0]['state']
+    assert (st['first'], st['first_frame'], st['first_hit']) == (4, 104, 4)
+    assert '4/f104' in parity.format_suite(rows)
+    rows_in = [{'frame': 3, 'v': 10, 'h': 20, 'reg': 0x0a6, 'value': 0x1234, 'pc': 0x1000, 'agnus': False}, (5, 0x096, 0x8001), (7, 1, 2, 0x0b6, 9)]
+    data = trace.encode_reglog(rows_in)
+    back = trace.read_reglog(data)
+    assert [(r['frame'], r['v'], r['h'], r['reg'], r['value'], r['pc'], r['agnus']) for r in back] == \
+        [(3, 10, 20, 0x0a6, 0x1234, 0x1000, False), (5, 0, 0, 0x096, 0x8001, 0, False), (7, 1, 2, 0x0b6, 9, 0, False)]

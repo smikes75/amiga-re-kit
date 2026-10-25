@@ -30,12 +30,15 @@ uint64_t CYCLES = 0;
 #ifndef PROF_TICK
 #define PROF_TICK(n) ((void)0)
 #endif
+#ifndef COV_TICK                /* generate(cover=..., cover_in_tick=True): the coverage mark rides in TICK */
+#define COV_TICK(pc) ((void)0)
+#endif
 #ifndef TICK                    /* a host may define its own TICK(pc, n) before this */
 #ifdef TICK_HOOK
 void tick_hook(M68 *m, uint32_t pc, uint32_t clocks);
-#define TICK(pc, n) (PROF_TICK(n), tick_hook(m, (pc), (n)))
+#define TICK(pc, n) (COV_TICK(pc), PROF_TICK(n), tick_hook(m, (pc), (n)))
 #else
-#define TICK(pc, n) (PROF_TICK(n), CYCLES += (n))
+#define TICK(pc, n) (COV_TICK(pc), PROF_TICK(n), CYCLES += (n))
 #endif
 #endif
 static uint32_t mulu_t(uint32_t s) { return 38 + 2 * (uint32_t)__builtin_popcount(s & 0xffff); }
@@ -114,6 +117,7 @@ COVER_RT = r'''
 static uint8_t COV[(COV_N + 7) / 8];
 static inline void cov_mark(uint32_t pc) { uint32_t i = (pc - COV_LO) >> 1; if (i < COV_N) COV[i >> 3] |= (uint8_t)(1u << (i & 7)); }
 #define COV_MARK(pc) cov_mark(pc)
+%(in_tick)s
 void cov_reset(void) { memset(COV, 0, sizeof COV); }
 void cov_dump(FILE *f) {
     fprintf(f, "H %%x %%x\n", (unsigned)COV_LO, (unsigned)COV_N);
@@ -586,10 +590,12 @@ class Gen:
     def STUBS(self):
         return decoder.STUBS
 
-    def __init__(self, data, base, funcs, cfg=None, flow=NOFLOW, timing=False, profile=False, cover=False):
+    def __init__(self, data, base, funcs, cfg=None, flow=NOFLOW, timing=False, profile=False, cover=False,
+                 cover_in_tick=False):
         self.data, self.base, self.flow, self.timing = data, base, flow, timing
         self.profile = profile and not flow.lib          # the profile lives in the main runtime
         self.cover = cover and not flow.lib              # so does the coverage bitmap
+        self.cover_in_tick = cover_in_tick and timing    # the mark rides in TICK: no extra lines in the body
         self.cov_pcs = {}                                # entry -> [instruction addresses translated]
         self.funcs = funcs                  # [(start, end, entry)] - linearni useky
         self.cfg = cfg or {}                # entry -> {adresa: Insn} z grafu toku
@@ -610,7 +616,8 @@ class Gen:
                 entries = sorted(set(self.all_entries()))
                 prof = PROFILE_RT % {'n': max(1, len(entries)), 'addrs': ', '.join('0x%xu' % e for e in entries) or '0'}
                 self.prof_index = {e: k for k, e in enumerate(entries)}
-            cov = COVER_RT % {'lo': self.base, 'n': max(1, len(self.data) // 2)} if self.cover else ''
+            cov = COVER_RT % {'lo': self.base, 'n': max(1, len(self.data) // 2),
+                              'in_tick': '#define COV_TICK(pc) cov_mark(pc)' if self.cover_in_tick else ''} if self.cover else ''
             self.emit(RUNTIME.replace('%%PROFILE%%', cov + (prof or PROFILE_OFF)))
         else:                               # guarded: a main translation included before wins
             self.emit((TIMING_RT if self.timing else '') + WAIT_RT)
@@ -711,7 +718,8 @@ class Gen:
             self.emit('L%06x: ; /* %s */' % (a, i.text))
             if self.cover:
                 self.cov_pcs.setdefault(entry, []).append(a)
-                self.emit('    COV_MARK(0x%xu);' % a)
+                if not self.cover_in_tick or self.tick(i) is None:
+                    self.emit('    COV_MARK(0x%xu);' % a)
             if self.timing and self.tick(i):
                 self.emit('    ' + self.tick(i))
             for line in self.body(i, None, None, ins):
@@ -736,7 +744,8 @@ class Gen:
             self.emit('L%06x: ; /* %s */' % (addr, ins.text))
             if self.cover:
                 self.cov_pcs.setdefault(entry, []).append(addr)
-                self.emit('    COV_MARK(0x%xu);' % addr)
+                if not self.cover_in_tick or self.tick(ins) is None:
+                    self.emit('    COV_MARK(0x%xu);' % addr)
             if self.timing and self.tick(ins):
                 self.emit('    ' + self.tick(ins))
             for line in self.body(ins, start, end):
@@ -1355,7 +1364,8 @@ def refusal_json(e):
 
 
 def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow=NOFLOW,
-             stub_impl=None, timing=False, memsz=None, slow=None, profile=False, cover=None, oob='stop'):
+             stub_impl=None, timing=False, memsz=None, slow=None, profile=False, cover=None, oob='stop',
+             cover_in_tick=False):
     """Return (c_source, stats, entries). ``funcs`` are (start, end, entry) linear ranges,
     ``auto`` are entry addresses whose bodies are discovered by walking the
     flow graph (transitively over bsr/jsr). ``flow`` (a decoder.Flow) carries what the
@@ -1369,6 +1379,10 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
     ``cover``: a dict to fill - the runtime then keeps one bit per translated instruction
     (cov_dump, cov_reset; the driver writes it to $AREK_COVER) and the dict gets
     ``{'lo', 'routines': {entry: [[first, last], ...]}}`` for ``arek cover``; not for lib modules.
+    ``cover_in_tick`` (with ``timing``): the mark is part of TICK instead of a line of its own before
+    it, so the body text of each instruction stays as without coverage (a host that patches the
+    generated text by exact match keeps working); mul/div with a zero divisor are then not marked.
+    A host of its own must call ``cov_dump`` itself (atexit); only the verification driver does.
     ``oob``: what an access outside the modelled RAM does - ``'stop'`` (exit 3, the default) or
     ``'zero'`` (reads give 0, writes are dropped, one note per KB, the driver reports ``oob N``).
     A refusal raises Unsupported with the first frontier as its text and all of them in
@@ -1398,7 +1412,7 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
             raise Unsupported(first, found)
     if oob not in ('stop', 'zero'):
         raise ValueError("oob is 'stop' or 'zero'")
-    g = Gen(data, base, list(funcs), cfg, flow, timing, profile, cover is not None)
+    g = Gen(data, base, list(funcs), cfg, flow, timing, profile, cover is not None, cover_in_tick)
     src = g.gen()
     if cover is not None:
         cover['lo'] = base

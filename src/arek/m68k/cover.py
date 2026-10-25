@@ -4,13 +4,21 @@ The runtime keeps one bit per instruction word and ``cov_dump`` writes the addre
 as ranges (``H <lo> <n>`` then ``first-last`` per line, hex); ``recomp --cover`` also writes
 ``OUT.cover.json`` with the translated instructions per routine. Together they say how much of
 each routine a run exercised and which routines never ran - the places a random-input run
-(``arek fuzz``) has not reached and a bug may hide.
+(``arek fuzz``) has not reached and a bug may hide. Several dumps (one per seed) read as their
+union. The verification driver writes the dump at exit when ``AREK_COVER`` is set; a host of its
+own calls ``cov_dump(f)`` itself, e.g. from ``atexit``, and ``cov_reset()`` between runs.
 """
 import json
 
 
 def read(src):
-    """The addresses that ran, as a set of instruction addresses."""
+    """The addresses that ran, as a set of instruction addresses; ``src`` a path, a dump's text,
+    or a list of paths (the union of several runs)."""
+    if isinstance(src, (list, tuple)):
+        ran = set()
+        for one in src:
+            ran |= read(one)
+        return ran
     text = src if isinstance(src, str) and '\n' in src else open(src).read()
     ran = set()
     for line in text.splitlines():

@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 2356 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2357 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -75,7 +75,7 @@ arek recomp  intro.bin --base 0x41d5c --auto 0x41d5c --lib --prefix in_:41d5c:4c
 arek recomp  main.bin --base 0x20700 --auto 0x20700 --timing --profile --main -o game.c   # then AREK_PROFILE=p.txt ./game ...
 arek profile p.txt --by clocks                         # which routines to rewrite or replace (--extern) first
 arek recomp  main.bin --base c00000 --auto c00000 --cover --oob zero --out game.c   # coverage bitmap; reads outside RAM give 0
-arek cover   run.cov game.c.cover.json                 # what a run never executed (routines least covered first)
+arek cover   run1.cov run2.cov game.c.cover.json       # what the runs never executed (union of seeds; routines least covered first)
 arek fuzz    --seed 3 --frames 30000 --start 320 --out build/in3.txt   # random input: the emulator (--inputs) and the rebuild alike
 arek recomp  main.bin --base 0x20700 --auto 0x21234 --timing \
              --jtab 21300:21400:12:4:bra --indirect 21350=21500,21600 --extern 21700=load_file -o game.c

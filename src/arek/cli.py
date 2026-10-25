@@ -27,7 +27,7 @@
     arek render      CAPTURE [--ram F --cop A] [--png OUT] [--compare RAW]
     arek selftest    inputs|display [--vahl BINARY]   (needs only the Kickstart ROM)
     arek profile     PROFILE [--by clocks|calls|bytes] [--top N] [--frame F]
-    arek cover       RUN.cov OUT.cover.json [--top N]                 (recomp --cover: what a run never executed)
+    arek cover       RUN.cov [RUN2.cov ...] OUT.cover.json [--top N]  (recomp --cover: what the runs never executed)
     arek fuzz        --seed N --frames N [--hold 3:22] [--start N] [--out FILE]   (random input for both sides)
     arek parity      SUITE.json [--json] [--no-run]                   (scenarios: state, picture, sound)
     arek web         copy DIR | demo [--port N] | test URL [--quick]   (display contract)
@@ -281,7 +281,7 @@ def cmd_recomp(a):
             data, a.base, funcs, a.auto or [], a.lo or a.base, a.hi, with_main=a.main, flow=flow,
             stub_impl=impl, timing=a.timing, memsz=a.memsz,
             slow=tuple(_hex(x) for x in a.slow.split(':')) if a.slow else None, profile=a.profile,
-            cover=cover, oob=a.oob)
+            cover=cover, oob=a.oob, cover_in_tick=a.cover_in_tick)
     except recomp.Unsupported as e:
         if a.refusals:
             Path(a.refusals).write_text(json.dumps(recomp.refusal_json(e), indent=1) + '\n')
@@ -403,7 +403,12 @@ def cmd_render(a):
 
 def cmd_cover(a):
     from .m68k import cover
-    r = cover.report(cover.read(a.file), a.sidecar, a.top)
+    files = list(a.file)
+    sidecar = a.sidecar or next((f for f in files if f.endswith('.json')), None)
+    if not sidecar:
+        raise ValueError('arek cover RUN.cov [RUN2.cov ...] OUT.cover.json')
+    dumps = [f for f in files if f != sidecar]
+    r = cover.report(cover.read(dumps), sidecar, a.top)
     if a.json:
         print(json.dumps(r, indent=1))
     else:
@@ -765,6 +770,8 @@ def build_parser():
                    '(routine, site, kind, insn, operand, target, why); removed when the run succeeds')
     s.add_argument('--cover', action='store_true', help='one bit per translated instruction, set when it runs '
                    '(cov_dump / $AREK_COVER); also writes OUT.cover.json for arek cover')
+    s.add_argument('--cover-in-tick', action='store_true', help='with --timing: the coverage mark rides in TICK, '
+                   'the instruction bodies stay as without --cover')
     s.add_argument('--oob', choices=['stop', 'zero'], default='stop',
                    help="an access outside the modelled RAM: stop (exit 3) or zero (reads 0, writes dropped, 'oob N' reported)")
     s.add_argument('--memsz', type=AH, help='chip RAM bytes from 0 (default 0x80000)')
@@ -862,8 +869,9 @@ def build_parser():
     s.set_defaults(fn=cmd_render)
 
     s = sp.add_parser('cover', help='coverage of a translation run (recomp --cover): what never ran')
-    s.add_argument('file', help='the dump the runtime wrote (AREK_COVER or cov_dump)')
-    s.add_argument('sidecar', help='OUT.cover.json written by recomp --cover')
+    s.add_argument('file', nargs='+', help='dumps the runtime wrote (AREK_COVER or cov_dump; several = their union) '
+                   'and OUT.cover.json written by recomp --cover')
+    s.add_argument('--sidecar', help='OUT.cover.json when it does not end in .json')
     s.add_argument('--top', type=int, default=20, help='least covered routines to list (0 = all)')
     s.add_argument('--json', action='store_true')
     s.set_defaults(fn=cmd_cover)

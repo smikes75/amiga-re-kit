@@ -379,6 +379,25 @@ def read_reglog(src):
     return out
 
 
+def encode_reglog(rows):
+    """The ``VAHL_REGLOG`` layout for a rebuild's own register writes, so ``arek parity`` compares
+    sound both ways: rows as ``read_reglog`` returns them (``frame, v, h, reg, value, pc, agnus``;
+    missing keys are 0 / False) or tuples ``(frame, reg, value)`` / ``(frame, v, h, reg, value)``."""
+    out = []
+    for r in rows:
+        if isinstance(r, dict):
+            frame, v, h, reg, value = r['frame'], r.get('v', 0), r.get('h', 0), r['reg'], r['value']
+            pc, agnus = r.get('pc', 0), r.get('agnus', False)
+        elif len(r) == 3:
+            (frame, reg, value), v, h, pc, agnus = r, 0, 0, 0, False
+        else:
+            frame, v, h, reg, value = r[:5]
+            pc, agnus = (r[5] if len(r) > 5 else 0), (r[6] if len(r) > 6 else False)
+        out.append(struct.pack('<4I', frame, ((v & 0xffff) << 16) | (h & 0xffff), ((reg & 0xffff) << 16) | (value & 0xffff),
+                               (pc & 0xffffff) | (0x01000000 if agnus else 0)))
+    return b''.join(out)
+
+
 def read_audlog(src):
     """Samples of a ``VAHL_AUDLOG`` file (12 bytes each): ``(frame, v, h, sample*volume, channel)``."""
     data = src if isinstance(src, (bytes, bytearray)) else open(src, 'rb').read()
