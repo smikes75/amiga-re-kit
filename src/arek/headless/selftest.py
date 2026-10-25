@@ -7,6 +7,11 @@ to its idle loop, RAM and the screenshot are captured and compared pixel by pixe
 
 ``inputs(conf)``: are inputs applied frame by frame? It runs its disk with ``VAHL_INPUTS``
 and checks that every frame saw exactly the keys of its line.
+
+``bus(conf)``: does the bus model (``arek.bus``) agree with this emulator's bus log? Its disk
+(``selftest_bus.s``: 5 lores planes, a sprite, a copper list with waits, three blits in a loop
+with stack traffic between them) runs with ``VAHL_BUSLOG``; the model's fixed DMA slots are
+compared with the log slot by slot and every blit is replayed over the recorded map.
 The disk only needs the Kickstart ROM from ``local.conf``. Its boot block copies a
 payload to $40000 and jumps there; the payload installs a level-3 handler at
 $40028 that stores JOY1DAT and CIA-A PRA of each frame at $50000 + 4·n (n at
@@ -138,3 +143,58 @@ def inputs(conf, frames=240, seed=7, timeout=300, keep=None):
         if got != want:
             bad.append((k, want, got))
     return {'frames': n, 'match': n - len(bad), 'mismatch': bad[:20], 'dir': tmp}
+
+
+BUS_LOOP, BUS_COPLIST, BUS_SPR0, BUS_NUL = 0x40042, 0x400de, 0x40196, 0x4021e
+BUS_PAYLOAD = bytes.fromhex('4df900dff0003d7c7fff009a3d7c7fff00962d7c000400de00803d4000883d7c87e000963d7cffff00443d7cffff0046426e0060426e0062426e0064426e00667e002d7c0001000000502d7c0002000000543d7c09f00040426e00423d7c08140058082e0006000266f82d7c0001000000502d7c00012000004c2d7c0001400000482d7c0002200000543d7c0fca00403d7c100000423d7c040a0058082e0006000266f82d7c0002400000543d7c01000040426e00423d7c10280058082e0006000266f841f90003000048e0ff7c4cd83eff524733c70003fffe6000ff6601005200008e2c810090f4c100920038009400d001080000010a000000e0000500e2000000e4000500e6200000e8000500ea400000ec000500ee600000f0000500f280000120000401220196012400040126021e01280004012a021e012c0004012e021e013000040132021e013400040136021e01380004013a021e013c0004013e021e0180000001820f00018400f00186000f6c07fffe018000058c07fffe01800050a007fffe01800500c007fffe01800055fffffffe50807000f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff00000000000000000')
+
+
+def bus_disk():
+    """The bus self-test ADF image (boot code copies ``selftest_bus.s``, linked at $40000, there)."""
+    n = len(BUS_PAYLOAD) // 2 - 1
+    stub = bytes.fromhex('41fa001843f900040000303c') + struct.pack('>H', n) + bytes.fromhex('32d851c8fffc4ef900040000')
+    return _boot_disk(stub + BUS_PAYLOAD)
+
+
+BUS_REGS = {0x096: 0x87e0, 0x100: 0x5200, 0x092: 0x38, 0x094: 0xd0, 0x08e: 0x2c81, 0x090: 0xf4c1,
+            0x080: BUS_COPLIST >> 16, 0x082: BUS_COPLIST & 0xffff, 0x120: BUS_SPR0 >> 16, 0x122: BUS_SPR0 & 0xffff}
+for _n in range(1, 8):
+    BUS_REGS[0x120 + 4 * _n], BUS_REGS[0x122 + 4 * _n] = BUS_NUL >> 16, BUS_NUL & 0xffff
+
+
+def bus(conf, frames=40, first=330, timeout=300, keep=None):
+    """Run the self-test, record the bus log of ``frames`` frames from ``first`` (after boot) and
+    check the model: ``{'frames', 'fixed_ok', 'fixed_bad', 'blits', 'exact', 'slots_ok', 'slots_bad', 'dir', 'text'}``."""
+    import re
+    import subprocess
+    from .. import bus as busmod
+    tmp = keep or tempfile.mkdtemp(prefix='arek-selftest')
+    path = os.path.join(tmp, 'bus.adf')
+    with open(path, 'wb') as f:
+        f.write(bus_disk())
+    out, log = os.path.join(tmp, 'bus.vtr'), os.path.join(tmp, 'bus.log')
+    seconds = (first + frames) / 50.0 + 1
+    trace.capture(conf, out, [], 6, int(seconds) + 1, breaks=[BUS_LOOP], ranges=[(0x3fffe, 2)], adf=path,
+                  timeout=timeout, buslog=log, bus_frames=(first, first + frames - 1))
+    recs = list(trace.records(out))
+    if len(recs) < 2:
+        raise trace.TraceError('the loop at $%x was not hit - see %s.log' % (BUS_LOOP, out))
+    blog = trace.read_buslog(log)
+    abbl = os.path.join(tmp, 'bus.abbl')
+    info = busmod.buslog_to_bin(blog, abbl, hpos=227)
+    with open(os.path.join(tmp, 'regs.txt'), 'w') as f:
+        f.write(' '.join('%x' % BUS_REGS.get(i * 2, 0) for i in range(0x100)) + '\n')
+    ram = bytearray(0x80000)
+    ram[0x40000:0x40000 + len(BUS_PAYLOAD)] = BUS_PAYLOAD
+    with open(os.path.join(tmp, 'ram.bin'), 'wb') as f:
+        f.write(ram)
+    cc = busmod.compiler()
+    if not cc:
+        raise RuntimeError('no C compiler for the bus model')
+    check = busmod.compile_check(os.path.join(tmp, 'arek_bus_check'), cc)
+    r = subprocess.run([check, abbl, os.path.join(tmp, 'regs.txt'), os.path.join(tmp, 'ram.bin')], capture_output=True, text=True)
+    m = re.search(r'fixed DMA slots: agree (\d+), disagree (\d+)', r.stdout)
+    rep = busmod.replay(abbl, busmod.compile_replay(os.path.join(tmp, 'arek_bus_replay'), cc))
+    return {'frames': info['frames'], 'lines': info['lines'], 'fixed_ok': int(m.group(1)) if m else 0,
+            'fixed_bad': int(m.group(2)) if m else -1, 'blits': rep['blits'], 'exact': rep['exact'],
+            'slots_ok': rep['slots_ok'], 'slots_bad': rep['slots_bad'], 'dir': tmp, 'text': r.stdout + rep['text']}

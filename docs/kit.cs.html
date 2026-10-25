@@ -253,10 +253,11 @@ trace_compare  trace_bus</code></pre>
         <tr><td>arek.seal, web</td><td>co potřebuje hratelná stránka: kontrakt obrazu (celé pixely zařízení, CRT, testy), kód zapečetěný k disketě návštěvníka, kontrola zveřejněného balíku</td><td>Alien Breed, Superfrog</td></tr>
         <tr><td>arek.m68k.cover, fuzz, parity suite</td><td>pokrytí běhu překladu a náhodný vstup pro obě strany (kde se dlouhý běh zasekne, je chyba); sada scénářů proti originálu: stav, obraz, zvuk po ticích</td><td>Superfrog</td></tr>
         <tr><td>arek.m68k.timing.bus</td><td>přístupy každé instrukce na sběrnici, ne jen takty: co potřebuje model sběrnice Amigy po slotech DMA</td><td>Alien Breed</td></tr>
-        <tr><td>arek, arek-mcp</td><td>příkazová řádka (26 podpříkazů) a MCP server (26 nástrojů)</td><td>nové</td></tr>
+        <tr><td>arek.bus</td><td>sběrnice Amigy po DMA slotech pro rekompilované hry: kdo vlastní který slot, blitter po taktech, procesor podle svých přístupů – na kterou instrukci padne přerušení, kdy skončí blit, jestli originál nestihl snímek; proti bus logu emulátoru přes <code>arek selftest bus</code></td><td>Alien Breed</td></tr>
+        <tr><td>arek, arek-mcp</td><td>příkazová řádka (27 podpříkazů) a MCP server (26 nástrojů)</td><td>nové</td></tr>
       </tbody>
     </table>
-    <p style="margin-top:18px">2359 testů: syntetická data (ručně assemblované programy, náhodné buffery, generované boot bloky a obrazy disket) a takty 68000 změřené na Moiře.</p>
+    <p style="margin-top:18px">2367 testů: syntetická data (ručně assemblované programy, náhodné buffery, generované boot bloky a obrazy disket) a takty 68000 změřené na Moiře.</p>
   </section>
 
   <footer>

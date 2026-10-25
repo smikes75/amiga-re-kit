@@ -286,6 +286,7 @@ arek trace regs  build/l1_regs.bin --reg DMACON AUD0PER
 arek trace audio build/l1_audio.bin
 ```
 
+- (`arek selftest bus` records a bus log of a synthetic program and checks the bus model `docs/BUS.md` against it)
 - `--inputs FILE`: one line per frame with the keys held - `R L U D F S`
   (`arek fuzz --seed N --frames N` writes such a file at random, the same one for the rebuild)
   (right, left, up, down, fire on joystick 2, space); an empty line holds

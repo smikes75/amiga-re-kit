@@ -169,6 +169,19 @@ void exit_point(M68 *m, uint32_t at);   /* a Flow.exits routine was called: the 
 %%PROFILE%%
 %%TIMING%%
 
+#ifdef BUS_HOOK                          /* the bus model behind the hooks (bus/arek_bus_glue.h, -DTICK_HOOK -DBUS_HOOK) */
+void bus_access_hook(uint32_t a);
+void bus_blit_hook(uint16_t con0, uint16_t con1, uint16_t size);
+int bus_bbusy_hook(void);
+double bus_time_hook(void);
+#define BUS_ACCESS(a) bus_access_hook(a)
+#define BUS_BLIT(c0, c1, sz) bus_blit_hook((uint16_t)(c0), (uint16_t)(c1), (uint16_t)(sz))
+#define BUS_BBUSY() bus_bbusy_hook()
+#else
+#define BUS_ACCESS(a) ((void)0)
+#define BUS_BLIT(c0, c1, sz) ((void)0)
+#define BUS_BBUSY() 0
+#endif
 #ifndef OOB_ZERO
 #define OOB_ZERO 0                      /* generate(oob='zero'): reads outside the modelled RAM give 0, writes are dropped */
 #endif
@@ -215,7 +228,7 @@ static void run_blit(void);
 static uint32_t hw_read(uint32_t off) {
     switch (off) {
     case 0x002:                          /* DMACONR: blitter u nas dobehne hned */
-        return (CREG[0x096 >> 1] & 0x1fff) | (BZERO ? 0x2000 : 0);
+        return (CREG[0x096 >> 1] & 0x1fff) | (BZERO ? 0x2000 : 0) | (BUS_BBUSY() ? 0x4000 : 0);
     case 0x01c:                          /* INTENAR = shadow of INTENA writes */
         return CREG[0x09a >> 1] & 0x7fff;
     default:
@@ -233,6 +246,7 @@ static void hw_write(uint32_t off, uint32_t v) {
         return;
     case 0x058:                          /* BLTSIZE: zapis spousti blit */
         CREG[off >> 1] = v;
+        BUS_BLIT(CREG[0x040 >> 1], CREG[0x042 >> 1], v);
         run_blit();
         return;
     default:
@@ -241,20 +255,23 @@ static void hw_write(uint32_t off, uint32_t v) {
         return;
     }
 }
-static uint32_t rd8(uint32_t a) {
+/* every access of the CPU to the chip bus is one BUS_ACCESS (a word or a byte); the _raw halves of a word do not count twice */
+static uint32_t rd8_raw(uint32_t a) {
     if (CUSTOM(a)) { uint32_t w = hw_read(a & 0x1fe); return (a & 1) ? (w & 0xff) : (w >> 8); }
     if (a < MEMSZ) return MEM[a];
     uint8_t *p = slow_at(a);
     if (!p) { oob(a); return 0; }
     return *p;
 }
+static uint32_t rd8(uint32_t a) { BUS_ACCESS(a); return rd8_raw(a); }
 static uint32_t rd16(uint32_t a) {
+    BUS_ACCESS(a);
     if (CUSTOM(a)) return hw_read(a & 0x1fe);
     if (a + 1 < MEMSZ) return (MEM[a] << 8) | MEM[a + 1];
-    return (rd8(a) << 8) | rd8(a + 1);
+    return (rd8_raw(a) << 8) | rd8_raw(a + 1);
 }
 static uint32_t rd32(uint32_t a) { return (rd16(a) << 16) | rd16(a + 2); }
-static void wr8(uint32_t a, uint32_t v) {
+static void wr8_raw(uint32_t a, uint32_t v) {
     if (CUSTOM(a)) { v &= 0xff; hw_write(a & 0x1fe, (v << 8) | v); return; }   /* 68000: the byte on both halves of the bus */
     if (a < MEMSZ) { MEM[a] = v; WRLOG[a] = 1; PROF_WRITE(a); return; }
     uint8_t *p = slow_at(a);
@@ -265,9 +282,11 @@ static void wr8(uint32_t a, uint32_t v) {
     PROF_WRITE(MEMSZ + (a - SLOWBASE));
 #endif
 }
+static void wr8(uint32_t a, uint32_t v) { BUS_ACCESS(a); wr8_raw(a, v); }
 static void wr16(uint32_t a, uint32_t v) {
+    BUS_ACCESS(a);
     if (CUSTOM(a)) { hw_write(a & 0x1fe, v); return; }
-    wr8(a, v >> 8); wr8(a + 1, v);
+    wr8_raw(a, v >> 8); wr8_raw(a + 1, v);
 }
 static void wr32(uint32_t a, uint32_t v) { wr16(a, v >> 16); wr16(a + 2, v); }
 
@@ -591,8 +610,10 @@ class Gen:
         return decoder.STUBS
 
     def __init__(self, data, base, funcs, cfg=None, flow=NOFLOW, timing=False, profile=False, cover=False,
-                 cover_in_tick=False):
+                 cover_in_tick=False, bus_table=False):
         self.data, self.base, self.flow, self.timing = data, base, flow, timing
+        self.bus_table = bus_table and not flow.lib      # the table lives with the main runtime
+        self.tab_insns = {}                              # pc -> Insn of every translated instruction
         self.profile = profile and not flow.lib          # the profile lives in the main runtime
         self.cover = cover and not flow.lib              # so does the coverage bitmap
         self.cover_in_tick = cover_in_tick and timing    # the mark rides in TICK: no extra lines in the body
@@ -636,11 +657,35 @@ class Gen:
             self.gen_func(s, e, entry)
         for entry in sorted(self.cfg):
             self.gen_cfg_func(entry)
+        if self.bus_table:
+            self.gen_bus_table()
         if not self.flow.lib:
             self.gen_dispatch()
         if self.flow.module:
             self.gen_module()
         return '\n'.join(self.out)
+
+    def gen_bus_table(self):
+        """BUS_TAB[(pc - BUS_LO) / 2] = {words, extra accesses, flags} (timing.bus_table_entry) for
+        every translated instruction; a host's arek_bus_glue.h reads it in tick_hook."""
+        from .timing import bus_table_entry
+        n = max(1, len(self.data) // 2)
+        rows = ['0,0,0'] * n
+        for pc, i in self.tab_insns.items():
+            k = (pc - self.base) // 2
+            if 0 <= k < n:
+                try:
+                    rows[k] = '%d,%d,%d' % bus_table_entry(i)
+                except Unsupported:
+                    rows[k] = '%d,0,0' % ((i.end - i.addr) // 2)
+        self.emit('/* bus table (recomp --bus-table): words, extra accesses, flags per instruction word of the image */')
+        self.emit('#define BUS_LO 0x%xu' % self.base)
+        self.emit('#define BUS_N %du' % n)
+        self.emit('static const uint8_t BUS_TAB[BUS_N][3] = {')
+        for k in range(0, n, 16):
+            self.emit('  ' + ','.join('{%s}' % r for r in rows[k:k + 16]) + ',')
+        self.emit('};')
+        self.emit()
 
     def gen_dispatch(self):
         """overlay_call (the areas of Flow.overlays) and call_addr (every entry of this
@@ -715,6 +760,7 @@ class Gen:
         for k, a in enumerate(order):
             i = ins[a]
             self.stats[i.kind] = self.stats.get(i.kind, 0) + 1
+            self.tab_insns[a] = i
             self.emit('L%06x: ; /* %s */' % (a, i.text))
             if self.cover:
                 self.cov_pcs.setdefault(entry, []).append(a)
@@ -741,6 +787,7 @@ class Gen:
         while addr < end:
             ins = decode(self.data, self.base, addr)
             self.stats[ins.kind] = self.stats.get(ins.kind, 0) + 1
+            self.tab_insns[addr] = ins
             self.emit('L%06x: ; /* %s */' % (addr, ins.text))
             if self.cover:
                 self.cov_pcs.setdefault(entry, []).append(addr)
@@ -1260,6 +1307,9 @@ int main(int argc, char **argv) {
     if (getenv("AREK_COVER")) { FILE *cf = fopen(getenv("AREK_COVER"), "w"); if (cf) { cov_dump(cf); fclose(cf); } }
 #endif
     if (OOB_COUNT) fprintf(f, "oob %ld\n", OOB_COUNT);
+#ifdef BUS_HOOK
+    fprintf(f, "bus %.1f\n", bus_time_hook());
+#endif
     for (int i = 0; i < HW_NOTES; i++) fprintf(f, "note %s\n", HW_NOTE[i]);
     for (int i = 0; i < 0x100; i++)
         if (HW_UNMODELLED[i]) fprintf(f, "hwreg %03x\n", i * 2);
@@ -1365,7 +1415,7 @@ def refusal_json(e):
 
 def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow=NOFLOW,
              stub_impl=None, timing=False, memsz=None, slow=None, profile=False, cover=None, oob='stop',
-             cover_in_tick=False):
+             cover_in_tick=False, bus_table=False):
     """Return (c_source, stats, entries). ``funcs`` are (start, end, entry) linear ranges,
     ``auto`` are entry addresses whose bodies are discovered by walking the
     flow graph (transitively over bsr/jsr). ``flow`` (a decoder.Flow) carries what the
@@ -1383,6 +1433,10 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
     it, so the body text of each instruction stays as without coverage (a host that patches the
     generated text by exact match keeps working); mul/div with a zero divisor are then not marked.
     A host of its own must call ``cov_dump`` itself (atexit); only the verification driver does.
+    ``bus_table``: BUS_TAB with words, extra bus accesses and flags per translated instruction
+    (timing.bus_table_entry) for the bus model (bus/arek_bus_glue.h, -DTICK_HOOK -DBUS_HOOK); the
+    runtime always has the hooks BUS_ACCESS (every CPU access to the chip bus), BUS_BLIT and
+    BUS_BBUSY, empty unless BUS_HOOK is defined. Not for lib modules.
     ``oob``: what an access outside the modelled RAM does - ``'stop'`` (exit 3, the default) or
     ``'zero'`` (reads give 0, writes are dropped, one note per KB, the driver reports ``oob N``).
     A refusal raises Unsupported with the first frontier as its text and all of them in
@@ -1412,7 +1466,7 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
             raise Unsupported(first, found)
     if oob not in ('stop', 'zero'):
         raise ValueError("oob is 'stop' or 'zero'")
-    g = Gen(data, base, list(funcs), cfg, flow, timing, profile, cover is not None, cover_in_tick)
+    g = Gen(data, base, list(funcs), cfg, flow, timing, profile, cover is not None, cover_in_tick, bus_table)
     src = g.gen()
     if cover is not None:
         cover['lo'] = base

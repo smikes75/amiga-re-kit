@@ -253,10 +253,11 @@ trace_compare  trace_bus</code></pre>
         <tr><td>arek.seal, web</td><td>what a playable page needs: the display contract (whole device pixels, CRT, tests), code sealed to the visitor's own disk, a checker for the published bundle</td><td>Alien Breed, Superfrog</td></tr>
         <tr><td>arek.m68k.cover, fuzz, parity suite</td><td>coverage of a translation run and random input for both sides (where a long run stalls, a bug hides); a suite of scenarios against the original: state, picture, sound per tick</td><td>Superfrog</td></tr>
         <tr><td>arek.m68k.timing.bus</td><td>bus cycles of every instruction, not only its clocks: what a model of the Amiga bus per DMA slot needs</td><td>Alien Breed</td></tr>
-        <tr><td>arek, arek-mcp</td><td>the command line (26 subcommands) and the MCP server (26 tools)</td><td>new</td></tr>
+        <tr><td>arek.bus</td><td>the Amiga bus per DMA slot for recompiled games: who owns each slot, the blitter cycle by cycle, the CPU by its accesses - on which instruction an interrupt lands, when a blit ends, whether the original overran the frame; checked against the emulator's bus log by <code>arek selftest bus</code></td><td>Alien Breed</td></tr>
+        <tr><td>arek, arek-mcp</td><td>the command line (27 subcommands) and the MCP server (26 tools)</td><td>new</td></tr>
       </tbody>
     </table>
-    <p style="margin-top:18px">2359 tests: synthetic data (hand-assembled programs, random buffers, generated boot blocks and disk images) and 68000 clock counts measured on Moira.</p>
+    <p style="margin-top:18px">2367 tests: synthetic data (hand-assembled programs, random buffers, generated boot blocks and disk images) and 68000 clock counts measured on Moira.</p>
   </section>
 
   <footer>

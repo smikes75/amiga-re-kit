@@ -28,6 +28,7 @@
     arek selftest    inputs|display [--vahl BINARY]   (needs only the Kickstart ROM)
     arek profile     PROFILE [--by clocks|calls|bytes] [--top N] [--frame F]
     arek cover       RUN.cov [RUN2.cov ...] OUT.cover.json [--top N]  (recomp --cover: what the runs never executed)
+    arek bus         copy DIR                                        (the bus model per DMA slot: C sources for a rebuild)
     arek fuzz        --seed N --frames N [--hold 3:22] [--start N] [--out FILE]   (random input for both sides)
     arek parity      SUITE.json [--json] [--no-run]                   (scenarios: state, picture, sound)
     arek web         copy DIR | demo [--port N] | test URL [--quick]   (display contract)
@@ -281,7 +282,7 @@ def cmd_recomp(a):
             data, a.base, funcs, a.auto or [], a.lo or a.base, a.hi, with_main=a.main, flow=flow,
             stub_impl=impl, timing=a.timing, memsz=a.memsz,
             slow=tuple(_hex(x) for x in a.slow.split(':')) if a.slow else None, profile=a.profile,
-            cover=cover, oob=a.oob, cover_in_tick=a.cover_in_tick)
+            cover=cover, oob=a.oob, cover_in_tick=a.cover_in_tick, bus_table=a.bus_table)
     except recomp.Unsupported as e:
         if a.refusals:
             Path(a.refusals).write_text(json.dumps(recomp.refusal_json(e), indent=1) + '\n')
@@ -399,6 +400,15 @@ def cmd_render(a):
                                                        ', box %s, rows %d' % (d['box'], len(d['rows'])) if d['pixels'] else ''))
         if d['pixels'] and a.fail:
             raise RuntimeError('the render differs from the screenshot')
+
+
+def cmd_bus(a):
+    from . import bus
+    if a.what == 'copy':
+        for f in bus.copy(a.target):
+            print(f)
+        return
+    raise ValueError('arek bus copy DIR')
 
 
 def cmd_cover(a):
@@ -519,6 +529,14 @@ def cmd_selftest(a):
     conf = config.load(a.conf)
     if a.vahl:
         conf['VAHL'] = os.path.abspath(a.vahl)
+    if a.what == 'bus':
+        r = selftest.bus(conf, frames=min(a.frames, 120), timeout=a.timeout)
+        print('%s: bus model against the bus log of %d frames: fixed DMA slots %d agree / %d disagree; '
+              'blits %d, %d end on the same slot, blitter slots %d agree / %d disagree' % (
+                  conf['VAHL'], r['frames'], r['fixed_ok'], r['fixed_bad'], r['blits'], r['exact'], r['slots_ok'], r['slots_bad']))
+        if r['fixed_bad'] or r['slots_bad'] or r['exact'] != r['blits'] or not r['blits']:
+            raise RuntimeError('the bus model and this emulator disagree (files in %s)' % r['dir'])
+        return
     if a.what == 'display':
         r = selftest.display(conf, timeout=a.timeout)
         print('%s: arek.display against the screenshot: %d of %d pixels differ' % (conf['VAHL'], r['pixels'], r['total']))
@@ -772,6 +790,8 @@ def build_parser():
                    '(cov_dump / $AREK_COVER); also writes OUT.cover.json for arek cover')
     s.add_argument('--cover-in-tick', action='store_true', help='with --timing: the coverage mark rides in TICK, '
                    'the instruction bodies stay as without --cover')
+    s.add_argument('--bus-table', action='store_true', help='BUS_TAB per translated instruction for the bus model '
+                   '(bus/arek_bus_glue.h, build with -DTICK_HOOK -DBUS_HOOK)')
     s.add_argument('--oob', choices=['stop', 'zero'], default='stop',
                    help="an access outside the modelled RAM: stop (exit 3) or zero (reads 0, writes dropped, 'oob N' reported)")
     s.add_argument('--memsz', type=AH, help='chip RAM bytes from 0 (default 0x80000)')
@@ -868,6 +888,10 @@ def build_parser():
     s.add_argument('--fail', action='store_true', help='exit 1 when the render differs from the screenshot')
     s.set_defaults(fn=cmd_render)
 
+    s = sp.add_parser('bus', help='the bus model per DMA slot (C sources for a rebuild)')
+    s.add_argument('what', choices=['copy'])
+    s.add_argument('target', help='copy: destination folder')
+    s.set_defaults(fn=cmd_bus)
     s = sp.add_parser('cover', help='coverage of a translation run (recomp --cover): what never ran')
     s.add_argument('file', nargs='+', help='dumps the runtime wrote (AREK_COVER or cov_dump; several = their union) '
                    'and OUT.cover.json written by recomp --cover')
@@ -917,8 +941,8 @@ def build_parser():
     s.add_argument('--quick', action='store_true', help='test: fewer combinations')
     s.set_defaults(fn=cmd_web)
 
-    s = sp.add_parser('selftest', help='check a VAHeadless build on a synthetic disk: inputs frame by frame, display model')
-    s.add_argument('what', choices=['inputs', 'display'])
+    s = sp.add_parser('selftest', help='check a VAHeadless build on a synthetic disk: inputs frame by frame, display model, bus model')
+    s.add_argument('what', choices=['inputs', 'display', 'bus'])
     s.add_argument('--conf', default='local.conf', help='needs ROM (and VAHL unless --vahl)')
     s.add_argument('--vahl', help='the binary to test instead of VAHL from the conf')
     s.add_argument('--frames', type=int, default=240)

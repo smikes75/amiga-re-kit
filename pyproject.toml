@@ -42,8 +42,9 @@ where = ["src"]
 version = {attr = "arek.__version__"}
 
 [tool.setuptools.package-data]
-"arek.headless" = ["patches/*.patch", "selftest_display.s"]
+"arek.headless" = ["patches/*.patch", "selftest_display.s", "selftest_bus.s"]
 "arek.web" = ["wb-obraz.js", "wb-seal.js", "demo.html"]
+"arek.bus" = ["*.c", "*.h"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

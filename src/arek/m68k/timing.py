@@ -318,6 +318,87 @@ def bus(i, taken=True, dbcc='loop'):
     raise Unsupported('bus: %s' % k)
 
 
+def _mem(e):
+    return e is not None and not isinstance(e, str) and ea_class(e) not in ('dn', 'an', 'imm')
+
+
+def performed(i):
+    """Word accesses the kit's translation of ``i`` makes itself through rd/wr (operand reads
+    and writes, stack pushes and pops) - the model is told about them as they happen."""
+    k = i.kind
+    L = getattr(i, 'sz', None) == SZ_L
+    W = 2 if L else 1
+    if k == 'move':
+        return (W if _mem(i.src) else 0) + (W if _mem(i.dst) else 0)
+    if k == 'alu':
+        return (W + (W if i.to_ea and i.name != 'cmp' else 0)) if _mem(i.ea) else 0
+    if k in ('eor', 'addq', 'neg', 'negx', 'not'):
+        return 2 * W if _mem(i.ea) else 0
+    if k in ('adda', 'suba', 'cmpa', 'tst'):
+        return W if _mem(i.ea) else 0
+    if k in ('mulu', 'muls', 'divu', 'divs'):
+        return 1 if _mem(i.ea) else 0
+    if k == 'alui':
+        return 0 if not _mem(i.ea) else W + (0 if i.name == 'cmpi' else W)
+    if k == 'clr':
+        return W if _mem(i.ea) else 0                  # the 68000 reads before it writes; the translation only writes
+    if k == 'scc':
+        return 1 if _mem(i.ea) else 0
+    if k == 'bit':
+        return (1 + (0 if i.bitop == 0 else 1)) if _mem(i.ea) else 0
+    if k == 'shift':
+        return 2 if getattr(i, 'mem', False) else 0
+    if k in ('jsr', 'bsr', 'pea', 'link', 'unlk'):
+        return 2
+    if k == 'rte':
+        return 1                                       # the SR; the return address is not read
+    if k == 'movem':
+        return bin(i.mask).count('1') * W
+    if k == 'sr':
+        return 1 if _mem(i.ea) else 0
+    if k == 'bcd':
+        return 3 if i.mem else 0
+    if k == 'addx':
+        return 3 * W if i.mem else 0
+    if k == 'cmpm':
+        return 2 * W
+    return 0                                           # rts (a7 += 4), branches, jmp, nop, exg, ext, swap, moveq
+
+
+TAB_BCC_S, TAB_DBCC, TAB_PRE_ALL, TAB_PRE_2, TAB_PUSH2 = 1, 2, 4, 8, 16
+
+
+def bus_table_entry(i):
+    """``(words, extra, flags)`` for the runtime's bus table (``recomp --bus-table``): the
+    instruction's words (each a prefetch read), the bus accesses the 68000 makes that the
+    translation does not (prefetch after a jump, the stack of rts, the read before clr,
+    movem's extra read ...), and flags the host resolves at run time from the clock count:
+    TAB_BCC_S (a taken short branch reads one more word), TAB_DBCC (an expired loop too),
+    TAB_PRE_ALL (a jump spends its internal cycles before its accesses), TAB_PRE_2 (-(An) and
+    d8(An,Xn) wait 2 cycles before the operand), TAB_PUSH2 (jsr/bsr push two words after)."""
+    k = i.kind
+    words = (i.end - i.addr) // 2
+    if k == 'bcc':
+        r, w = bus(i, taken=False)
+    elif k == 'dbcc':
+        r, w = bus(i, dbcc='loop')
+    else:
+        r, w = bus(i)
+    extra = max(0, r + w - words - performed(i))
+    flags = 0
+    if k == 'bcc' and words == 1:
+        flags |= TAB_BCC_S
+    if k == 'dbcc':
+        flags |= TAB_DBCC
+    if k in ('bcc', 'bra', 'dbcc', 'jmp', 'jsr', 'bsr'):
+        flags |= TAB_PRE_ALL
+    if k in ('jsr', 'bsr'):
+        flags |= TAB_PUSH2
+    if any(_mem(e) and ea_class(e) in ('pre', 'd8x', 'pcd8x') for e in (getattr(i, a, None) for a in ('ea', 'src', 'dst'))):
+        flags |= TAB_PRE_2
+    return words, extra, flags
+
+
 def bus_pattern(i, **kw):
     """``{'words', 'reads', 'writes', 'cycles', 'internal'}`` of ``i``: its length in words, its
     bus cycles, its clocks (``cycles(i, **kw)``) and the clocks spent without the bus."""
