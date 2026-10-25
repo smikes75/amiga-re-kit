@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 2357 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2359 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
