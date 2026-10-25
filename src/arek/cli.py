@@ -27,6 +27,9 @@
     arek render      CAPTURE [--ram F --cop A] [--png OUT] [--compare RAW]
     arek selftest    inputs|display [--vahl BINARY]   (needs only the Kickstart ROM)
     arek profile     PROFILE [--by clocks|calls|bytes] [--top N] [--frame F]
+    arek cover       RUN.cov OUT.cover.json [--top N]                 (recomp --cover: what a run never executed)
+    arek fuzz        --seed N --frames N [--hold 3:22] [--start N] [--out FILE]   (random input for both sides)
+    arek parity      SUITE.json [--json] [--no-run]                   (scenarios: state, picture, sound)
     arek web         copy DIR | demo [--port N] | test URL [--quick]   (display contract)
     arek web         seal FILE... --set D1.adf[,D2.adf] [--payload FILE] [--label TEXT] [--gzip] --out DIR   (derived code, opened by the disk or by the game's content)
     arek web         check DIR                                          (a presentation bundle: no game data, derived = sealed)
@@ -272,11 +275,13 @@ def cmd_recomp(a):
         impl = 'notes' if a.stub_impl == 'notes' else Path(a.stub_impl).read_text()
     if a.refusals and os.path.exists(a.refusals):
         os.unlink(a.refusals)
+    cover = {} if a.cover else None
     try:
         src, stats, entries = recomp.generate(
             data, a.base, funcs, a.auto or [], a.lo or a.base, a.hi, with_main=a.main, flow=flow,
             stub_impl=impl, timing=a.timing, memsz=a.memsz,
-            slow=tuple(_hex(x) for x in a.slow.split(':')) if a.slow else None, profile=a.profile)
+            slow=tuple(_hex(x) for x in a.slow.split(':')) if a.slow else None, profile=a.profile,
+            cover=cover, oob=a.oob)
     except recomp.Unsupported as e:
         if a.refusals:
             Path(a.refusals).write_text(json.dumps(recomp.refusal_json(e), indent=1) + '\n')
@@ -285,6 +290,8 @@ def cmd_recomp(a):
                                                    else '; --refusals FILE lists them as JSON'), file=sys.stderr)
         raise
     Path(a.out).write_text(src)
+    if cover is not None:
+        Path(a.out + '.cover.json').write_text(json.dumps(cover) + '\n')
     print('%s: %d entries (%s), %d instruction kinds, %d instructions' %
           (a.out, len(entries), ', '.join('%06x' % e for e in entries), len(stats), sum(stats.values())))
     if a.stats:
@@ -392,6 +399,35 @@ def cmd_render(a):
                                                        ', box %s, rows %d' % (d['box'], len(d['rows'])) if d['pixels'] else ''))
         if d['pixels'] and a.fail:
             raise RuntimeError('the render differs from the screenshot')
+
+
+def cmd_cover(a):
+    from .m68k import cover
+    r = cover.report(cover.read(a.file), a.sidecar, a.top)
+    if a.json:
+        print(json.dumps(r, indent=1))
+    else:
+        print(cover.format_report(r))
+
+
+def cmd_fuzz(a):
+    from . import fuzz
+    lo, _, hi = a.hold.partition(':')
+    lines = fuzz.inputs(a.seed, a.frames, (int(lo), int(hi or lo)), a.start, a.rest, keys=a.keys)
+    if a.out:
+        fuzz.write(a.out, lines)
+        print('%s: %d frames, seed %d' % (a.out, len(lines), a.seed))
+    else:
+        print('\n'.join(lines))
+
+
+def cmd_parity(a):
+    from . import parity
+    rows = parity.suite(a.suite, a.base, not a.no_run)
+    if a.json:
+        print(json.dumps(rows, indent=1))
+    else:
+        print(parity.format_suite(rows))
 
 
 def cmd_profile(a):
@@ -727,6 +763,10 @@ def build_parser():
     s.add_argument('--main', action='store_true', help='append the verification driver main()')
     s.add_argument('--refusals', metavar='FILE', help='on a refusal write every frontier here as JSON '
                    '(routine, site, kind, insn, operand, target, why); removed when the run succeeds')
+    s.add_argument('--cover', action='store_true', help='one bit per translated instruction, set when it runs '
+                   '(cov_dump / $AREK_COVER); also writes OUT.cover.json for arek cover')
+    s.add_argument('--oob', choices=['stop', 'zero'], default='stop',
+                   help="an access outside the modelled RAM: stop (exit 3) or zero (reads 0, writes dropped, 'oob N' reported)")
     s.add_argument('--memsz', type=AH, help='chip RAM bytes from 0 (default 0x80000)')
     s.add_argument('--slow', metavar='BASE:SIZE', help='slow RAM, hex, e.g. c00000:80000; the driver '
                    'takes SLOW.bin SLOWOUT.bin as arguments 5 and 6')
@@ -821,6 +861,27 @@ def build_parser():
     s.add_argument('--fail', action='store_true', help='exit 1 when the render differs from the screenshot')
     s.set_defaults(fn=cmd_render)
 
+    s = sp.add_parser('cover', help='coverage of a translation run (recomp --cover): what never ran')
+    s.add_argument('file', help='the dump the runtime wrote (AREK_COVER or cov_dump)')
+    s.add_argument('sidecar', help='OUT.cover.json written by recomp --cover')
+    s.add_argument('--top', type=int, default=20, help='least covered routines to list (0 = all)')
+    s.add_argument('--json', action='store_true')
+    s.set_defaults(fn=cmd_cover)
+    s = sp.add_parser('fuzz', help='random joystick input (R L U D F S per frame) for the emulator and a rebuild alike')
+    s.add_argument('--seed', type=int, required=True)
+    s.add_argument('--frames', type=int, required=True)
+    s.add_argument('--hold', default='3:22', help='frames a press lasts, min:max (default 3:22)')
+    s.add_argument('--start', type=int, default=0, help='frames of nothing at the start')
+    s.add_argument('--rest', type=float, default=0.25, help='share of spans with nothing held')
+    s.add_argument('--keys', default='RLUDFS', help='keys allowed')
+    s.add_argument('--out', help='write the file (default: print)')
+    s.set_defaults(fn=cmd_fuzz)
+    s = sp.add_parser('parity', help='a suite of scenarios against the original: state, picture, sound per tick')
+    s.add_argument('suite', help='SUITE.json (see arek.parity.suite)')
+    s.add_argument('--base', default='.', help='paths in the suite are relative to this folder')
+    s.add_argument('--no-run', action='store_true', help="do not run a scenario's make command for a missing original trace")
+    s.add_argument('--json', action='store_true')
+    s.set_defaults(fn=cmd_parity)
     s = sp.add_parser('profile', help='routine profile of a translation run (recomp --profile): what to rewrite first')
     s.add_argument('file', help='the profile the runtime wrote (AREK_PROFILE or prof_dump)')
     s.add_argument('--by', choices=['clocks', 'calls', 'bytes'], default='clocks')

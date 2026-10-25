@@ -226,6 +226,106 @@ def cycles(i, taken=True, src=None, dst=None, count=None, dbcc='loop'):
     raise Unsupported('timing: %s' % k)
 
 
+# bus cycles of an effective address: (extension words + operand reads) for a word / a long operand
+_EA_R = {'dn': (0, 0), 'an': (0, 0), 'ind': (1, 2), 'post': (1, 2), 'pre': (1, 2), 'd16': (2, 3), 'd8x': (2, 3),
+         'absw': (2, 3), 'absl': (3, 4), 'pcd16': (2, 3), 'pcd8x': (2, 3), 'imm': (1, 2)}
+_DST_X = {'dn': 0, 'an': 0, 'ind': 0, 'post': 0, 'pre': 0, 'd16': 1, 'd8x': 1, 'absw': 1, 'absl': 2}
+# control addressing, (reads, writes): (An), d16(An), d8(An,Xn), abs.W, abs.L, d16(PC), d8(PC,Xn)
+_CTL_RW = {'jmp': ((2, 0), (2, 0), (3, 0), (2, 0), (3, 0), (2, 0), (3, 0)),
+           'jsr': ((2, 2), (2, 2), (2, 2), (2, 2), (3, 2), (2, 2), (2, 2)),
+           'lea': ((1, 0), (2, 0), (2, 0), (2, 0), (3, 0), (2, 0), (2, 0)),
+           'pea': ((1, 2), (2, 2), (2, 2), (2, 2), (3, 2), (2, 2), (2, 2))}
+_MOVEM_R_M2R = {'ind': 3, 'post': 3, 'd16': 4, 'd8x': 4, 'absw': 4, 'absl': 5, 'pcd16': 4, 'pcd8x': 4}
+_MOVEM_R_R2M = {'ind': 2, 'pre': 2, 'd16': 3, 'd8x': 3, 'absw': 3, 'absl': 4}
+_FIXED_RW = {'nop': (1, 0), 'rts': (4, 0), 'rte': (5, 0), 'link': (2, 2), 'unlk': (3, 0), 'exg': (1, 0),
+             'ext': (1, 0), 'swap': (1, 0), 'moveq': (1, 0), 'bra': (2, 0), 'bsr': (2, 2)}
+
+
+def bus(i, taken=True, dbcc='loop'):
+    """Bus cycles of ``i`` as ``(reads, writes)`` - the n(r/w) of the MC68000 User's Manual, the
+    opcode and extension words included (each a read), 4 clocks each; the rest of
+    ``cycles(i)`` is internal. What a model of the Amiga bus needs per instruction: how many
+    slots the CPU takes, not only how long it runs."""
+    k = i.kind
+    L = getattr(i, 'sz', None) == SZ_L
+    W = 2 if L else 1                                   # operand accesses of the size
+    if k in _FIXED_RW:
+        return _FIXED_RW[k]
+    if k == 'move':
+        d = ea_class(i.dst)
+        return 1 + _EA_R[ea_class(i.src)][L] + _DST_X[d], 0 if d in ('dn', 'an') else W
+    if k == 'alu':
+        r = 1 + _EA_R[ea_class(i.ea)][L]
+        return r, (W if i.to_ea and i.name != 'cmp' else 0)
+    if k == 'eor':
+        c = ea_class(i.ea)
+        return (1, 0) if c == 'dn' else (1 + _EA_R[c][L], W)
+    if k in ('adda', 'suba', 'cmpa', 'tst', 'mulu', 'muls', 'divu', 'divs'):
+        return 1 + _EA_R[ea_class(i.ea)][L if k in ('adda', 'suba', 'cmpa', 'tst') else False], 0
+    if k == 'alui':
+        c = ea_class(i.ea)
+        if c == 'imm':                                  # to CCR / SR
+            return 3, 0
+        imm = 2 if L else 1
+        if c == 'dn':
+            return 1 + imm, 0
+        return 1 + imm + _EA_R[c][L], (0 if i.name == 'cmpi' else W)
+    if k in ('addq', 'clr', 'neg', 'negx', 'not'):
+        c = ea_class(i.ea)
+        if c in ('dn', 'an'):
+            return 1, 0
+        return 1 + _EA_R[c][L], W
+    if k == 'scc':
+        c = ea_class(i.ea)
+        return (1, 0) if c == 'dn' else (1 + _EA_R[c][0], 1)
+    if k == 'bit':
+        st = 0 if i.src.startswith('m->d[') else 1      # a static bit number is an extension word
+        c = ea_class(i.ea)
+        if c == 'dn':
+            return 1 + st, 0
+        return 1 + st + _EA_R[c][0], (0 if i.bitop == 0 else 1)
+    if k == 'shift':
+        if getattr(i, 'mem', False):
+            return 1 + _EA_R[ea_class(i.ea)][0], 1
+        return 1, 0
+    if k == 'bcc':
+        if taken:
+            return 2, 0
+        return (1, 0) if i.end - i.addr == 2 else (2, 0)
+    if k == 'dbcc':
+        return {'loop': (2, 0), 'expired': (3, 0), 'cc': (2, 0)}[dbcc]
+    if k in _CTL_RW:
+        return _CTL_RW[k][_CTL_IX[ea_class(i.ea)]]
+    if k == 'movem':
+        c = ea_class(i.ea)
+        n = bin(i.mask).count('1') * W
+        if i.to_mem:
+            return _MOVEM_R_R2M[c], n
+        return _MOVEM_R_M2R[c] + n, 0
+    if k == 'sr':
+        c = ea_class(i.ea)
+        if i.which == 'from_sr':
+            return (1, 0) if c == 'dn' else (1 + _EA_R[c][0], 1)
+        return 1 + _EA_R[c][0], 0
+    if k == 'bcd':
+        return (3, 1) if i.mem else (1, 0)
+    if k == 'addx':
+        if i.mem:
+            return (5, 2) if L else (3, 1)
+        return 1, 0
+    if k == 'cmpm':
+        return (5, 0) if L else (3, 0)
+    raise Unsupported('bus: %s' % k)
+
+
+def bus_pattern(i, **kw):
+    """``{'words', 'reads', 'writes', 'cycles', 'internal'}`` of ``i``: its length in words, its
+    bus cycles, its clocks (``cycles(i, **kw)``) and the clocks spent without the bus."""
+    r, w = bus(i, taken=kw.get('taken', True), dbcc=kw.get('dbcc', 'loop'))
+    c = cycles(i, **kw)
+    return {'words': (i.end - i.addr) // 2, 'reads': r, 'writes': w, 'cycles': c, 'internal': c - 4 * (r + w)}
+
+
 def describe(i):
     """Clock count of ``i`` for a listing: a number, or the cases when it depends on data."""
     k = i.kind

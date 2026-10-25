@@ -287,6 +287,7 @@ arek trace audio build/l1_audio.bin
 ```
 
 - `--inputs FILE`: one line per frame with the keys held - `R L U D F S`
+  (`arek fuzz --seed N --frames N` writes such a file at random, the same one for the rebuild)
   (right, left, up, down, fire on joystick 2, space); an empty line holds
   nothing. Line k is applied at the k-th frame in which a breakpoint is hit at
   v < 100, so `--break` must include an address of the VBL handler (the first

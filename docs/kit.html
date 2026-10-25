@@ -251,10 +251,12 @@ trace_compare  trace_bus</code></pre>
         <tr><td>arek.m68k.profile</td><td>per-routine calls, clocks and memory pages from a profiled recompilation: which routines an enhancement has to touch</td><td>new</td></tr>
         <tr><td>arek.display, parity</td><td>a frame rendered from chip RAM with vAmiga's colour pipeline, 0 pixels off; long-run parity of a rebuild against the emulator's register and input logs</td><td>Turrican II, Alien Breed, Superfrog</td></tr>
         <tr><td>arek.seal, web</td><td>what a playable page needs: the display contract (whole device pixels, CRT, tests), code sealed to the visitor's own disk, a checker for the published bundle</td><td>Alien Breed, Superfrog</td></tr>
-        <tr><td>arek, arek-mcp</td><td>the command line (23 subcommands) and the MCP server (26 tools)</td><td>new</td></tr>
+        <tr><td>arek.m68k.cover, fuzz, parity suite</td><td>coverage of a translation run and random input for both sides (where a long run stalls, a bug hides); a suite of scenarios against the original: state, picture, sound per tick</td><td>Superfrog</td></tr>
+        <tr><td>arek.m68k.timing.bus</td><td>bus cycles of every instruction, not only its clocks: what a model of the Amiga bus per DMA slot needs</td><td>Alien Breed</td></tr>
+        <tr><td>arek, arek-mcp</td><td>the command line (26 subcommands) and the MCP server (26 tools)</td><td>new</td></tr>
       </tbody>
     </table>
-    <p style="margin-top:18px">1303 tests: synthetic data (hand-assembled programs, random buffers, generated boot blocks and disk images) and 68000 clock counts measured on Moira.</p>
+    <p style="margin-top:18px">2356 tests: synthetic data (hand-assembled programs, random buffers, generated boot blocks and disk images) and 68000 clock counts measured on Moira.</p>
   </section>
 
   <footer>

@@ -104,6 +104,28 @@ void prof_dump(FILE *f, long frame) {
 }
 '''
 
+COVER_RT = r'''
+/* Coverage (generate(cover=True)): one bit per instruction word of the image [COV_LO, COV_LO + 2 * COV_N),
+   set when the instruction at that address runs. cov_dump(f) writes the addresses that ran as ranges,
+   cov_reset() clears them; the verification driver writes the dump to $AREK_COVER at exit, a host per
+   run. `arek cover` turns it into executed / translated instructions per routine. */
+#define COV_LO 0x%(lo)xu
+#define COV_N %(n)du
+static uint8_t COV[(COV_N + 7) / 8];
+static inline void cov_mark(uint32_t pc) { uint32_t i = (pc - COV_LO) >> 1; if (i < COV_N) COV[i >> 3] |= (uint8_t)(1u << (i & 7)); }
+#define COV_MARK(pc) cov_mark(pc)
+void cov_reset(void) { memset(COV, 0, sizeof COV); }
+void cov_dump(FILE *f) {
+    fprintf(f, "H %%x %%x\n", (unsigned)COV_LO, (unsigned)COV_N);
+    long run = -1;
+    for (uint32_t i = 0; i <= COV_N; i++) {
+        int on = i < COV_N && (COV[i >> 3] >> (i & 7)) & 1;
+        if (on && run < 0) run = (long)i;
+        if (!on && run >= 0) { fprintf(f, "%%x-%%x\n", (unsigned)(COV_LO + 2 * run), (unsigned)(COV_LO + 2 * (i - 1))); run = -1; }
+    }
+}
+'''
+
 WAIT_RT = r'''
 /* A wait loop "L: tst/btst/cmp/cmpa/cmpi <mem> ; bcc L" polls memory or a hardware register:
    statically translated, time must move on inside it (an interrupt, the beam) or it never
@@ -143,10 +165,24 @@ void exit_point(M68 *m, uint32_t at);   /* a Flow.exits routine was called: the 
 %%PROFILE%%
 %%TIMING%%
 
+#ifndef OOB_ZERO
+#define OOB_ZERO 0                      /* generate(oob='zero'): reads outside the modelled RAM give 0, writes are dropped */
+#endif
+static long OOB_COUNT = 0;
 static void oob(uint32_t a) {
+#if OOB_ZERO
+    static uint32_t seen[64];
+    static int n = 0;
+    OOB_COUNT++;
+    for (int i = 0; i < n; i++) if (seen[i] == (a & ~0x3ffu)) return;      /* one line per KB */
+    if (n < 64) seen[n++] = a & ~0x3ffu;
+    fprintf(stderr, "access outside the modelled RAM (MEMSZ %x, SLOWBASE %x SLOWSZ %x): %08x - reads 0, writes dropped\n",
+            MEMSZ, SLOWBASE, SLOWSZ, a);
+#else
     fprintf(stderr, "access outside the modelled RAM (MEMSZ %x, SLOWBASE %x SLOWSZ %x): %08x\n",
             MEMSZ, SLOWBASE, SLOWSZ, a);
     exit(3);
+#endif
 }
 static uint8_t *slow_at(uint32_t a) {   /* NULL outside slow RAM */
 #if SLOWSZ
@@ -205,7 +241,7 @@ static uint32_t rd8(uint32_t a) {
     if (CUSTOM(a)) { uint32_t w = hw_read(a & 0x1fe); return (a & 1) ? (w & 0xff) : (w >> 8); }
     if (a < MEMSZ) return MEM[a];
     uint8_t *p = slow_at(a);
-    if (!p) oob(a);
+    if (!p) { oob(a); return 0; }
     return *p;
 }
 static uint32_t rd16(uint32_t a) {
@@ -218,7 +254,7 @@ static void wr8(uint32_t a, uint32_t v) {
     if (CUSTOM(a)) { v &= 0xff; hw_write(a & 0x1fe, (v << 8) | v); return; }   /* 68000: the byte on both halves of the bus */
     if (a < MEMSZ) { MEM[a] = v; WRLOG[a] = 1; PROF_WRITE(a); return; }
     uint8_t *p = slow_at(a);
-    if (!p) oob(a);
+    if (!p) { oob(a); return; }
     *p = v;
 #if SLOWSZ
     SLOWLOG[a - SLOWBASE] = 1;
@@ -550,9 +586,11 @@ class Gen:
     def STUBS(self):
         return decoder.STUBS
 
-    def __init__(self, data, base, funcs, cfg=None, flow=NOFLOW, timing=False, profile=False):
+    def __init__(self, data, base, funcs, cfg=None, flow=NOFLOW, timing=False, profile=False, cover=False):
         self.data, self.base, self.flow, self.timing = data, base, flow, timing
         self.profile = profile and not flow.lib          # the profile lives in the main runtime
+        self.cover = cover and not flow.lib              # so does the coverage bitmap
+        self.cov_pcs = {}                                # entry -> [instruction addresses translated]
         self.funcs = funcs                  # [(start, end, entry)] - linearni useky
         self.cfg = cfg or {}                # entry -> {adresa: Insn} z grafu toku
         self.entries = {e: (s, en) for s, en, e in funcs}
@@ -572,7 +610,8 @@ class Gen:
                 entries = sorted(set(self.all_entries()))
                 prof = PROFILE_RT % {'n': max(1, len(entries)), 'addrs': ', '.join('0x%xu' % e for e in entries) or '0'}
                 self.prof_index = {e: k for k, e in enumerate(entries)}
-            self.emit(RUNTIME.replace('%%PROFILE%%', prof or PROFILE_OFF))
+            cov = COVER_RT % {'lo': self.base, 'n': max(1, len(self.data) // 2)} if self.cover else ''
+            self.emit(RUNTIME.replace('%%PROFILE%%', cov + (prof or PROFILE_OFF)))
         else:                               # guarded: a main translation included before wins
             self.emit((TIMING_RT if self.timing else '') + WAIT_RT)
         for name in sorted(set(self.flow.externs.values())):
@@ -670,6 +709,9 @@ class Gen:
             i = ins[a]
             self.stats[i.kind] = self.stats.get(i.kind, 0) + 1
             self.emit('L%06x: ; /* %s */' % (a, i.text))
+            if self.cover:
+                self.cov_pcs.setdefault(entry, []).append(a)
+                self.emit('    COV_MARK(0x%xu);' % a)
             if self.timing and self.tick(i):
                 self.emit('    ' + self.tick(i))
             for line in self.body(i, None, None, ins):
@@ -692,6 +734,9 @@ class Gen:
             ins = decode(self.data, self.base, addr)
             self.stats[ins.kind] = self.stats.get(ins.kind, 0) + 1
             self.emit('L%06x: ; /* %s */' % (addr, ins.text))
+            if self.cover:
+                self.cov_pcs.setdefault(entry, []).append(addr)
+                self.emit('    COV_MARK(0x%xu);' % addr)
             if self.timing and self.tick(ins):
                 self.emit('    ' + self.tick(ins))
             for line in self.body(ins, start, end):
@@ -1202,6 +1247,10 @@ int main(int argc, char **argv) {
 #ifdef PROF_N
     if (getenv("AREK_PROFILE")) { FILE *pf = fopen(getenv("AREK_PROFILE"), "w"); if (pf) { prof_dump(pf, -1); fclose(pf); } }
 #endif
+#ifdef COV_N
+    if (getenv("AREK_COVER")) { FILE *cf = fopen(getenv("AREK_COVER"), "w"); if (cf) { cov_dump(cf); fclose(cf); } }
+#endif
+    if (OOB_COUNT) fprintf(f, "oob %ld\n", OOB_COUNT);
     for (int i = 0; i < HW_NOTES; i++) fprintf(f, "note %s\n", HW_NOTE[i]);
     for (int i = 0; i < 0x100; i++)
         if (HW_UNMODELLED[i]) fprintf(f, "hwreg %03x\n", i * 2);
@@ -1288,6 +1337,17 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
                 dynamic=map(_hex, dynamic), module=mod)
 
 
+def _ranges(pcs):
+    """Sorted addresses as [[first, last], ...] of consecutive instruction words."""
+    out = []
+    for a in sorted(set(pcs)):
+        if out and a <= out[-1][1] + 2:
+            out[-1][1] = max(out[-1][1], a)
+        else:
+            out.append([a, a])
+    return out
+
+
 def refusal_json(e):
     """An Unsupported as JSON-ready data: the message and every frontier, addresses as hex strings."""
     return {'message': str(e), 'frontiers': [{k: ('%x' % v if k in ('routine', 'site', 'target') else v)
@@ -1295,7 +1355,7 @@ def refusal_json(e):
 
 
 def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow=NOFLOW,
-             stub_impl=None, timing=False, memsz=None, slow=None, profile=False):
+             stub_impl=None, timing=False, memsz=None, slow=None, profile=False, cover=None, oob='stop'):
     """Return (c_source, stats, entries). ``funcs`` are (start, end, entry) linear ranges,
     ``auto`` are entry addresses whose bodies are discovered by walking the
     flow graph (transitively over bsr/jsr). ``flow`` (a decoder.Flow) carries what the
@@ -1306,6 +1366,11 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
     MUL/DIV operands included) through TICK(pc, n) into CYCLES or the host's tick_hook.
     ``profile``: per routine the calls, clocks and written bytes/pages (prof_dump, prof_reset;
     the driver writes it to $AREK_PROFILE) - what to rewrite first; not for lib modules.
+    ``cover``: a dict to fill - the runtime then keeps one bit per translated instruction
+    (cov_dump, cov_reset; the driver writes it to $AREK_COVER) and the dict gets
+    ``{'lo', 'routines': {entry: [[first, last], ...]}}`` for ``arek cover``; not for lib modules.
+    ``oob``: what an access outside the modelled RAM does - ``'stop'`` (exit 3, the default) or
+    ``'zero'`` (reads give 0, writes are dropped, one note per KB, the driver reports ``oob N``).
     A refusal raises Unsupported with the first frontier as its text and all of them in
     ``.frontiers`` (decoder.frontier), so one run lists every place that needs a Flow entry.
     ``memsz``: chip RAM bytes from 0 (default 512 KB); ``slow``: (base, size) of slow RAM, e.g.
@@ -1331,8 +1396,13 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
             cfg[e] = ins
         if found:
             raise Unsupported(first, found)
-    g = Gen(data, base, list(funcs), cfg, flow, timing, profile)
+    if oob not in ('stop', 'zero'):
+        raise ValueError("oob is 'stop' or 'zero'")
+    g = Gen(data, base, list(funcs), cfg, flow, timing, profile, cover is not None)
     src = g.gen()
+    if cover is not None:
+        cover['lo'] = base
+        cover['routines'] = {'%x' % e: _ranges(pcs) for e, pcs in sorted(g.cov_pcs.items())}
     if stub_impl is not None and decoder.STUBS:
         names = sorted(set(decoder.STUBS.values()))
         impl = stub_impl if stub_impl != 'notes' else '\n'.join(
@@ -1351,6 +1421,8 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
     mem = ''
     if flow.lib and (memsz is not None or slow is not None):
         raise ValueError('memsz/slow belong to the main translation, not to a --lib module')
+    if oob == 'zero' and not flow.lib:
+        mem += '#define OOB_ZERO 1\n'
     if memsz is not None:
         mem += '#define MEMSZ 0x%xu\n' % memsz
     if slow is not None:

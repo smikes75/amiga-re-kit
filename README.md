@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 1303 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2356 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -74,6 +74,9 @@ arek recomp  main.bin --base 0x20700 --auto 0x20700 --overlay 41d5c:b000 --dynam
 arek recomp  intro.bin --base 0x41d5c --auto 0x41d5c --lib --prefix in_:41d5c:4cd5c --overlay-module 41d5c -o intro.c
 arek recomp  main.bin --base 0x20700 --auto 0x20700 --timing --profile --main -o game.c   # then AREK_PROFILE=p.txt ./game ...
 arek profile p.txt --by clocks                         # which routines to rewrite or replace (--extern) first
+arek recomp  main.bin --base c00000 --auto c00000 --cover --oob zero --out game.c   # coverage bitmap; reads outside RAM give 0
+arek cover   run.cov game.c.cover.json                 # what a run never executed (routines least covered first)
+arek fuzz    --seed 3 --frames 30000 --start 320 --out build/in3.txt   # random input: the emulator (--inputs) and the rebuild alike
 arek recomp  main.bin --base 0x20700 --auto 0x21234 --timing \
              --jtab 21300:21400:12:4:bra --indirect 21350=21500,21600 --extern 21700=load_file -o game.c
 arek bpstate --address 0x21234 --end 20 --out cap/before
@@ -89,6 +92,7 @@ arek trace   run build/s.vtr --arm 3 --end 176 --shots build/f --shot-frames 860
 arek trace   run build/w.vtr --arm 3 --end 200 --break 0xc01b06 --poke c01b06:c00faa=00000002  # write into the machine, go on
 arek selftest inputs                                   # is this VAHeadless frame exact? (synthetic disk)
 
+# 4b. many scenarios at once (arek.parity.suite): state (traces), picture (--shots), sound (--reglog)
 # 5. the web page: display contract wb-shell obraz 1.3 (WB-OBRAZ-CRT.md)
 arek web copy web/                                     # the reference wb-obraz.js into the game's page
 arek web demo                                          # a page built on it (http://127.0.0.1:8920/demo.html)
@@ -96,6 +100,7 @@ arek web test http://localhost:8911/?test=1            # §5.1-5.4b in Chromium 
 arek web seal build/present/engine.wasm --set disk1.adf --label "disk 1, retail" --gzip --out build/present/sealed
 arek web seal build/present/engine.wasm --payload build/payload.bin --payload-label "the game files" --out build/present/sealed  # any disk version with the same game data opens it
 arek web check build/present                           # a bundle: no game data, derived files sealed, manifest right
+arek parity  suite.json                                # scenarios against the original: state, picture, sound per tick
 arek --version                                         # version + decoder/recompiler hashes
 ```
 
@@ -117,6 +122,8 @@ asks for (see `examples/profile.example.json`).
 | `arek.hunk` | bounded HUNK reader: CODE/DATA/BSS, RELOC32, split streams; `build()` for probes | Superfrog |
 | `arek.copper` | copper list disassembler with custom register names | S.W.I.V. |
 | `arek.webtest`, `web/wb-obraz.js` | display contract 1.3: reference module (whole device pixels, CRT canvas, layout quantum of Chromium's 1/64 px), demo page, Chromium tests incl. the row test | Turrican II, Alien Breed, Superfrog (Sonnet) |
+| `arek.m68k.cover`, `arek.fuzz` | coverage of a translation run (`recomp --cover`: one bit per translated instruction, `arek cover` lists what never ran) and deterministic random joystick input (`arek fuzz`, one file for `trace run --inputs` and the rebuild) - where a long random run stalls, a bug hides | Superfrog |
+| `arek.m68k.timing.bus` | bus cycles n(r/w) of every instruction, opcode and extension words included - what a model of the Amiga bus per DMA slot needs beyond the clock count | Alien Breed |
 | `arek.seal`, `web/wb-seal.js` | code derived from a game on a public page, encrypted (AES-GCM) under a key computed from the contents of the original disk, or from the game's own content as the page's loader rebuilds it (a payload key: every disk version with the same game files opens it); opened in the browser with WebCrypto | presentation pages |
 | `arek.parity` | long parity: record by record against the original's trace (first difference, addresses, phase shift); traces packed as XOR + zlib | Alien Breed, Turrican II, Superfrog (Sonnet) |
 | `arek.display` | the frame chip RAM shows: Copper timing, bitplanes, dual playfield, EHB, sprites; vAmiga's colours; 0 differing pixels on vAmiga screenshots (`arek selftest display`) | Superfrog (Sonnet), Alien Breed, Turrican II |

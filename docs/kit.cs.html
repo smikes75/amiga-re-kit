@@ -251,10 +251,12 @@ trace_compare  trace_bus</code></pre>
         <tr><td>arek.m68k.profile</td><td>volání, takty a stránky paměti po rutinách z profilované rekompilace: kterých rutin se vylepšení musí dotknout</td><td>nové</td></tr>
         <tr><td>arek.display, parity</td><td>snímek vykreslený z chip RAM barevným řetězcem vAmigy, 0 pixelů rozdíl; dlouhodobá shoda přestavby s logy registrů a vstupů z emulátoru</td><td>Turrican II, Alien Breed, Superfrog</td></tr>
         <tr><td>arek.seal, web</td><td>co potřebuje hratelná stránka: kontrakt obrazu (celé pixely zařízení, CRT, testy), kód zapečetěný k disketě návštěvníka, kontrola zveřejněného balíku</td><td>Alien Breed, Superfrog</td></tr>
-        <tr><td>arek, arek-mcp</td><td>příkazová řádka (23 podpříkazů) a MCP server (26 nástrojů)</td><td>nové</td></tr>
+        <tr><td>arek.m68k.cover, fuzz, parity suite</td><td>pokrytí běhu překladu a náhodný vstup pro obě strany (kde se dlouhý běh zasekne, je chyba); sada scénářů proti originálu: stav, obraz, zvuk po ticích</td><td>Superfrog</td></tr>
+        <tr><td>arek.m68k.timing.bus</td><td>přístupy každé instrukce na sběrnici, ne jen takty: co potřebuje model sběrnice Amigy po slotech DMA</td><td>Alien Breed</td></tr>
+        <tr><td>arek, arek-mcp</td><td>příkazová řádka (26 podpříkazů) a MCP server (26 nástrojů)</td><td>nové</td></tr>
       </tbody>
     </table>
-    <p style="margin-top:18px">1303 testů: syntetická data (ručně assemblované programy, náhodné buffery, generované boot bloky a obrazy disket) a takty 68000 změřené na Moiře.</p>
+    <p style="margin-top:18px">2356 testů: syntetická data (ručně assemblované programy, náhodné buffery, generované boot bloky a obrazy disket) a takty 68000 změřené na Moiře.</p>
   </section>
 
   <footer>
