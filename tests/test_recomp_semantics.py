@@ -311,7 +311,7 @@ def test_timing_counts_the_path_actually_run(tmp_path):
 
 def test_timing_is_off_by_default_and_has_a_host_hook():
     src, _, _ = recomp.generate(bytes.fromhex('4e714e75'), BASE, auto=[BASE])
-    assert 'TICK(0x' not in src.split('#define TICK(pc, n) (PROF_TICK(n), CYCLES += (n))')[1]
+    assert 'TICK(0x' not in src.split('#define TICK(pc, n) (COV_TICK(pc), PROF_TICK(n), CYCLES += (n))')[1]
     assert '#ifdef TICK_HOOK' in src
     src, _, _ = recomp.generate(bytes.fromhex('4e714e75'), BASE, auto=[BASE], timing=True)
     assert 'TICK(0x1000u, 4);' in src and 'TICK(0x1002u, 16);' in src
