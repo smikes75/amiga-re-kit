@@ -30,7 +30,11 @@ def test_table_entries_follow_the_translation():
     assert T.bus_table_entry(dec('4e90')) == (1, 1, T.TAB_PRE_ALL | T.TAB_PUSH2)    # jsr (a0)
     assert T.bus_table_entry(dec('4250')) == (1, 1, 0)                              # clr.w (a0): the 68000 reads first
     assert T.bus_table_entry(dec('4cd8 00ff'.replace(' ', ''))) == (2, 1, 0)        # movem.l (a0)+,d0-d7: one read more
-    assert T.bus_table_entry(dec('48a0 00ff'.replace(' ', ''))) == (2, 0, T.TAB_PRE_2)   # movem.w d0-d7,-(a0)
+    assert T.bus_table_entry(dec('48a0 00ff'.replace(' ', ''))) == (2, 0, 0)         # movem.w d0-d7,-(a0): a write, no wait (Alien Breed II)
+    assert T.bus_table_entry(dec('2100')) == (1, 0, 0)                              # move.l d0,-(a0): a write, no wait
+    assert T.bus_table_entry(dec('d160')) == (1, 0, T.TAB_PRE_2)                    # add.w d0,-(a0): read first
+    assert T.bus_table_entry(dec('3020')) == (1, 0, T.TAB_PRE_2)                    # move.w -(a0),d0
+    assert T.bus_table_entry(dec('21b0 0000'.replace(' ', '')))[2] & T.TAB_PRE_2     # move.l (a0),0(a0,d0.w): the index adds its cycles
     assert T.bus_table_entry(dec('6602')) == (1, 0, T.TAB_PRE_ALL | T.TAB_BCC_S)    # bne.s
     assert T.bus_table_entry(dec('51c8 fffe'.replace(' ', ''))) == (2, 0, T.TAB_PRE_ALL | T.TAB_DBCC)   # dbf
     assert T.bus_table_entry(dec('2020')) == (1, 0, T.TAB_PRE_2)                    # move.l -(a0),d0
@@ -83,6 +87,13 @@ int main(int argc, char **argv) {
         for (long k = 0; k < 312L * 227; k++) if (own[k] == AREK_BUS_BLITTER) { n++; if (first < 0) first = k; last = k; }
         printf("busy0 %d end %.0f slots %ld first %ld last %ld\n", busy0, e, n, first, last);
         for (long k = 0; k < 312L * 227; k++) if (own[k] == AREK_BUS_BLITTER) printf("%ld\n", k);
+    } else if (!strcmp(mode, "spr")) {                        /* sprites 0-7 all at one POS/CTL ($50..$70), DDFSTRT from argv[4] */
+        regs[0x092 >> 1] = (uint16_t)strtoul(argv[4], 0, 16);
+        RAM[0x2000] = 0x50; RAM[0x2001] = 0x80; RAM[0x2002] = 0x70; RAM[0x2003] = 0x00;
+        for (int n = 0; n < 8; n++) { regs[(0x120 >> 1) + 2 * n] = 0; regs[(0x122 >> 1) + 2 * n] = 0x2000; }
+        arek_bus_frame(&B, 312);
+        int v = atoi(argv[3]); uint8_t *L = own + v * 227;
+        printf("line %d:", v); for (int h = 0; h < 227; h++) printf(" %d", L[h]); printf("\n");
     } else if (!strcmp(mode, "pri")) {
         double t = 1000;
         t = arek_bus_blit(&B, t, 0x09f0, 0, 0x0814);
@@ -133,6 +144,18 @@ def test_frame_map_fixed_dma(harness):
     assert {int(a): int(b) for a, b in (l.split()[1:] for l in off.splitlines() if l.startswith('owner')) if int(a)} == {2: 312 * 4}
 
 
+def test_sprite_slots_yield_to_bitplanes(harness):
+    def line(ddf, v):
+        return [int(x) for x in harness('83e0', 'spr', v, ddf).split(':')[1].split()]     # + SPREN
+    full = line('38', 0x60)                           # DDFSTRT $38: every sprite gets both slots on a data line
+    assert all(full[0x15 + 4 * n] == 16 + n and full[0x17 + 4 * n] == 16 + n for n in range(8))
+    cut = line('24', 0x60)                            # DDFSTRT $24: slots from $23 on belong to the bitplanes
+    assert all(cut[0x15 + 4 * n] == 16 + n and cut[0x17 + 4 * n] == 16 + n for n in range(3))
+    assert cut[0x21] == 19 and cut[0x23] != 19 and not any(cut[h] in range(20, 24) for h in range(227))
+    above = line('24', 25)                            # line 25 (above DIWSTRT): no bitplanes, every POS/CTL fetch happens
+    assert all(above[0x15 + 4 * n] == 16 + n and above[0x17 + 4 * n] == 16 + n for n in range(8))
+
+
 def test_cpu_waits_for_dma_slots(harness):
     free = harness('83c0', 'cpu', 10 * 227 + 20)    # a free line: 3 accesses, no wait, 12 clocks = 6 CCK
     busy = harness('83c0', 'cpu', 100 * 227 + 0x38)  # inside a bitplane group: the CPU waits
@@ -168,7 +191,7 @@ def test_bus_table_and_glue_run(tmp_path):
     prog = bytes.fromhex('7001 2080 6104 4e75 4e71 4e75'.replace(' ', ''))
     base = 0x1000
     src, _, _ = recomp.generate(prog, base, auto=[base], with_main=True, timing=True, bus_table=True)
-    assert '#define BUS_LO 0x1000u' in src and 'static const uint8_t BUS_TAB[BUS_N][3]' in src
+    assert '#define BUS_LO 0x1000u' in src and '#define BUS_SPARSE 1' in src and 'bus_tab_row(uint32_t pc)' in src
     glue = '''
 #include "arek_bus_glue.h"
 static uint8_t OWN[313 * 227]; static uint16_t REGS[0x100];
@@ -281,3 +304,109 @@ def test_operand_accesses_go_through_the_hooks():
     # the blitter's own traffic stays raw
     rt = src[:src.index('L001000:')]
     assert 'rd16_raw(apt)' in rt and 'wr16_raw(dpt, d)' in rt
+
+
+def test_bus_table_is_sparse():
+    """Code at the start and 1 MB later: two segments, not a table over the whole image (Alien Breed II: 55 MB of C)."""
+    prog = bytes.fromhex('4e71 4e75'.replace(' ', ''))                  # nop; rts
+    far = 0x100000
+    img = bytearray(far + 4)
+    img[0:4] = prog
+    img[far:far + 4] = prog
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[0, far], bus_table=True)
+    assert 'BUS_SEGS_N 2' in src and 'BUS_SEG_LO[BUS_SEGS_N] = {0x0u, 0x100000u}' in src and 'BUS_SEG_HI[BUS_SEGS_N] = {0x4u, 0x100004u}' in src
+    assert src.count('{1,0,0},{1,3,0}') == 2 and len(src) < 200000                 # nop, rts in both; no 12 MB of zeros
+
+
+PAULA_HARNESS = r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "arek_bus.h"
+#include "arek_bus_paula.h"
+static uint8_t RAM[0x10000];
+static uint16_t rd16(void *c, uint32_t a) { (void)c; a &= 0xfffe; return (uint16_t)((RAM[a] << 8) | RAM[a + 1]); }
+static void sample(void *c, int ch, double t, int v) { (void)c; printf("s %d %.0f %d\n", ch, t, v); }
+int main(void) {
+    static uint8_t own[313 * 227]; static uint16_t regs[0x100];
+    ArekBus B; arek_bus_init(&B, 227, 313, 313, own, regs, rd16, 0);
+    ArekPaula P; arek_paula_init(&P, &B, sample, 0);
+    const uint16_t W[4] = { 0x0102, 0x0304, 0x0506, 0x0708 };
+    for (int i = 0; i < 4; i++) { RAM[0x1000 + 2 * i] = W[i] >> 8; RAM[0x1001 + 2 * i] = W[i] & 0xff; }
+    arek_bus_frame(&B, 313); arek_paula_frame(&P, 0);
+    arek_paula_write(&P, 0, 0xa0, 0); arek_paula_write(&P, 0, 0xa2, 0x1000); arek_paula_write(&P, 0, 0xa4, 4);
+    arek_paula_write(&P, 0, 0xa6, 100); arek_paula_write(&P, 0, 0xa8, 64);
+    arek_paula_write(&P, 2320, 0x96, 0x8001);                       /* DMA on at line 10, slot 50 */
+    printf("planned %d %d\n", own[11 * 227 + 13], own[12 * 227 + 13]);   /* marked ahead, before anything ran */
+    arek_paula_run(&P, 3300);
+    arek_paula_write(&P, 3300, 0x96, 0x0001);                       /* off */
+    arek_paula_run(&P, 20000);
+    long n = 0; for (long k = 0; k < 313L * 227; k++) if (own[k] == 4) { printf("slot %ld\n", k); n++; }
+    printf("fetches %ld slots %ld\n", P.fetches, n);
+    return 0;
+}
+"""
+
+
+def test_paula_model_rules(tmp_path):
+    """arek_bus_paula.h: request -> slot $0D of the next line, the first word discarded, bytes every PER, a request
+    on every even byte, one high and one low byte per word, slots planned ahead, nothing after DMA off (the rules
+    Alien Breed II measured, plus vAmiga's output state machine; `arek selftest audio` has them exact)."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    (tmp_path / 'p.c').write_text(PAULA_HARNESS)
+    subprocess.run([cc, '-O1', '-I', HERE, '-o', str(tmp_path / 'p'), str(tmp_path / 'p.c'), os.path.join(HERE, 'arek_bus.c'),
+                    os.path.join(HERE, 'arek_bus_vamiga.c'), '-lm'], check=True)
+    out = subprocess.run([str(tmp_path / 'p')], capture_output=True, text=True, check=True).stdout.splitlines()
+    assert 'planned 4 4' in out                                               # the slots of lines 11 and 12 are marked at the write
+    samples = [tuple(map(int, l.split()[2:])) for l in out if l.startswith('s 0 ')]
+    # 2937: the high byte's turn before the next word arrived (fetched at 2964) -> skipped, as vAmiga's state machine does;
+    # off at 3300 after the low byte 3237: the next (high) byte is not output
+    assert samples == [(2737, 64), (2837, 128), (3037, 128), (3137, 192), (3237, 256)]
+    slots = [int(l.split()[1]) for l in out if l.startswith('slot ')]
+    assert slots[:3] == [11 * 227 + 13, 12 * 227 + 13, 13 * 227 + 13] and all(k % 227 == 13 for k in slots)
+    assert not [k for k in slots if k > 16 * 227]                               # the request pending at the off is served, no more
+    assert out[-1].startswith('fetches ')
+
+
+def test_selftest_audio_disk_and_conversions():
+    from arek import adf
+    from arek.headless import selftest
+    d = selftest.audio_disk()
+    assert len(d) == adf.SIZE and d[:4] == b'DOS\0' and adf.bootblock_checksum(d[:1024]) == struct.unpack('>I', d[4:8])[0]
+    pay = selftest.AUDIO_PAYLOAD
+    assert d[12 + 26:12 + 26 + len(pay)] == pay and pay[:6] == bytes.fromhex('4df900dff000')
+    assert pay[selftest.AUDIO_SAMP - 0x40000:selftest.AUDIO_SAMP - 0x40000 + 4] == bytes([0, 16, 32, 48])
+    assert pay[selftest.AUDIO_LOOP - 0x40000:selftest.AUDIO_LOOP - 0x40000 + 2] == bytes.fromhex('7064')      # moveq #100,d0
+    recs = [{'frame': 331, 'v': 100, 'h': 40, 'reg': 0x096, 'value': 0x8001, 'agnus': False},
+            {'frame': 330, 'v': 100, 'h': 30, 'reg': 0x0a6, 'value': 200, 'agnus': False},
+            {'frame': 330, 'v': 100, 'h': 31, 'reg': 0x09a, 'value': 0xc020, 'agnus': False}]   # INTENA: not Paula's
+    w = bus.paula_writes(recs, 330, 313)
+    assert w == [(100 * 227 + 30, 0x0a6, 200), (313 * 227 + 100 * 227 + 40, 0x096, 0x8001)]
+    assert bus.paula_samples([(330, 5, 6, -64, 2)], 330, 313) == [(5 * 227 + 6, 2, -64)]
+
+
+def test_paula_check_program(tmp_path):
+    """arek_bus_paula_check on a synthetic log: the slots the model plans appear in the log -> agree; a log without them -> disagree."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    exe = bus.compile_paula_check(str(tmp_path / 'chk'), cc)
+    H, NL = 227, 313
+    writes = [(0, 0xa0, 0), (0, 0xa2, 0x1000), (0, 0xa4, 4), (0, 0xa6, 100), (0, 0xa8, 64), (2320, 0x96, 0x8001)]
+    empty = bytearray(H * NL)
+    for k in (1, 3, 5, 226):
+        for v in range(NL):
+            empty[v * H + k] = 2
+    (tmp_path / 'none.abbl').write_bytes(b'ABBL' + struct.pack('<5I', H, NL, 0, 1, 0) + bytes(empty))
+    r = bus.paula_check(str(tmp_path / 'none.abbl'), writes, exe=exe)
+    assert r['rc'] == 1 and r['agree'] == 0 and r['disagree'] > 10 and r['slots'][0]['only_model'] == r['disagree']
+    full = bytearray(empty)
+    for v in range(11, NL):
+        full[v * H + 13] = 4                                                   # one fetch per line from line 11 on
+    (tmp_path / 'full.abbl').write_bytes(b'ABBL' + struct.pack('<5I', H, NL, 0, 1, 0) + bytes(full))
+    ram = bytearray(0x2000)
+    ram[0x1000:0x1008] = bytes.fromhex('0102030405060708')
+    r = bus.paula_check(str(tmp_path / 'full.abbl'), writes, samples=[(2737, 0, 64), (2837, 0, 128)], exe=exe, ram=bytes(ram))
+    assert r['slots'][0]['only_model'] == 0 and r['samples'][0]['exact'] == 2 and r['samples'][0]['model'] > 2

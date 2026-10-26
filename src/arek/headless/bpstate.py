@@ -20,8 +20,60 @@ from pathlib import Path
 
 from . import config, shot
 
-# chips whose registers ``r <chip>`` prints at the stop (cpu.json "chips")
-CHIPS = ('agnus', 'copper', 'denise', 'paula', 'blitter')
+# chips whose registers ``r <chip>`` prints at the stop (cpu.json "chips"); the CIAs when the build answers ``r ciaa``
+CHIPS = ('agnus', 'copper', 'denise', 'paula', 'blitter', 'ciaa', 'ciab')
+
+# custom register offsets of the values ``r <chip>`` prints: (chip, name, offset, 'w' word | 'l' long | 'w8' list of
+# words 8 apart | 'l4' list of longs 4 apart | 'l16' list of longs 16 apart | 'w16' list of words 16 apart)
+CREG_MAP = (
+    ('agnus', 'DMACON', 0x096, 'w'), ('agnus', 'DDFSTRT', 0x092, 'w'), ('agnus', 'DDFSTOP', 0x094, 'w'),
+    ('agnus', 'DIWSTRT', 0x08e, 'w'), ('agnus', 'DIWSTOP', 0x090, 'w'), ('agnus', 'BPL1MOD', 0x108, 'w'), ('agnus', 'BPL2MOD', 0x10a, 'w'),
+    ('agnus', 'BPL%dPT', 0x0e0, 'l4'), ('agnus', 'SPR%dPT', 0x120, 'l4'), ('agnus', 'AUD%dLC', 0x0a0, 'l16'),
+    ('copper', 'COP1LC', 0x080, 'l'), ('copper', 'COP1LC#2', 0x084, 'l'), ('copper', 'COP2LC', 0x084, 'l'),
+    ('denise', 'BPLCON0', 0x100, 'w'), ('denise', 'BPLCON1', 0x102, 'w'), ('denise', 'BPLCON2', 0x104, 'w'),
+    ('agnus', 'BPLCON0', 0x100, 'w'), ('denise', 'SPRxPOS', 0x140, 'w8'), ('denise', 'SPRxCTL', 0x142, 'w8'),
+    ('paula', 'INTENA', 0x09a, 'w'), ('paula', 'INTREQ', 0x09c, 'w'), ('paula', 'ADKCON', 0x09e, 'w'), ('paula', 'POTGO', 0x034, 'w'),
+    ('paula', 'AUD%dLEN', 0x0a4, 'w16'), ('paula', 'AUD%dPER', 0x0a6, 'w16'), ('paula', 'AUD%dVOL', 0x0a8, 'w16'),
+    ('blitter', 'BLTCON0', 0x040, 'w'), ('blitter', 'BLTCON1', 0x042, 'w'), ('blitter', 'BLTAFWM', 0x044, 'w'), ('blitter', 'BLTALWM', 0x046, 'w'),
+    ('blitter', 'BLTCPT', 0x048, 'l'), ('blitter', 'BLTBPT', 0x04c, 'l'), ('blitter', 'BLTAPT', 0x050, 'l'), ('blitter', 'BLTDPT', 0x054, 'l'),
+    ('blitter', 'BLTCMOD', 0x060, 'w'), ('blitter', 'BLTBMOD', 0x062, 'w'), ('blitter', 'BLTAMOD', 0x064, 'w'), ('blitter', 'BLTDMOD', 0x066, 'w'),
+)
+
+
+def chip_regs(chips):
+    """The custom registers $DFF000-$DFF1FE as 512 bytes (256 big-endian words) from cpu.json ``chips``: the
+    emulator's view at the stop, write-only registers included, for a host of the translation or the recomp
+    driver (``$AREK_CREG``). What the build does not print stays 0 (colours, BPLCON3, ...); denise's BPLCON0
+    wins over agnus's; BLTSIZE is rebuilt from BLTSIZEH/BLTSIZEW when both are printed."""
+    reg = [0] * 0x100
+
+    def put(off, v):
+        reg[off >> 1] = int(v) & 0xffff
+
+    def put32(off, v):
+        put(off, int(v) >> 16)
+        put(off + 2, int(v))
+
+    for chip, name, off, kind in reversed(CREG_MAP):            # earlier rows win: write them last
+        d = chips.get(chip, {})
+        if kind in ('w', 'l'):
+            if name in d and not isinstance(d[name], (list, bool)):
+                (put if kind == 'w' else put32)(off, d[name])
+        elif kind in ('w8',):
+            vals = d.get(name)
+            if isinstance(vals, list):
+                for i, v in enumerate(vals[:8]):
+                    put(off + 8 * i, v)
+        else:                                                    # 'l4', 'l16', 'w16': NAME%d
+            step = {'l4': 4, 'l16': 16, 'w16': 16}[kind]
+            for i in range(8):
+                v = d.get(name % i)
+                if v is not None and not isinstance(v, (list, bool)):
+                    (put32 if kind.startswith('l') else put)(off + step * i, v)
+    bl = chips.get('blitter', {})
+    if 'BLTSIZEH' in bl and 'BLTSIZEW' in bl:
+        put(0x058, (int(bl['BLTSIZEH']) << 6) | (int(bl['BLTSIZEW']) & 0x3f))
+    return b''.join(int(v).to_bytes(2, 'big') for v in reg)
 
 
 def state(conf, events, addr, npass, t_end, t_set=0, ram_len=524288, keep=None,
@@ -85,6 +137,11 @@ def parse_regs(out):
     if m:
         f = m.group(1)[-5:]
         st['ccr'] = {k.lower(): int(c.isupper()) for k, c in zip('XNZVC', f)}
+    m = re.search(r'Flags\s*:\s*([tT])([tT])([sS])([mM])-<(\d)>---([xX])([nN])([zZ])([vV])([cC])', out)
+    if m:                                                        # the whole status register: trace, supervisor, IPL, CCR
+        g = m.groups()
+        st['sr'] = ((g[0].isupper() << 15) | (g[1].isupper() << 14) | (g[2].isupper() << 13) | (g[3].isupper() << 12)
+                    | (int(g[4]) << 8) | sum(c.isupper() << (4 - i) for i, c in enumerate(g[5:])))
     return st
 
 
@@ -176,5 +233,7 @@ def capture(conf, folder, addr, npass, t_end, events=(), t_set=0, ram_len=524288
         shot.raw_to_png(str(raw), str(folder / 'stable.png'))
         meta['screenshot'] = {'raw': raw.name, 'png': 'stable.png',
                               'sha256': hashlib.sha256(raw.read_bytes()).hexdigest()}
+    (folder / 'creg.bin').write_bytes(chip_regs(st.get('chips', {})))      # the custom registers for a host / $AREK_CREG
+    meta['creg_file'] = 'creg.bin'
     (folder / 'cpu.json').write_text(json.dumps(meta, indent=2) + '\n')
     return meta

@@ -19,8 +19,12 @@ Timing measured against vAmiga in the Superfrog Sonnet project (``docs/M5-FRAME.
 on six frames): the Copper uses even colour clocks not taken by bitplane DMA (and not the
 free slot at position 4 of each fetch group), a MOVE takes two slots, waking from a WAIT
 takes one; a sprite starts one lowres pixel right of its HSTART; the first bitplane pixel
-is at ``2*DDFSTRT + 17 + scroll``. The screenshot of vAmiga maps lowres pixel h of line v
-to ``x = 2h - 196``, ``y = v - 26``.
+is at ``2*DDFSTRT + 17 + scroll``; with DDFSTRT not a multiple of 8 the scroll is delayed by
+``2 * (DDFSTRT & 7)`` (mod 16), and on a line with bitplane DMA the sprite DMA slots from
+``DDFSTRT - 1`` on are not served (DDFSTRT $24: sprite 3 gets one word, sprites 4-7 none; the
+missing word keeps the old register), both measured by the Alien Breed II project against
+vAmiga (needs DMACON from ``chips`` or ``regs``). The screenshot of vAmiga maps lowres pixel h
+of line v to ``x = 2h - 196``, ``y = v - 26``.
 
 Colours: ``vamiga_rgb`` is vAmiga's monitor conversion (YUV matrix, gamma 2.8 in / 2.2 out,
 defaults), taken over from the Turrican II and Alien Breed renderers; EHB halves the 8-bit
@@ -82,10 +86,10 @@ class Frame:
 
 
 class _Sprite:
-    __slots__ = ('pt', 'pos', 'ctl', 'armed', 'on', 'pt_set')
+    __slots__ = ('pt', 'pos', 'ctl', 'armed', 'on', 'pt_set', 'da', 'db')
 
     def __init__(self):
-        self.pt = self.pos = self.ctl = 0
+        self.pt = self.pos = self.ctl = self.da = self.db = 0
         self.armed = self.on = self.pt_set = False
 
     def vstart(self):
@@ -193,26 +197,47 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES):
         else:
             cop['wait'] = (wv, wh, vm, hm)
 
+    def sprite_slots(v, n):
+        """DMA slots of sprite n on line v: 2, fewer on a line with bitplane DMA when they lie from DDFSTRT - 1 on."""
+        con0, dmacon = r[0x100 >> 1], r[0x096 >> 1]
+        if not (con0 >> 12) & 7 or (dmacon & 0x300) != 0x300:
+            return 2
+        diwstrt, diwstop = r[0x08e >> 1] or 0x2c81, r[0x090 >> 1] or 0x2cc1
+        v0, sv = diwstrt >> 8, diwstop >> 8
+        if not v0 <= v < (sv | (0 if sv & 0x80 else 0x100)):
+            return 2
+        lim = ((r[0x092 >> 1] or 0x38) & 0xfc) - 1
+        return (0x15 + 4 * n < lim) + (0x17 + 4 * n < lim)
+
+    def load(s, nsl):
+        words = []
+        for _ in range(nsl):
+            words.append(rd(s.pt))
+            s.pt = (s.pt + 2) & 0x1ffffe
+        return words
+
     for v in range(lines):
         # sprites: at the end of vertical blank DMA loads the control words of every sprite
         # whose pointer the Copper set in this frame; VSTOP ends a sprite and loads the next
-        # control words; VSTART starts it
+        # control words; VSTART starts it. A slot the bitplanes take leaves the old word.
         sline = []
         for k, s in enumerate(spr):
+            nsl = sprite_slots(v, k)
             if v == VBLANK_END and s.pt_set and not s.armed and not s.on:
-                s.pos, s.ctl = rd(s.pt), rd(s.pt + 2)
-                s.pt = (s.pt + 4) & 0x1ffffe
+                w = load(s, nsl)
+                s.pos, s.ctl = (w + [s.pos, s.ctl][len(w):])[:2]
                 s.armed = bool(s.pos or s.ctl)
             if s.on and v == s.vstop():
                 s.on = False
-                s.pos, s.ctl = rd(s.pt), rd(s.pt + 2)
-                s.pt = (s.pt + 4) & 0x1ffffe
+                w = load(s, nsl)
+                s.pos, s.ctl = (w + [s.pos, s.ctl][len(w):])[:2]
                 s.armed = bool(s.pos or s.ctl)
             if s.armed and v == s.vstart() and s.vstart() != s.vstop():
                 s.on, s.armed = True, False
             if s.on:
-                sline.append((k, s.hstart() + 1, rd(s.pt), rd(s.pt + 2), (s.ctl >> 7) & 1))
-                s.pt = (s.pt + 4) & 0x1ffffe
+                w = load(s, nsl)
+                s.da, s.db = (w + [s.da, s.db][len(w):])[:2]
+                sline.append((k, s.hstart() + 1, s.da, s.db, (s.ctl >> 7) & 1))
         line = [0] * WIDTH
         fetch, words, base, fetch_end, nplanes = 0, None, (0, 0), 0, 0
         for c in range(CCKS):
@@ -230,8 +255,8 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES):
                         mod = r[(0x108 if k % 2 == 0 else 0x10a) >> 1]
                         bpl[k] = (bpl[k] + 2 * nw + (mod - 0x10000 if mod & 0x8000 else mod)) & 0x1ffffe
                     con1 = r[0x102 >> 1]
-                    start = 2 * ddfstrt + 17
-                    base = (start + (con1 & 15), start + ((con1 >> 4) & 15))
+                    start, ofs = 2 * ddfstrt + 17, 2 * (ddfstrt & 7)
+                    base = (start + (((con1 & 15) + ofs) & 15), start + ((((con1 >> 4) & 15) + ofs) & 15))
                     fetch_end, nplanes, fetch = ddfstrt + 8 * nw, n, 1
                 else:
                     fetch = -1

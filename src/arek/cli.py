@@ -25,9 +25,10 @@
                      (run: --inputs FILE --reglog F --audlog F --skip N --from-frame F)
     arek diff        DIR_A DIR_B [--range LO HI]
     arek render      CAPTURE [--ram F --cop A] [--png OUT] [--compare RAW]
-    arek selftest    inputs|display [--vahl BINARY]   (needs only the Kickstart ROM)
+    arek selftest    inputs|display|bus|audio [--vahl BINARY]   (needs only the Kickstart ROM)
     arek profile     PROFILE [--by clocks|calls|bytes] [--top N] [--frame F]
     arek cover       RUN.cov [RUN2.cov ...] OUT.cover.json [--top N]  (recomp --cover: what the runs never executed)
+    arek host        copy DIR | state CAPTURE OUT [--trace T.vtr]   (the host of a translation, docs/HOST.md)
     arek bus         copy DIR                                        (the bus model per DMA slot: C sources for a rebuild)
     arek fuzz        --seed N --frames N [--hold 3:22] [--start N] [--out FILE]   (random input for both sides)
     arek parity      SUITE.json [--json] [--no-run]                   (scenarios: state, picture, sound)
@@ -408,7 +409,42 @@ def cmd_bus(a):
         for f in bus.copy(a.target):
             print(f)
         return
-    raise ValueError('arek bus copy DIR')
+    if a.what == 'diff':
+        from .headless import trace
+        if not a.own or a.frame0 is None:
+            raise ValueError('arek bus diff BUSLOG OWN.bin --frame0 F [--lines N]')
+        log = trace.read_buslog(a.target)
+        rows = bus.own_compare(log, bus.own_frames(a.own, a.frame0, lines=a.lines), lines=a.lines)
+        print(bus.format_own_compare(rows))
+        return
+    raise ValueError('arek bus copy DIR | diff BUSLOG OWN.bin --frame0 F')
+
+
+def cmd_verify(a):
+    from .m68k import verify
+    from .headless import trace
+    if a.what != 'calls':
+        raise ValueError('arek verify calls TRACE DRIVER IMAGE --base B')
+    image = rd(a.image)
+    res = verify.calls(trace.records(a.trace), a.driver, image, a.base, a.vbl, a.max)
+    print(verify.format_calls(res))
+    if a.json:
+        verify.write_json(res, a.json)
+
+
+def cmd_host(a):
+    from . import host
+    if a.what == 'copy':
+        for f in host.copy(a.target):
+            print(f)
+        return
+    if a.what == 'state':
+        if not a.out:
+            raise ValueError('arek host state CAPTURE OUT [--trace T.vtr]')
+        r = host.state(a.target, a.out, trace=a.trace)
+        print('%s: sr %04x frame %d time %d pc %06x' % (r['dir'], r['sr'], r['frame'], r['time'], r['pc']))
+        return
+    raise ValueError('arek host copy DIR | state CAPTURE OUT')
 
 
 def cmd_cover(a):
@@ -463,7 +499,8 @@ def cmd_web(a):
         dest = Path(a.target or '.')
         dest.mkdir(parents=True, exist_ok=True)
         kept = []
-        for name in ('wb-obraz.js', 'wb-seal.js', 'wb-nastaveni.js', 'wb-zvuk.js'):
+        from .web import FILES as WEB_FILES
+        for name in WEB_FILES:
             out = dest / name
             if out.exists() and not a.force and b'amiga-re-kit' not in out.read_bytes()[:4096]:
                 kept.append(out)            # the game's own file under a kit name: never overwrite it
@@ -500,6 +537,29 @@ def cmd_web(a):
         path = seal.write_dir(a.out, manifest, blobs)
         keys = ['disks ' + ','.join(d[:12] for d in k['disks']) if 'disks' in k else 'payload ' + k['payload'][:12] for k in manifest['keys']]
         print('%s: %d files sealed for %d disk sets and %d payloads (%s)' % (path, len(blobs), len(sets), len(payloads), '; '.join(keys)))
+    elif a.what == 'payload':
+        from . import web as webmod
+        from .headless import config
+        if not a.atn or not a.out:
+            raise ValueError('web payload --atn DISK:OFFSET... --out PAYLOAD.bin [--content content.json] [--conf local.conf]')
+        conf = config.load(a.conf) if os.path.exists(a.conf) else {}
+        payload, content = webmod.payload_atn([webmod.parse_block(x) for x in a.atn], conf)
+        with open(a.out, 'wb') as f:
+            f.write(payload)
+        if a.content:
+            with open(a.content, 'w') as f:
+                json.dump(content, f, indent=1)
+        print('%s: %d bytes, %d files%s' % (a.out, len(payload), len(content['files']), ' -> ' + a.content if a.content else ''))
+    elif a.what == 'serve':
+        from . import web as webmod
+        from .headless import config
+        conf = config.load(a.conf) if os.path.exists(a.conf) else {}
+        srv = webmod.serve(a.target or '.', a.port, conf)
+        print('http://127.0.0.1:%d/  (%s; disks of %s at %s; Ctrl+C to stop)' % (a.port, a.target or '.', a.conf, ', '.join(sorted(srv.disks)) or 'none'), flush=True)
+        try:
+            srv.serve_forever()
+        except KeyboardInterrupt:
+            pass
     elif a.what == 'demo':
         import functools
         import http.server
@@ -544,9 +604,17 @@ def cmd_selftest(a):
         if r['fixed_bad'] or r['slots_bad'] or r['exact'] != r['blits'] or not r['blits']:
             raise RuntimeError('the bus model and this emulator disagree (files in %s)' % r['dir'])
         return
+    if a.what == 'audio':
+        r = selftest.audio(conf, frames=min(a.frames, 120), timeout=a.timeout)
+        print('%s: Paula model against the logs of %d frames (from frame %d of the window): audio DMA slots %d agree / %d disagree; samples %s' % (
+            conf['VAHL'], r['frames'], r['from'] if 'from' in r else 0, r['agree'], r['disagree'],
+            ', '.join('ch%d %d/%d exact %d' % (ch, v['model'], v['log'], v['exact']) for ch, v in sorted(r['samples'].items()))))
+        if r['disagree'] or not r['agree']:
+            raise RuntimeError('the Paula model and this emulator disagree (files in %s)' % r['dir'])
+        return
     if a.what == 'display':
-        r = selftest.display(conf, timeout=a.timeout)
-        print('%s: arek.display against the screenshot: %d of %d pixels differ' % (conf['VAHL'], r['pixels'], r['total']))
+        r = selftest.display(conf, timeout=a.timeout, c=a.c)
+        print('%s: %s against the screenshot: %d of %d pixels differ' % (conf['VAHL'], 'arek_display.h (C)' if a.c else 'arek.display', r['pixels'], r['total']))
         if r['pixels']:
             raise RuntimeError('the display model and this emulator disagree (files in %s)' % r['dir'])
         return
@@ -616,6 +684,36 @@ def cmd_trace(a):
             print(parity.format_compare(r))
         if r['first'] and a.fail:
             raise RuntimeError('the traces differ')
+        return
+    if a.what == 'targets':
+        from .headless import tracetools
+        if not a.other:
+            raise ValueError('trace targets TRACE IMAGE --base B [--only SITE...] [--out OUT.json]')
+        t = tracetools.indirect_targets(trace.records(a.file), rd(a.other), a.base, set(a.only) if a.only else None)
+        print(tracetools.format_targets(t))
+        if a.out:
+            with open(a.out, 'w') as f:
+                json.dump({'%x' % s: sorted('%x' % x for x in c) for s, c in t.items()}, f, indent=1)
+        return
+    if a.what == 'pcs':
+        from .headless import tracetools
+        if not a.other:
+            raise ValueError('trace pcs ORIG.vtr HOST_PC.txt [--tick PC] [--from-frame F] [--image IMG --base B]')
+        r = tracetools.pc_compare(trace.records(a.file), tracetools.read_pclog(a.other), a.tick, a.from_frame or 0, a.lines, drift_limit=a.limit)
+        print(tracetools.format_pc_compare(r, rd(a.image) if a.image else None, a.base))
+        return
+    if a.what == 'filter':
+        from .headless import tracetools
+        if not a.other or not a.pc:
+            raise ValueError('trace filter IN.vtr OUT.vtr --pc PC... [--skip N]')
+        print('%s: %d records' % (a.other, tracetools.filter_pcs(a.file, a.other, set(a.pc), a.skip or 0)))
+        return
+    if a.what == 'pairdiff':
+        from .headless import tracetools
+        if not a.other:
+            raise ValueError('trace pairdiff ORIG.vtr HOST.vtr [--from-frame F] [--ignore START:LEN] [--limit N]')
+        ign = [trace.parse_range(r)[:2] for r in a.ignore]
+        print(tracetools.format_pair_diff(tracetools.pair_diff(list(trace.records(a.file)), list(trace.records(a.other)), a.from_frame or 0, ign, a.limit)))
         return
     if a.what == 'regs':
         rows = [r for r in trace.read_reglog(a.file) if not a.reg or r['name'] in a.reg]
@@ -797,7 +895,7 @@ def build_parser():
                    '(cov_dump / $AREK_COVER); also writes OUT.cover.json for arek cover')
     s.add_argument('--cover-in-tick', action='store_true', help='with --timing: the coverage mark rides in TICK, '
                    'the instruction bodies stay as without --cover')
-    s.add_argument('--bus-table', action='store_true', help='BUS_TAB per translated instruction for the bus model '
+    s.add_argument('--bus-table', action='store_true', help='the bus table (words, extra accesses, flags per translated instruction, in segments) for the bus model '
                    '(bus/arek_bus_glue.h, build with -DTICK_HOOK -DBUS_HOOK)')
     s.add_argument('--oob', choices=['stop', 'zero'], default='stop',
                    help="an access outside the modelled RAM: stop (exit 3) or zero (reads 0, writes dropped, 'oob N' reported)")
@@ -845,9 +943,16 @@ def build_parser():
     s.set_defaults(fn=cmd_diff)
 
     s = sp.add_parser('trace', help='continuous trace of the original (patched VAHeadless)')
-    s.add_argument('what', choices=['run', 'show', 'regs', 'audio', 'compare', 'pack', 'bus'])
+    s.add_argument('what', choices=['run', 'show', 'regs', 'audio', 'compare', 'pack', 'bus', 'targets', 'pcs', 'filter', 'pairdiff'])
     s.add_argument('file', help='trace file (written by run, read by show); regs: a reglog, audio: an audlog')
-    s.add_argument('other', nargs='?', help='compare: the rebuild trace; pack: the output file')
+    s.add_argument('other', nargs='?', help='compare/pairdiff: the rebuild trace; pack/filter: the output file; targets: the code image; pcs: the host\'s --pclog file')
+    s.add_argument('--base', type=A, default=0, help='targets/pcs: address of the image')
+    s.add_argument('--only', type=A, nargs='*', help='targets: only these sites')
+    s.add_argument('--out', help='targets: write {site: [targets]} here as JSON')
+    s.add_argument('--tick', type=A, help='pcs: start both sides at the first pass of this pc')
+    s.add_argument('--image', help='pcs: the code image, to show the instruction before each drift')
+    s.add_argument('--lines', type=int, default=313, help='pcs: lines per frame (313)')
+    s.add_argument('--pc', type=A, nargs='*', help='filter: the pcs to keep')
     s.add_argument('--ignore', nargs='*', default=[], metavar='START:LEN', help='compare: hex spans to skip')
     s.add_argument('--shift', type=int, default=0, help='compare: record k against record k+SHIFT of the rebuild')
     s.add_argument('--best-shift', type=int, metavar='N', help='compare: try shifts -N..N, report equal pairs')
@@ -895,10 +1000,29 @@ def build_parser():
     s.add_argument('--fail', action='store_true', help='exit 1 when the render differs from the screenshot')
     s.set_defaults(fn=cmd_render)
 
-    s = sp.add_parser('bus', help='the bus model per DMA slot (C sources for a rebuild)')
-    s.add_argument('what', choices=['copy'])
-    s.add_argument('target', help='copy: destination folder')
+    s = sp.add_parser('bus', help='the bus model per DMA slot (C sources for a rebuild); diff: a host\'s slot maps against a bus log')
+    s.add_argument('what', choices=['copy', 'diff'])
+    s.add_argument('target', help='copy: destination folder; diff: the bus log (VAHL_BUSLOG)')
+    s.add_argument('own', nargs='?', help='diff: the maps a host wrote with --own')
+    s.add_argument('--frame0', type=int, help='diff: the frame number of the host\'s first map')
+    s.add_argument('--lines', type=int, default=313, help='diff: lines per frame (313)')
     s.set_defaults(fn=cmd_bus)
+    s = sp.add_parser('verify', help='translated routines against the original call by call (docs/HOST.md)')
+    s.add_argument('what', choices=['calls'])
+    s.add_argument('trace', help='a trace with breakpoints on jsr abs.l sites and the addresses after them')
+    s.add_argument('driver', help='the recomp --main driver of the translation')
+    s.add_argument('image', help='the code image the trace was taken on')
+    s.add_argument('--base', type=A, default=0, help='address of the image')
+    s.add_argument('--vbl', type=A, help='the interrupt handler: pairs it fell into are left out')
+    s.add_argument('--max', type=int, default=3, help='calls per routine (3)')
+    s.add_argument('--json', help='write the results here')
+    s.set_defaults(fn=cmd_verify)
+    s = sp.add_parser('host', help='the host of a translation (C sources: time, interrupts, CIAs, Paula, picture) and its state')
+    s.add_argument('what', choices=['copy', 'state'])
+    s.add_argument('target', help='copy: destination folder; state: a bpstate capture folder')
+    s.add_argument('out', nargs='?', help='state: the state folder to write')
+    s.add_argument('--trace', help='state: a trace armed at the same stop (its record 0 gives SR when cpu.json has none)')
+    s.set_defaults(fn=cmd_host)
     s = sp.add_parser('cover', help='coverage of a translation run (recomp --cover): what never ran')
     s.add_argument('file', nargs='+', help='dumps the runtime wrote (AREK_COVER or cov_dump; several = their union) '
                    'and OUT.cover.json written by recomp --cover')
@@ -930,9 +1054,9 @@ def build_parser():
     s.set_defaults(fn=cmd_profile)
 
     s = sp.add_parser('web', help='display contract: reference wb-obraz.js, demo page, Chromium tests (WB-OBRAZ-CRT.md)')
-    s.add_argument('what', choices=['copy', 'demo', 'test', 'seal', 'check'])
+    s.add_argument('what', choices=['copy', 'demo', 'test', 'seal', 'check', 'payload', 'serve'])
     s.add_argument('target', nargs='?', help='copy: destination folder (writes wb-obraz.js, wb-seal.js, wb-nastaveni.js, '
-                   'wb-zvuk.js); demo: nothing - it serves the package\'s demo.html on http://127.0.0.1:PORT/demo.html '
+                   'wb-zvuk.js, wb-atn.js, wb-content.js); serve: the bundle folder (default .); demo: nothing - it serves the package\'s demo.html on http://127.0.0.1:PORT/demo.html '
                    '(the file itself is arek/web/demo.html in the installed package); test: URL of a page with window.wbObrazTest; '
                    'seal: the first file; check: a presentation bundle folder')
     s.add_argument('rest', nargs='*', help='seal: more files')
@@ -949,10 +1073,14 @@ def build_parser():
     s.add_argument('--port', type=int, default=8920, help='demo: port of the local server (Ctrl+C stops it)')
     s.add_argument('--quick', action='store_true', help='test: fewer combinations')
     s.add_argument('--force', action='store_true', help='copy: overwrite a file under a kit name that is not from the kit')
+    s.add_argument('--atn', nargs='*', metavar='DISK:OFFSET', help='payload: ATN! blocks in order (DISK = path or a local.conf key, e.g. ADF1:0x57800)')
+    s.add_argument('--content', help='payload: write content.json (sizes and hashes, no game data) here for wb-content.js')
+    s.add_argument('--conf', default='local.conf', help='payload/serve: the local.conf with the disks')
     s.set_defaults(fn=cmd_web)
 
-    s = sp.add_parser('selftest', help='check a VAHeadless build on a synthetic disk: inputs frame by frame, display model, bus model')
-    s.add_argument('what', choices=['inputs', 'display', 'bus'])
+    s = sp.add_parser('selftest', help='check a VAHeadless build on a synthetic disk: inputs frame by frame, display model, bus model, Paula model')
+    s.add_argument('what', choices=['inputs', 'display', 'bus', 'audio'])
+    s.add_argument('--c', action='store_true', help='display: the C renderer (arek_display.h) instead of arek.display')
     s.add_argument('--conf', default='local.conf', help='needs ROM (and VAHL unless --vahl)')
     s.add_argument('--vahl', help='the binary to test instead of VAHL from the conf')
     s.add_argument('--frames', type=int, default=240)

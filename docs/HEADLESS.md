@@ -149,7 +149,14 @@ writes `cap/draw_in/capture_21234_0.retrosh` (the script), `onstop_*.retrosh`
 `r denise`, `r paula`, `r blitter`), write-only ones included - the Copper list
 address, DMACON, bitplane and sprite pointers are there without reading the
 game's code. vAmiga 5.0b2 labels two lines COP1LC and two BPL6PT; the repeated
-name is stored as `NAME#2`.
+name is stored as `NAME#2`. `ciaa` / `ciab` appear when the build answers `r ciaa`
+(PRA, DDRA, the TOD counter a game may read as a random seed). `sr` is the whole
+status register (supervisor bit, interrupt level, CCR) when `Flags` is printed.
+
+`creg.bin` next to `cpu.json` holds the same registers as 256 big-endian words at
+their `$DFF` offsets (`bpstate.chip_regs`): a host of the translation starts from it,
+and the recomp driver loads it from `$AREK_CREG`, so INTENAR, DMACONR, the Copper
+list address and the pointers are what the original had at the stop.
 
 The asset hashes tie the capture to the exact ROM, disk and emulator
 binary — a capture made with a different build is a different measurement
@@ -287,6 +294,7 @@ arek trace audio build/l1_audio.bin
 ```
 
 - (`arek selftest bus` records a bus log of a synthetic program and checks the bus model `docs/BUS.md` against it)
+- (`arek selftest audio` records the bus, register and audio logs of a synthetic program and checks the Paula model `arek_bus_paula.h` against them: slots and samples)
 - `--inputs FILE`: one line per frame with the keys held - `R L U D F S`
   (`arek fuzz --seed N --frames N` writes such a file at random, the same one for the rebuild)
   (right, left, up, down, fire on joystick 2, space); an empty line holds

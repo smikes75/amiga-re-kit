@@ -127,5 +127,23 @@ def test_parse_chips():
     assert 'cpu' not in c
 
 
+def test_chip_regs_from_the_capture():
+    c = bpstate.parse_chips(CHIPS_OUT)
+    c['blitter'].update(BLTSIZEH=3, BLTSIZEW=5)
+    c['paula'] = {'INTENA': 0xc020, 'AUD1PER': 0x1bc}
+    b = bpstate.chip_regs(c)
+    w = lambda off: int.from_bytes(b[off:off + 2], 'big')
+    assert len(b) == 512 and w(0x96) == 0x3f0 and w(0xe4) == 2 and w(0xe6) == 0xf5ae and w(0xe0) == 2 and w(0xe2) == 0xdbae
+    assert w(0x80) == 0 and w(0x82) == 0x6fd0 and w(0x86) == 0x7800                  # COP1LC#2 = COP2LC
+    assert w(0x140) == 0x5cd and w(0x148) == 0 and w(0x64) == 0xfffe and w(0x100) == 0x5200   # agnus BPLCON0 when denise has none
+    assert w(0x9a) == 0xc020 and w(0xb6) == 0x1bc and w(0x58) == (3 << 6) | 5
+    assert bpstate.chip_regs({}) == bytes(512)
+
+
+def test_parse_regs_status_register():
+    st = bpstate.parse_regs('  PC : 0x00001000\n  Flags   : ttSm-<3>---XnZvc\n')
+    assert st['ccr'] == {'x': 1, 'n': 0, 'z': 1, 'v': 0, 'c': 0} and st['sr'] == 0x2314
+
+
 def test_cpu_pc_is_not_taken_from_copper():
     assert bpstate.parse_regs('COPPC : 0x00006fd4\n  PC : 0x00c01a46\n')['pc'] == 0xc01a46

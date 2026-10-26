@@ -8,6 +8,12 @@ to its idle loop, RAM and the screenshot are captured and compared pixel by pixe
 ``inputs(conf)``: are inputs applied frame by frame? It runs its disk with ``VAHL_INPUTS``
 and checks that every frame saw exactly the keys of its line.
 
+``audio(conf)``: does the Paula model (``arek_bus_paula.h``) agree with this emulator? Its disk
+(``selftest_audio.s``: four channels with different periods, lengths and volumes switched on and
+off by a script, a period change while playing) runs with ``VAHL_BUSLOG``, ``VAHL_REGLOG`` and
+``VAHL_AUDLOG``; the register writes are replayed into the model and its audio DMA slots and
+output bytes are compared with the logs.
+
 ``bus(conf)``: does the bus model (``arek.bus``) agree with this emulator's bus log? Its disk
 (``selftest_bus.s``: 5 lores planes, a sprite, a copper list with waits, three blits in a loop
 with stack traffic between them) runs with ``VAHL_BUSLOG``; the model's fixed DMA slots are
@@ -85,9 +91,10 @@ def display_disk():
     return _boot_disk(DISPLAY_BOOT)
 
 
-def display(conf, timeout=300, keep=None):
-    """Render the self-test frame with ``arek.display`` and compare it with the emulator's
-    screenshot: ``{'pixels': differing, 'total': n, 'box': ..., 'dir': folder}``."""
+def display(conf, timeout=300, keep=None, c=False):
+    """Render the self-test frame with ``arek.display`` (``c=True``: with the C renderer of
+    ``arek.host``) and compare it with the emulator's screenshot: ``{'pixels': differing, 'total': n,
+    'box': ..., 'dir': folder}``."""
     from .. import display as dsp
     from . import bpstate
     tmp = keep or tempfile.mkdtemp(prefix='arek-selftest')
@@ -101,7 +108,12 @@ def display(conf, timeout=300, keep=None):
         ram = f.read()
     with open(os.path.join(cap, 'stable.raw'), 'rb') as f:
         ref = f.read()
-    d = dsp.diff(dsp.to_screenshot(dsp.render(ram, DISPLAY_COPPER)), ref)
+    if c:
+        from .. import host
+        _, rgb = host.render(ram, DISPLAY_COPPER, regs={0x096: meta['chips'].get('agnus', {}).get('DMACON', 0)} if meta.get('chips') else None)
+        d = dsp.diff(rgb, ref)
+    else:
+        d = dsp.diff(dsp.to_screenshot(dsp.render(ram, DISPLAY_COPPER)), ref)
     d['dir'] = tmp
     return d
 
@@ -160,6 +172,56 @@ BUS_REGS = {0x096: 0x87e0, 0x100: 0x5200, 0x092: 0x38, 0x094: 0xd0, 0x08e: 0x2c8
             0x080: BUS_COPLIST >> 16, 0x082: BUS_COPLIST & 0xffff, 0x120: BUS_SPR0 >> 16, 0x122: BUS_SPR0 & 0xffff}
 for _n in range(1, 8):
     BUS_REGS[0x120 + 4 * _n], BUS_REGS[0x122 + 4 * _n] = BUS_NUL >> 16, BUS_NUL & 0xffff
+
+
+AUDIO_LOOP, AUDIO_SAMP = 0x4001a, 0x40118
+AUDIO_PAYLOAD = bytes.fromhex('4df900dff0003d7c7fff009a3d7c7fff00963d7c820000967e00706461000084524733c70003fffe32070241000f66046100007cd241323b104a67043d41009632070241000f0c410009660c3d7c009600a63d7c003000a8303c00c86100004432070241000f0c41000566063d7c000200960c41000b66a23d7c800f00966000ff9a000000008001000080020000800c00000002000080030000000f000000000000322e0006e049b20066f64e752d7c0004011800a03d7c001000a43d7c00c800a63d7c004000a82d7c0004011800b03d7c000800b43d7c007c00b63d7c002000b82d7c0004011800c03d7c002000c43d7c012c00c63d7c004000c82d7c0004011800d03d7c000400d43d7c008300d63d7c002800d84e7500102030405060707f7060504030201000f0e0d0c0b0a0908090a0b0c0d0e0f003070b0f13171b1f23272b2f33373b3ffdf9f5f1ede9e5e1ddd9d5d1cdc9c5c1')
+
+
+def audio_disk():
+    """The Paula self-test ADF image (boot code copies ``selftest_audio.s``, linked at $40000, there)."""
+    n = len(AUDIO_PAYLOAD) // 2 - 1
+    stub = bytes.fromhex('41fa001843f900040000303c') + struct.pack('>H', n) + bytes.fromhex('32d851c8fffc4ef900040000')
+    return _boot_disk(stub + AUDIO_PAYLOAD)
+
+
+def audio(conf, frames=60, first=330, timeout=300, keep=None):
+    """Run the Paula self-test, record ``frames`` frames from ``first`` (bus log, register log, audio
+    log) and check ``arek_bus_paula.h``: ``{'frames', 'from', 'agree', 'disagree', 'slots', 'samples',
+    'dir', 'text'}`` (``slots`` / ``samples`` per channel as ``arek.bus.paula_check`` returns them).
+    The comparison starts one frame after the first full setup of the channels inside the window
+    (the program rewrites it every 16 frames), so the model and the log start from the same state."""
+    from .. import bus as busmod
+    tmp = keep or tempfile.mkdtemp(prefix='arek-selftest')
+    os.makedirs(tmp, exist_ok=True)
+    path = os.path.join(tmp, 'audio.adf')
+    with open(path, 'wb') as f:
+        f.write(audio_disk())
+    out, log = os.path.join(tmp, 'audio.vtr'), os.path.join(tmp, 'audio.bus')
+    reglog, audlog = os.path.join(tmp, 'audio.reglog'), os.path.join(tmp, 'audio.audlog')
+    seconds = (first + frames) / 50.0 + 1
+    trace.capture(conf, out, [], 6, int(seconds) + 1, breaks=[AUDIO_LOOP], ranges=[(0x3fffe, 2)], adf=path,
+                  timeout=timeout, buslog=log, bus_frames=(first, first + frames - 1), reglog=reglog, audlog=audlog)
+    recs = list(trace.records(out))
+    if len(recs) < 2:
+        raise trace.TraceError('the loop at $%x was not hit - see %s.log' % (AUDIO_LOOP, out))
+    blog = trace.read_buslog(log)
+    abbl = os.path.join(tmp, 'audio.abbl')
+    info = busmod.buslog_to_bin(blog, abbl, hpos=227)
+    writes = trace.read_reglog(reglog)
+    setups = sorted({r['frame'] for r in writes if r['reg'] == 0x0a0 and not r['agnus']})
+    logged = min(r['frame'] for r in writes) if writes else 0
+    start = next((f for f in setups if f > logged and f >= info['frame0']), None)
+    if start is None or start - info['frame0'] + 2 >= info['frames']:
+        raise trace.TraceError('no full channel setup inside the logged window (files in %s)' % tmp)
+    ram = bytearray(0x80000)
+    ram[0x40000:0x40000 + len(AUDIO_PAYLOAD)] = AUDIO_PAYLOAD
+    r = busmod.paula_check(abbl, busmod.paula_writes(writes, info['frame0'], info['lines']),
+                           busmod.paula_samples(trace.read_audlog(audlog), info['frame0'], info['lines']),
+                           from_frame=start - info['frame0'] + 1, exe=busmod.compile_paula_check(os.path.join(tmp, 'arek_bus_paula_check')),
+                           ram=bytes(ram))
+    r.update(frames=info['frames'], lines=info['lines'], dir=tmp, setup_frame=start, **{'from': start - info['frame0'] + 1})
+    return r
 
 
 def bus(conf, frames=40, first=330, timeout=300, keep=None):

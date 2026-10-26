@@ -25,7 +25,10 @@ TIMING_RT = r'''
 #ifndef AREK_TIMING
 #define AREK_TIMING
 /* 68000 clocks of the translated code (generate(timing=True); arek.m68k.timing, no DMA
-   contention). Compile with -DTICK_HOOK to route every instruction to the host instead. */
+   contention). Compile with -DTICK_HOOK to route every instruction to the host instead.
+   -DHW_HOOK: hw_read_hook/hw_write_hook for custom registers the runtime does not model and for observing writes;
+   -DCIA_HOOK: cia_read_hook/cia_write_hook for every byte access to $bfxxxx. The driver loads the custom registers
+   of a capture from $AREK_CREG (bpstate creg.bin). */
 uint64_t CYCLES = 0;
 #ifndef PROF_TICK
 #define PROF_TICK(n) ((void)0)
@@ -182,6 +185,10 @@ double bus_time_hook(void);
 #define BUS_BLIT(c0, c1, sz) ((void)0)
 #define BUS_BBUSY() 0
 #endif
+#ifdef HW_HOOK                           /* the host models custom registers the runtime does not (VPOSR, VHPOSR, INTREQR, JOYxDAT, POTGOR...) */
+int hw_read_hook(uint32_t off, uint32_t *v);     /* off = even register offset from $dff000; answer with *v and return 1, or return 0 */
+void hw_write_hook(uint32_t off, uint32_t v);    /* every CPU write to a custom register, before the runtime's own handling (observe INTREQ, COPxLC, display, Paula) */
+#endif
 #ifdef CIA_HOOK                          /* the host models the CIAs ($bfxxxx): every byte access goes to it (-DCIA_HOOK) */
 uint8_t cia_read_hook(uint32_t a);       /* a = the full address; the host decodes CIA-A (A12 low, odd bytes) and CIA-B */
 void cia_write_hook(uint32_t a, uint8_t v);   /* (A13 low, even bytes), register = (a >> 8) & 15 - e.g. CIA-B TOD as a seed */
@@ -237,12 +244,18 @@ static uint32_t hw_read(uint32_t off) {
     case 0x01c:                          /* INTENAR = shadow of INTENA writes */
         return CREG[0x09a >> 1] & 0x7fff;
     default:
+#ifdef HW_HOOK
+        { uint32_t hv; if (hw_read_hook(off, &hv)) return hv & 0xffff; }
+#endif
         HW_UNMODELLED[off >> 1] = 1;
         return CREG[off >> 1];
     }
 }
 static void hw_write(uint32_t off, uint32_t v) {
     v &= 0xffff;
+#ifdef HW_HOOK
+    hw_write_hook(off, v);
+#endif
     switch (off) {
     case 0x096:                          /* DMACON: bit 15 = nastav/smaz */
     case 0x09a:                          /* INTENA: likewise, read back through INTENAR */
@@ -677,11 +690,13 @@ class Gen:
         return '\n'.join(self.out)
 
     def gen_bus_table(self):
-        """BUS_TAB[(pc - BUS_LO) / 2] = {words, extra accesses, flags} (timing.bus_table_entry) for
-        every translated instruction; a host's arek_bus_glue.h reads it in tick_hook."""
+        """{words, extra accesses, flags} (timing.bus_table_entry) per instruction word, in segments of
+        the image that hold translated code (BUS_SPARSE: gaps over 256 words are left out, so an image
+        with code at $400 and at $C00000 does not get 12 MB of zeros); bus_tab_row(pc) finds the row,
+        a host's arek_bus_glue.h calls it in tick_hook."""
         from .timing import bus_table_entry
         n = max(1, len(self.data) // 2)
-        rows = ['0,0,0'] * n
+        rows = {}
         for pc, i in self.tab_insns.items():
             k = (pc - self.base) // 2
             if 0 <= k < n:
@@ -689,13 +704,30 @@ class Gen:
                     rows[k] = '%d,%d,%d' % bus_table_entry(i)
                 except Unsupported:
                     rows[k] = '%d,0,0' % ((i.end - i.addr) // 2)
-        self.emit('/* bus table (recomp --bus-table): words, extra accesses, flags per instruction word of the image */')
+        segs = []
+        for k in sorted(rows):
+            if segs and k - segs[-1][1] <= 256:
+                segs[-1][1] = k
+            else:
+                segs.append([k, k])
+        if not segs:
+            segs = [[0, 0]]
+        self.emit('/* bus table (recomp --bus-table): words, extra accesses, flags per instruction word, in %d segment(s) of the image */' % len(segs))
+        self.emit('#define BUS_SPARSE 1')
         self.emit('#define BUS_LO 0x%xu' % self.base)
-        self.emit('#define BUS_N %du' % n)
-        self.emit('static const uint8_t BUS_TAB[BUS_N][3] = {')
-        for k in range(0, n, 16):
-            self.emit('  ' + ','.join('{%s}' % r for r in rows[k:k + 16]) + ',')
-        self.emit('};')
+        for j, (a, b) in enumerate(segs):
+            self.emit('static const uint8_t BUS_SEG%d[%d][3] = {' % (j, b - a + 1))
+            for k in range(a, b + 1, 16):
+                self.emit('  ' + ','.join('{%s}' % rows.get(q, '0,0,0') for q in range(k, min(b + 1, k + 16))) + ',')
+            self.emit('};')
+        self.emit('#define BUS_SEGS_N %d' % len(segs))
+        self.emit('static const uint32_t BUS_SEG_LO[BUS_SEGS_N] = {%s};' % ', '.join('0x%xu' % (self.base + 2 * a) for a, b in segs))
+        self.emit('static const uint32_t BUS_SEG_HI[BUS_SEGS_N] = {%s};' % ', '.join('0x%xu' % (self.base + 2 * b + 2) for a, b in segs))
+        self.emit('static const uint8_t (*const BUS_SEGS[BUS_SEGS_N])[3] = {%s};' % ', '.join('BUS_SEG%d' % j for j in range(len(segs))))
+        self.emit('static inline const uint8_t *bus_tab_row(uint32_t pc) {')
+        self.emit('    for (int k = 0; k < BUS_SEGS_N; k++) if (pc >= BUS_SEG_LO[k] && pc < BUS_SEG_HI[k]) return BUS_SEGS[k][(pc - BUS_SEG_LO[k]) >> 1];')
+        self.emit('    return 0;')
+        self.emit('}')
         self.emit()
 
     def gen_dispatch(self):
@@ -1289,6 +1321,13 @@ int main(int argc, char **argv) {
         fclose(f);
     }
 #endif
+    if (getenv("AREK_CREG")) {                       /* the custom registers at the capture: bpstate creg.bin, 256 big-endian words */
+        uint8_t cb[0x200];
+        f = fopen(getenv("AREK_CREG"), "rb");
+        if (!f || fread(cb, 1, sizeof cb, f) != sizeof cb) { fprintf(stderr, "AREK_CREG?\n"); return 1; }
+        fclose(f);
+        for (int i = 0; i < 0x100; i++) CREG[i] = (uint16_t)((cb[2 * i] << 8) | cb[2 * i + 1]);
+    }
     M68 m; memset(&m, 0, sizeof m);
     f = fopen(argv[2], "r");
     for (int i = 0; i < 8; i++) if (fscanf(f, "%x", &m.d[i]) != 1) return 1;

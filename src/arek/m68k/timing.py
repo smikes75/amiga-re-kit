@@ -374,8 +374,9 @@ def bus_table_entry(i):
     translation does not (prefetch after a jump, the stack of rts, the read before clr,
     movem's extra read ...), and flags the host resolves at run time from the clock count:
     TAB_BCC_S (a taken short branch reads one more word), TAB_DBCC (an expired loop too),
-    TAB_PRE_ALL (a jump spends its internal cycles before its accesses), TAB_PRE_2 (-(An) and
-    d8(An,Xn) wait 2 cycles before the operand), TAB_PUSH2 (jsr/bsr push two words after)."""
+    TAB_PRE_ALL (a jump spends its internal cycles before its accesses), TAB_PRE_2 (a read through
+    -(An), and d8(An,Xn), wait 2 cycles before the operand; a write to -(An) does not), TAB_PUSH2
+    (jsr/bsr push two words after)."""
     k = i.kind
     words = (i.end - i.addr) // 2
     if k == 'bcc':
@@ -394,8 +395,19 @@ def bus_table_entry(i):
         flags |= TAB_PRE_ALL
     if k in ('jsr', 'bsr'):
         flags |= TAB_PUSH2
-    if any(_mem(e) and ea_class(e) in ('pre', 'd8x', 'pcd8x') for e in (getattr(i, a, None) for a in ('ea', 'src', 'dst'))):
-        flags |= TAB_PRE_2
+    for name in ('ea', 'src', 'dst'):
+        e = getattr(i, name, None)
+        if not (e is not None and _mem(e)):
+            continue
+        c = ea_class(e)
+        if c in ('d8x', 'pcd8x'):
+            flags |= TAB_PRE_2
+        elif c == 'pre':
+            # a write to -(An) has no cycle before it (UM: move Dn,-(An) 8(1/1) as (An); movem regs,-(An) 8+8n);
+            # measured by Alien Breed II against the original: +1 CCK per movem.l ...,-(a7) when flagged
+            if (k == 'move' and name == 'dst') or (k == 'movem' and i.to_mem):
+                continue
+            flags |= TAB_PRE_2
     return words, extra, flags
 
 

@@ -1,6 +1,6 @@
 /* arek_bus_glue.h - the bus model (arek_bus.h) behind the hooks of a kit translation (amiga-re-kit).
  *
- * Include it ONCE, after the generated translation (it needs M68 and, with `recomp --bus-table`, BUS_TAB) and build the
+ * Include it ONCE, after the generated translation (it needs M68 and, with `recomp --bus-table`, the bus table) and build the
  * translation with -DTICK_HOOK -DBUS_HOOK: the runtime then calls tick_hook() per instruction, bus_access_hook() per CPU
  * access to the chip bus (RAM, custom registers), bus_blit_hook() at BLTSIZE and bus_bbusy_hook() when the game reads
  * DMACONR. This file turns them into model calls and keeps the CPU's time (CCK slots from the start of the frame).
@@ -58,8 +58,10 @@ static inline void arek_glue_interrupt(void) {
 static inline void arek_glue_insn(uint32_t pc, uint32_t clocks) {
     if (!AREK_GLUE.ready) return;
     uint32_t words = 1, extra = 0, flags = 0, pre = 0;
-#ifdef BUS_N
-    uint32_t i = (pc - BUS_LO) >> 1;
+#if defined(BUS_SPARSE)
+    { const uint8_t *row = bus_tab_row(pc); if (row && row[0]) { words = row[0]; extra = row[1]; flags = row[2]; } }
+#elif defined(BUS_N)
+    uint32_t i = (pc - BUS_LO) >> 1;           /* the dense table of kit 0.5.15 - 0.6.4 */
     if (i < BUS_N && BUS_TAB[i][0]) { words = BUS_TAB[i][0]; extra = BUS_TAB[i][1]; flags = BUS_TAB[i][2]; }
 #else
     (void)pc;

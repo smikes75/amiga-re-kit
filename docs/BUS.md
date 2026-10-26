@@ -1,4 +1,4 @@
-# The bus model per DMA slot (`arek.bus`, kit 0.5.15)
+# The bus model per DMA slot (`arek.bus`, kit 0.5.15; audio DMA 0.7.0)
 
 A recompiled game (path B) runs its logic from its own 68000 code, but *when* things happen inside a
 frame - on which instruction the VBL interrupt lands, when a blit ends, whether the original ran over
@@ -70,7 +70,7 @@ what the model does not know (interrupt entry, instructions without a table entr
 
 ## With a kit translation
 
-`arek recomp ... --timing --bus-table` adds `BUS_TAB[(pc - BUS_LO) / 2] = {words, extra, flags}`
+`arek recomp ... --timing --bus-table` adds the bus table `{words, extra, flags}` per instruction word, in segments of the image that hold code (`bus_tab_row(pc)`; 0.7.0, before that a dense `BUS_TAB`)
 for every translated instruction (`arek.m68k.timing.bus_table_entry`): its words (each a prefetch
 read), the accesses the 68000 makes that the translation does not (the prefetch after a jump, the
 return address rts does not read, the read before clr, movem's extra read ...), and flags the glue
@@ -100,9 +100,40 @@ the handler's instructions count like any others. A host with its own
 blitter (`run_blit`) moves its words raw - they are the blitter's slots in the model, not CPU accesses
 (Superfrog found 0.5.15 counting them: KIT-GAPS 28; 0.5.17 then moved movem.w and rte's SR read raw by
 mistake, 0.5.18 counts them again: KIT-GAPS 29 - the extension words an indirect jump re-reads stay raw,
-they are prefetch and in BUS_TAB). Audio DMA slots come from the host's Paula model (`arek_bus_mark`).
+they are prefetch and in the bus table). Audio DMA slots come from the host's Paula model (`arek_bus_mark`).
+
+## Audio DMA (Paula), kit 0.7.0
+
+`arek_bus_paula.h` (header-only, MIT) marks the audio slots ($0D + 2n of every line) the way Paula uses them and
+outputs the channels' bytes, so a host has the complete slot map and the sound. Rules measured by the Alien Breed II
+project against `VAHL_BUSLOG` / `VAHL_AUDLOG` and checked by `arek selftest audio` (four channels, periods 124-300,
+lengths 4-32 words, DMA switched on and off at two points of the frame, a period and volume change while playing):
+
+- DMA on raises a request; a request raised in line v is served in the channel's slot of line v + 1, even if DMA was
+  switched off meanwhile. The first word after switching on is discarded and the pointer goes back to AUDxLC; the
+  second word starts the output and requests the next; then a byte every AUDxPER CCK (0 = 65536), and every high byte
+  (a new word on the output) requests the next word. The length counter wraps the pointer after AUDxLEN words.
+- Audio has priority on the bus: the slots a channel will use up to the end of the frame are marked ahead, so a blit
+  scheduled by BLTSIZE does not take them; a register write re-plans them.
+- Output (vAmiga's state machine): each DMA word enables one high and one low byte; a byte whose turn comes before a
+  new word arrived is skipped while the period runs on, so a word fetched early costs the previous word's low byte.
+  AUDxVOL takes effect at the next high byte (min 64). After DMA off a pending low byte is still output, then the
+  channel stops.
+- Self-test (VAHeadless 899da5d, 60 frames, compared from the first full setup): **audio DMA slots 18 356 agree /
+  0 disagree; output samples ch0 12 533 / 12 533, ch1 6 156 / 6 156, ch2 4 894 / 4 894, ch3 10 346 / 10 346 exact in
+  time and value.** Not modelled: a game that clears the audio INTREQ bits and switches DMA off and on without a gap
+  keeps vAmiga's state machine looping (no first-word discard on the restart).
+
+A host: `arek_paula_init(&P, &bus, sample_cb, ctx)`; after every `arek_bus_frame`: `arek_paula_frame(&P, absolute
+time of the frame start)`; `arek_paula_write(&P, t, off, v)` for every write to $DFF0A0-$DFF0DE and DMACON (from
+`hw_write_hook`); `arek_paula_run(&P, t)` at instruction boundaries and at the end of the frame; `sample_cb` gets
+every byte * volume with its absolute time (`arek_bus_paula_check.c` shows the whole loop).
 
 ## Measured
+
+- Known limit: the frame map reads the sprites' POS/CTL from chip RAM when the frame starts; a game
+  that rewrites sprite data during the frame gets a map with a fixed number of sprite slots (Alien
+  Breed II: 247-378 slots in the log, 264 in the model). A host that needs those slots marks them itself.
 
 - `arek selftest bus` (a synthetic program: 5 lores planes, a sprite, a copper list with waits,
   three blits in a loop with BLTPRI and stack traffic between them; VAHeadless 899da5d with the
@@ -123,7 +154,9 @@ they are prefetch and in BUS_TAB). Audio DMA slots come from the host's Paula mo
 | constant | value | from |
 |---|---|---|
 | refresh | slots 1, 3, 5, hpos - 1 | vAmiga, bus log |
-| sprites | DMA from line 25, slots 0x15 + 4n and 0x17 + 4n | vAmiga, bus log |
+| audio | slot 0x0D + 2n of the line after the request; first word discarded; a request per high byte | Alien Breed II, `arek selftest audio` (0.7.0) |
+| sprites | DMA from line 25, slots 0x15 + 4n and 0x17 + 4n; POS/CTL on line 25 always; on a line with bitplane DMA no sprite slot from DDFSTRT - 1 on (DDFSTRT $24: sprite 3 one word, sprites 4-7 none) | vAmiga, bus log; Alien Breed II against the bus log (0.7.0) |
+| -(An) writes | no 2-cycle wait before `move ..,-(An)` and `movem regs,-(An)`; reads through -(An) and every d8(An,Xn) keep it | MC68000 UM table 8; Alien Breed II per instruction against the original (0.7.0) |
 | bitplanes lores | planes in the 8-slot group at 7/3/5/1/6/2, DDFSTRT to DDFSTOP | vAmiga SequencerBpl, bus log |
 | bitplanes hires | 4/2/3/1 twice per group | vAmiga |
 | copper | reads on even free slots, next step 2 slots later, WAIT compares h + 2, slot 0xE0 blocked | vAmiga CopperEvents, bus log |

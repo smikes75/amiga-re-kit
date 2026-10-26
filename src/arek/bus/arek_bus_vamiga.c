@@ -28,14 +28,20 @@ void arek_bus_frame_map(ArekBus *b) {
         L[1] = L[3] = L[5] = L[H - 1] = 2;   /* obnova: PAL 1/3/5/226 */
         { int s = R[0x08e >> 1] >> 8, e = (R[0x090 >> 1] >> 8) | ((R[0x090 >> 1] & 0x8000) ? 0 : 0x100); if ((int)v == e) vflop = 0; if ((int)v == s) vflop = 1; }
         uint16_t dma = R[0x096 >> 1]; int den = dma & 0x200;
-        /* sprity: radek 25 nacte POS/CTL, data od vstart do vstop - 1, na vstop dalsi POS/CTL */
+        /* sprity: radek 25 nacte POS/CTL vzdy (i kdyz je copper zapsal), data od vstart do vstop - 1, na vstop dalsi POS/CTL.
+         * Na radku s DMA bitplanu se sloty spritu od DDFSTRT - 1 dal nekonaji (DDFSTRT $24: sprite 3 jen $21, sprity 4-7 nic);
+         * zmereno proti VAHL_BUSLOG (Alien Breed II, 2026-10-26). */
+        int sp_lim = 0x7fff;
+        if (den && (dma & 0x100) && vflop && ((R[0x100 >> 1] >> 12) & 7)) sp_lim = (R[0x092 >> 1] & 0xfc) - 1;
         if (den && (dma & 0x20) && v >= 25 && v < NL - 1) for (int n = 0; n < 8; n++) {
-            BSpr *p = &S[n]; int fetch = 0;
-            if (p->st == 0 && v == 25) fetch = 1;
+            BSpr *p = &S[n]; int fetch = 0, s1 = 0x15 + 4 * n, s2 = 0x17 + 4 * n;
+            if (v == 25) fetch = 1;
             else if (p->st == 2 && (int)v == p->ve) fetch = 1;
-            else if ((p->st == 1 || p->st == 2) && (int)v >= p->vs && (int)v < p->ve) { p->st = 2; L[0x15 + 4 * n] = L[0x17 + 4 * n] = 16 + n; p->ptr += 4; continue; }
+            else if ((p->st == 1 || p->st == 2) && (int)v >= p->vs && (int)v < p->ve) {
+                p->st = 2; if (s1 < sp_lim) { L[s1] = 16 + n; p->ptr += 2; } if (s2 < sp_lim) { L[s2] = 16 + n; p->ptr += 2; } continue; }
             if (fetch) {
-                uint32_t pos = b->rd16(b->ctx, p->ptr), ctl = b->rd16(b->ctx, p->ptr + 2); p->ptr += 4; L[0x15 + 4 * n] = L[0x17 + 4 * n] = 16 + n;
+                uint32_t pos = b->rd16(b->ctx, p->ptr), ctl = b->rd16(b->ctx, p->ptr + 2); p->ptr += 4;
+                if (s1 < sp_lim) L[s1] = 16 + n; if (s2 < sp_lim) L[s2] = 16 + n;
                 p->vs = (pos >> 8) | ((ctl & 4) << 6); p->ve = (ctl >> 8) | ((ctl & 2) << 7); p->st = (pos | ctl) ? 1 : 3;
                 if (p->st == 1 && p->vs <= (int)v) p->st = 3;
             }

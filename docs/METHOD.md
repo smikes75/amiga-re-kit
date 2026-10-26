@@ -94,9 +94,18 @@ RAM dump + write log out*. That is the verification loop:
    result against `cap/out`, restricted to the ranges the routine owns.
 4. `arek.contract.untouched` for the ranges it must *not* write.
 
+The driver takes the capture's custom registers from `$AREK_CREG` (`creg.bin`
+of the capture), so a routine that reads INTENAR or DMACONR sees the original's
+values. What the runtime does not model, the host answers: compile with
+`-DHW_HOOK` (`hw_read_hook` for VPOSR, VHPOSR, INTREQR, JOYxDAT..., `hw_write_hook`
+to observe every register write) and `-DCIA_HOOK` (every byte access to `$bfxxxx`).
+
 Nothing "looks right"; it is equal or it is not.
 
-For a whole frame step rather than one routine, record the original with
+For the whole game rather than one routine, put the translation into the kit's host
+(`arek host copy`, `docs/HOST.md`): the bus model gives it the time, the host the frames, the
+interrupts, the CIAs, Paula and the picture, and its driver writes the same records as the
+original's trace. For a whole frame step rather than one routine, record the original with
 `arek trace run` (one record per frame boundary, the chosen RAM ranges in
 each), feed record *N* to the recompiled step and compare its RAM with record
 *N + 1*, frame after frame. A step that matches for hundreds of frames, from

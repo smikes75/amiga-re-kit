@@ -344,7 +344,7 @@ void cia_write_hook(uint32_t a, uint8_t v) { MEM[0x4000] = (uint8_t)(a >> 8); ME
     if not cc:
         pytest.skip('no C compiler')
     src, _, _ = recomp.generate(bytes.fromhex(prog + '4e75'), BASE, auto=[BASE], with_main=True)
-    assert src.count('cia_read_hook') == 2 and '#ifdef CIA_HOOK' in src
+    assert src.count('cia_read_hook') >= 2 and '#ifdef CIA_HOOK' in src
     c, exe = tmp_path / 'h.c', tmp_path / 'h'
     c.write_text(src + host)
     subprocess.run([cc, '-O1', '-DCIA_HOOK', '-o', str(exe), str(c)], check=True)
@@ -356,3 +356,24 @@ void cia_write_hook(uint32_t a, uint8_t v) { MEM[0x4000] = (uint8_t)(a >> 8); ME
     d0 = int((tmp_path / 'log.txt').read_text().split('\n')[0], 16)
     assert d0 == 0xabffabff
     assert (tmp_path / 'out.bin').read_bytes()[0x4000:0x4003] == bytes.fromhex('e00112')
+
+
+def test_hw_hook_answers_unmodelled_reads_and_sees_writes(tmp_path):
+    """-DHW_HOOK: a custom register the runtime does not model is answered by the host; every write is observed."""
+    host = """
+int hw_read_hook(uint32_t off, uint32_t *v) { if (off == 0x006) { *v = 0x1234; return 1; } return 0; }
+void hw_write_hook(uint32_t off, uint32_t v) { MEM[0x4000] = (uint8_t)(off >> 8); MEM[0x4001] = (uint8_t)off; MEM[0x4002] = (uint8_t)(v >> 8); MEM[0x4003] = (uint8_t)v; }
+"""
+    prog = '303900dff006' + '33fc567800dff180'                   # move.w $dff006,d0 (VHPOSR); move.w #$5678,$dff180
+    d, _, _, mem = run(tmp_path, prog, {}, pre_c='#define HW_HOOK 1\n', extra_c=host)
+    assert d[0] == 0x1234 and mem[0x4000:0x4004] == bytes.fromhex('01805678')
+    d, _, _, mem = run(tmp_path, prog, {})                        # without the hook: unmodelled read = the shadow (0), no observer
+    assert d[0] == 0 and mem[0x4000:0x4004] == bytes(4)
+
+
+def test_driver_loads_the_custom_registers_of_a_capture(tmp_path):
+    """$AREK_CREG (bpstate creg.bin): INTENAR reads back what the capture had in INTENA."""
+    creg = bytearray(512); creg[0x9a:0x9c] = bytes.fromhex('c020')
+    (tmp_path / 'creg.bin').write_bytes(creg)
+    d, *_ = run(tmp_path, '303900dff01c', {}, env={'AREK_CREG': str(tmp_path / 'creg.bin')})   # move.w $dff01c,d0
+    assert d[0] == 0x4020
