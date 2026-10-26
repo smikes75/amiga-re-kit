@@ -224,7 +224,7 @@ def run(url, quick=False, log=print):
     return {'checks': checks, 'fails': fails}
 
 
-MENU_IDS = ['wb-zoom', 'wb-crt', 'wb-crt-detail', 'wb-crt-shape', 'wb-blur', 'wb-brightness', 'wb-contrast', 'wb-saturation',
+MENU_IDS = ['wb-zoom', 'wb-crt', 'wb-crt-detail', 'wb-crt-shape', 'wb-blur', 'wb-brightness', 'wb-contrast', 'wb-saturation', 'wb-red', 'wb-green', 'wb-blue',
             'wb-par', 'wb-smooth', 'wb-sound', 'wb-volume', 'wb-filter-fixed', 'wb-filter-led', 'wb-filter-hp', 'wb-stereo',
             'wb-defaults-display', 'wb-defaults-sound']
 FLAT = {'volume': 100, 'stereo': 100, 'filterFixed': False, 'filterLed': 'off', 'filterHp': False}

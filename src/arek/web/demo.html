@@ -18,9 +18,9 @@
   .game.no-vignette::after { display: none; }
   .game[data-crt=fine] { --crt-edge: .25 } .game[data-crt=standard] { --crt-edge: .5 } .game[data-crt=strong] { --crt-edge: .65 }
   #menu { position: absolute; top: 32px; right: 0; width: 320px; max-height: calc(100% - 32px); overflow: auto; background: #16161c; padding: 8px 12px; box-sizing: border-box; }
-  .wb-menu fieldset { border: 1px solid #333; margin: 0 0 8px; padding: 6px 8px; } .wb-menu legend { color: #fff; }
-  .wb-menu-row { display: grid; grid-template-columns: 1fr 120px 36px; gap: 6px; align-items: center; margin: 4px 0; }
-  .wb-menu-defaults { margin-top: 6px; }
+  .wb-nastaveni fieldset { border: 1px solid #333; margin: 0 0 8px; padding: 6px 8px; } .wb-nastaveni legend { color: #fff; }
+  .wb-nastaveni-row { display: grid; grid-template-columns: 1fr 120px 36px; gap: 6px; align-items: center; margin: 4px 0; }
+  .wb-nastaveni-defaults { margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -28,7 +28,7 @@
 <div id="stage"><div class="game"><canvas id="screen"></canvas><canvas class="crt-layer" aria-hidden="true"></canvas></div></div>
 <div id="menu" hidden></div>
 <script src="wb-obraz.js"></script>
-<script src="wb-menu.js"></script>
+<script src="wb-nastaveni.js"></script>
 <script src="wb-zvuk.js"></script>
 <script>
 'use strict';
@@ -79,8 +79,8 @@ window.wbObrazTest = {
   set(mode, cfg) { state.mode = mode; Object.assign(state.cfg[mode], cfg || {}); return layout(); },
   fill(kind) { state.pattern = kind; game.classList.toggle('no-vignette', kind !== 'picture'); paint(); return true; },
 };
-// the shared menu (wb-menu.js): its Display values drive this page's cfg, its Sound values the sound chain
-const menu = WBMENU.build(document.getElementById('menu'), { lang: 'en' });
+// the shared menu (wb-nastaveni.js): its Display values drive this page's cfg, its Sound values the sound chain
+const menu = WBNASTAVENI.build(document.getElementById('menu'), { lang: 'en' });
 function fromMenu(st) {
   const d = st.display;
   state.cfg[st.mode] = { zoom: d.zoom, crt: d.crt, crtDetail: d['crt-detail'], crtShape: d['crt-shape'], blur: d.blur, par: d.par };

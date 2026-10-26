@@ -16,12 +16,12 @@ def js(expr):
     if not node:
         pytest.skip('no node')
     code = "const Z = require(%s), M = require(%s); const r = (%s); console.log(JSON.stringify(r));" % (
-        json.dumps(str(WEB / 'wb-zvuk.js')), json.dumps(str(WEB / 'wb-menu.js')), expr)
+        json.dumps(str(WEB / 'wb-zvuk.js')), json.dumps(str(WEB / 'wb-nastaveni.js')), expr)
     return json.loads(subprocess.run([node, '-e', code], capture_output=True, text=True, check=True).stdout)
 
 
 def test_mix_rule():
-    assert js('Z.VERSION') == '1.0' and js('Z.RAMP_MS') == 20
+    assert js('Z.VERSION') == '1.1' and js('Z.RAMP_MS') == 20
     assert js('Z.mix(1, 0, 100)') == [1, 0] and js('Z.mix(1, 0, 0)') == [0.5, 0.5] and js('Z.mix(0.5, -0.5, 50)') == [0.25, -0.25]
     g = js('Z.gains(70)')
     assert abs(g['a'] - 0.85) < 1e-12 and abs(g['b'] - 0.15) < 1e-12
@@ -33,6 +33,10 @@ def test_filters_and_process():
     c = js('Z.coefficients(44100)')
     ff, fb = c['fixed']['feedforward'], c['fixed']['feedback']
     assert abs(sum(ff) / (1 + fb[1]) - 1) < 1e-9                              # low-pass: DC gain 1
+    import math
+    a = 1 - math.exp(-2 * math.pi * 4420.97 / 44100)
+    assert abs(ff[0] - a) < 1e-12 and abs(fb[1] + (1 - a)) < 1e-12            # y += a (x - y), the schematic's RC
+    assert js('Z.FILTERS') == {'fixed': {'hz': 4420.97, 'order': 1}, 'led': {'hz': 3090.53, 'order': 2, 'q': 0.660225}, 'hp': {'hz': 5.2041, 'order': 1}}
     ff, fb = c['hp']['feedforward'], c['hp']['feedback']
     assert abs(sum(ff)) < 1e-9                                                # high-pass: DC gain 0
     ff, fb = c['led']['feedforward'], c['led']['feedback']
@@ -51,7 +55,7 @@ def test_filters_and_process():
 
 
 def test_menu_defaults_coerce_merge():
-    assert js('M.VERSION') == '1.0' and js('M.MODES') == ['original', 'enhanced']
+    assert js('M.VERSION') == '1.1' and js('M.MODES') == ['original', 'enhanced']
     d = js("M.defaults('display', 'enhanced')")
     assert d['par'] == 1.04 and d['smooth'] is True and d['zoom'] == 3 and d['crt-detail'] == 'fine'
     assert js("M.defaults('display', 'original').par") == 1 and js("M.defaults('display', 'original').smooth") is False
@@ -70,10 +74,29 @@ def test_menu_defaults_coerce_merge():
     assert set(js("Object.keys(M.TEXTS.cs.display)")) >= {'zoom', 'par', 'smooth', 'defaults', 'fit'} and js("M.TEXTS.cs.sound._") == 'Zvuk'
 
 
+def test_menu_zoom_snap():
+    """spec.zoom = 'snap': the zoom only takes the values spec.zoomSteps() lists (whole device pixels), nearest wins, fit stays."""
+    snap = lambda tail, spec="{zoom: 'snap', zoomSteps: () => [3, 1, {value: 2, label: '2 px'}, 4.5]}": \
+        js("(() => { const m = new M.Menu(null, %s); return %s; })()" % (spec, tail))
+    assert snap("m.zoomSteps()") == [{'value': 1, 'label': '1×'}, {'value': 2, 'label': '2 px'}, {'value': 3, 'label': '3×'}, {'value': 4.5, 'label': '4.5×'}]
+    assert snap("[m.snapZoom(2.4), m.snapZoom(2.6), m.snapZoom(9), m.snapZoom(0), m.snapZoom(0.2)]") == [2, 3, 4.5, 0, 1]
+    assert snap("(m.set('display', 'zoom', 2.6), m.get('display').zoom)") == 3
+    assert snap("(m.set('display', 'zoom', '0'), m.get('display').zoom)") == 0                                    # fit
+    assert snap("(m.set('display', 'zoom', 2.6), [m.zoomSteps(), m.get('display').zoom])", "{}") == [[], 1]      # no snapping: coerce as before
+    assert snap("m.snapZoom(2.4)", "{zoom: 'snap'}") == 2.4                                                      # snap without steps: unchanged
+
+
 def test_package_files_and_copy(tmp_path, capsys):
     assert cli.main(['web', 'copy', str(tmp_path)]) == 0
-    for name in ('wb-obraz.js', 'wb-seal.js', 'wb-menu.js', 'wb-zvuk.js'):
+    for name in ('wb-obraz.js', 'wb-seal.js', 'wb-nastaveni.js', 'wb-zvuk.js'):
         assert (tmp_path / name).exists()
-    assert webtest.MENU_IDS[0] == 'wb-zoom' and len(webtest.MENU_IDS) == 18
-    assert "globalThis.WBMENU" in (WEB / 'wb-menu.js').read_text() and "globalThis.WBZVUK" in (WEB / 'wb-zvuk.js').read_text()
+    assert webtest.MENU_IDS[0] == 'wb-zoom' and len(webtest.MENU_IDS) == 21 and 'wb-blue' in webtest.MENU_IDS
+    assert "globalThis.WBNASTAVENI" in (WEB / 'wb-nastaveni.js').read_text() and "globalThis.WBZVUK" in (WEB / 'wb-zvuk.js').read_text()
     assert 'wbMenuTest' in (WEB / 'demo.html').read_text() and 'wbZvukTest' in (WEB / 'demo.html').read_text()
+    assert js("[M.ITEMS.display.map((i) => i.id).slice(7, 11), M.ITEMS.display.find((i) => i.id === 'saturation').max]") == [['saturation', 'red', 'green', 'blue'], 200]
+    # the games' own file under a kit name (their Workbench bar was wb-menu.js) is never overwritten
+    own = tmp_path / 'wb-nastaveni.js'
+    own.write_text("// the game's own bar\n")
+    assert cli.main(['web', 'copy', str(tmp_path)]) == 1 and own.read_text().startswith("// the game's own")
+    assert 'kept, not a kit file' in capsys.readouterr().out
+    assert cli.main(['web', 'copy', str(tmp_path), '--force']) == 0 and 'WBNASTAVENI' in own.read_text()

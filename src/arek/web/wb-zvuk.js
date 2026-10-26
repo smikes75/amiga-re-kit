@@ -1,4 +1,4 @@
-// wb-zvuk.js - reference implementation of the sound contract "wb-shell zvuk 1.0" (amiga-re-kit, WB-ZVUK.md).
+// wb-zvuk.js - reference implementation of the sound contract "wb-shell zvuk 1.1" (amiga-re-kit, WB-ZVUK.md).
 // One mixing rule for the stereo width, gain changes that ramp (no clicks), the Amiga 500's output filters, and
 // test hooks for `arek web test` (§6). No game data. Works as a <script> (global WBZVUK, globalThis.WBZVUK),
 // as CommonJS and in Node for the pure parts (mix, coefficients).
@@ -7,20 +7,24 @@
 //   z.input.connect-from your source; WBZVUK.apply(z, { on, volume, stereo, filterFixed, filterLed, filterHp }, led)
 //
 // Stereo width w = stereo / 100: l' = l*(1+w)/2 + r*(1-w)/2, r' = r*(1+w)/2 + l*(1-w)/2 (100 % = as the Amiga,
-// 0 % = mono). Every gain change ramps linearly over RAMP_MS. Filter values are the Amiga 500's as the projects
-// measured them against vAmiga; a game may pass its own in opts.filters.
+// 0 % = mono). Every gain change ramps linearly over RAMP_MS. Filter values are the Amiga 500's from the schematic
+// (FILTERS, with the digital forms the contract prescribes); a game may pass its own in opts.filters.
 //
 // Test hooks a page provides (§6): window.wbZvukTest.render(settings) -> {l: [...], r: [...]} - the page's fixed
 // test signal (wbZvukTest.signal()) through a chain built with `settings` in an OfflineAudioContext; WBZVUK.render
 // does that for a page that keeps its chain to the reference.
 'use strict';
 const WBZVUK = (() => {
-    const VERSION = '1.0';
+    const VERSION = '1.1';
     const RAMP_MS = 20;
-    // Amiga 500 output stage: a fixed one-pole low-pass, the "LED" low-pass (CIA-A PRA bit 1, power LED) as a
-    // second-order Butterworth, and the AC coupling as a one-pole high-pass. Provisional until Alien Breed's
-    // measurement against vAmiga lands in WB-ZVUK.md (K2).
-    const FILTERS = { fixed: { hz: 4400, order: 1 }, led: { hz: 3300, order: 2, q: Math.SQRT1_2 }, hp: { hz: 5, order: 1 } };
+    // Amiga 500 output stage from the schematic (Superfrog, after pt2-clone): the fixed one-pole RC low-pass
+    // R321 360 ohm / C321 0.1 uF = 4420.97 Hz; the "LED" filter, a unity-gain Sallen-Key with R322 = R323 = 10 k,
+    // C322 6800 pF, C323 3900 pF = 3090.53 Hz, Q 0.660225 (on while CIA-A PRA bit 1 is 0, the power LED bright);
+    // the output coupling, a one-pole high-pass (R324 + R325) 1390 ohm / C334 22 uF = 5.2041 Hz. The analog output
+    // is not measured; the stages are linear, so their order does not matter. Digital form (WB-ZVUK.md §4): one pole
+    // low y += a(x - y), a = 1 - exp(-2 pi f / fs); one pole high y = r(y1 + x - x1), r = exp(-2 pi f / fs); the LED
+    // stage an RBJ low-pass biquad (bilinear) with that f0 and Q. Every game uses these forms so the tests agree.
+    const FILTERS = { fixed: { hz: 4420.97, order: 1 }, led: { hz: 3090.53, order: 2, q: 0.660225 }, hp: { hz: 5.2041, order: 1 } };
     const DEFAULTS = { on: true, volume: 80, stereo: 100, filterFixed: true, filterLed: 'auto', filterHp: true };
 
     /** The width gains: l' = l*a + r*b, r' = r*a + l*b. */
@@ -38,15 +42,15 @@ const WBZVUK = (() => {
         for (let i = 0; i < n; i++) { ol[i] = l[i] * a + r[i] * b; or[i] = r[i] * a + l[i] * b; }
         return [ol, or];
     }
-    /** One-pole low-pass y[n] = a0*x[n] + b1*y[n-1] (bilinear), as IIRFilterNode feedforward/feedback arrays. */
+    /** One-pole low-pass y += a (x - y), a = 1 - exp(-2 pi f / fs), as IIRFilterNode feedforward/feedback arrays. */
     function onePoleLow(hz, sr) {
-        const k = Math.tan(Math.PI * hz / sr), a0 = k / (1 + k), b1 = (1 - k) / (1 + k);
-        return { feedforward: [a0, a0], feedback: [1, -b1] };
+        const a = 1 - Math.exp(-2 * Math.PI * hz / sr);
+        return { feedforward: [a], feedback: [1, -(1 - a)] };
     }
-    /** One-pole high-pass (bilinear). */
+    /** One-pole high-pass y = r (y1 + x - x1), r = exp(-2 pi f / fs). */
     function onePoleHigh(hz, sr) {
-        const k = Math.tan(Math.PI * hz / sr), a0 = 1 / (1 + k), b1 = (1 - k) / (1 + k);
-        return { feedforward: [a0, -a0], feedback: [1, -b1] };
+        const r = Math.exp(-2 * Math.PI * hz / sr);
+        return { feedforward: [r, -r], feedback: [1, -r] };
     }
     /** Second-order low-pass (RBJ cookbook), normalised so a0 = 1. */
     function biquadLow(hz, q, sr) {
@@ -111,7 +115,8 @@ const WBZVUK = (() => {
         param.setValueAtTime(param.value, t);
         param.linearRampToValueAtTime(value, t + ms / 1000);
     }
-    /** Apply settings {on, volume, stereo, filterFixed, filterLed ('auto'|'on'|'off'), filterHp}; led = the game's LED bit. */
+    /** Apply settings {on, volume, stereo, filterFixed, filterLed ('auto'|'on'|'off'), filterHp}; led = true when the game's
+     *  filter is on (CIA-A PRA bit 1 = 0, the power LED bright). */
     function apply(z, settings, led, ms) {
         const s = Object.assign(z.settings, settings || {}), r = (p, v) => ramp(p, v, z.ctx, ms === undefined ? RAMP_MS : ms);
         z.led = !!led;

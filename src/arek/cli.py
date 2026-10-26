@@ -31,7 +31,7 @@
     arek bus         copy DIR                                        (the bus model per DMA slot: C sources for a rebuild)
     arek fuzz        --seed N --frames N [--hold 3:22] [--start N] [--out FILE]   (random input for both sides)
     arek parity      SUITE.json [--json] [--no-run]                   (scenarios: state, picture, sound)
-    arek web         copy DIR | demo [--port N] | test URL [--quick]   (display contract)
+    arek web         copy DIR [--force] | demo [--port N] | test URL [--quick]   (display contract)
     arek web         seal FILE... --set D1.adf[,D2.adf] [--payload FILE] [--label TEXT] [--gzip] --out DIR   (derived code, opened by the disk or by the game's content)
     arek web         check DIR                                          (a presentation bundle: no game data, derived = sealed)
     arek init        [DIR]
@@ -462,11 +462,18 @@ def cmd_web(a):
     if a.what == 'copy':
         dest = Path(a.target or '.')
         dest.mkdir(parents=True, exist_ok=True)
-        for name in ('wb-obraz.js', 'wb-seal.js', 'wb-menu.js', 'wb-zvuk.js'):
+        kept = []
+        for name in ('wb-obraz.js', 'wb-seal.js', 'wb-nastaveni.js', 'wb-zvuk.js'):
             out = dest / name
+            if out.exists() and not a.force and b'amiga-re-kit' not in out.read_bytes()[:4096]:
+                kept.append(out)            # the game's own file under a kit name: never overwrite it
+                continue
             shutil.copyfile(web / name, out)
             print('%s  sha256 %s' % (out, hashlib.sha256(out.read_bytes()).hexdigest()))
         print('(wb-obraz %s)' % _wb_version(web))
+        if kept:
+            print('kept, not a kit file (--force overwrites): %s' % ', '.join(str(k) for k in kept))
+            return 1
     elif a.what == 'check':
         from . import seal
         if not a.target:
@@ -939,6 +946,7 @@ def build_parser():
     s.add_argument('--gzip', action='store_true', help='seal: gzip the files before sealing (wb-seal.js inflates)')
     s.add_argument('--port', type=int, default=8920, help='demo: port')
     s.add_argument('--quick', action='store_true', help='test: fewer combinations')
+    s.add_argument('--force', action='store_true', help='copy: overwrite a file under a kit name that is not from the kit')
     s.set_defaults(fn=cmd_web)
 
     s = sp.add_parser('selftest', help='check a VAHeadless build on a synthetic disk: inputs frame by frame, display model, bus model')
@@ -959,7 +967,7 @@ def main(argv=None):
     from .m68k.decoder import Unsupported
     a = build_parser().parse_args(argv)
     try:
-        a.fn(a)
+        rc = a.fn(a)
     except Unsupported as e:
         print('arek %s: refused: %s' % (a.cmd, e), file=sys.stderr)
         return 2
@@ -969,7 +977,7 @@ def main(argv=None):
     except BrokenPipeError:                      # arek ... | head
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return 0
-    return 0
+    return rc if isinstance(rc, int) else 0      # a command's own exit code (web copy kept a file, web check failed)
 
 
 if __name__ == '__main__':
