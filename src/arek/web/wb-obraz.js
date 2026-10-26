@@ -1,22 +1,25 @@
-// wb-obraz.js - reference implementation of the display contract "wb-shell obraz 1.3"
-// (amiga-re-kit, WB-OBRAZ-CRT.md). Whole device pixels per game pixel (S), zoom = window width in
+// wb-obraz.js - reference implementation of the display contract "wb-shell obraz 1.4"
+// (amiga-re-kit, WB-OBRAZ-CRT.md). Whole device pixels per game row (S), zoom = window width in
 // multiples of the Original's width W0, the CRT as a second canvas in device pixels, blur 0.8 game
 // pixel at 100 %, the content placed on a whole device pixel by layout (left/top) - never transform.
+// 1.4: a pixel aspect ratio `par` (PAL lores ~1.015, NTSC lores ~0.857, 1 = square) is applied INSIDE the
+// backing - the picture is W*S*par device pixels wide (contentSize, blit resamples horizontally only), the
+// rows stay exact, the CRT layer still equals the backing. Never stretch a canvas by CSS: that breaks §1-§2.
 // No game data. Works as a <script> (global WBOBRAZ, also globalThis.WBOBRAZ - an ES module that imports
 // nothing can read it there), as CommonJS (require) and in Node for tests.
 // Projects copy this file (`arek web copy DIR`) and keep its sha256 in their docs.
 //
 // Test hooks a page provides for `arek web test URL` (contract §5):
-//   window.wbObrazTest.set(mode, {zoom, crtDetail, crtShape, crt, blur}) -> info
-//       mode 'original' | 'enhanced'; zoom: window width in multiples of W0, 0 = fit; returns
-//       {scale: S, W, H, P, D, origin: [x, y] device px, backing: [w, h], content: [W*S, H*S],
-//        crtLayer: [w, h], crtOrigin: [x, y]}   (Screen.info() gives origin/backing/crtLayer/crtOrigin)
+//   window.wbObrazTest.set(mode, {zoom, crtDetail, crtShape, crt, blur, par}) -> info
+//       mode 'original' | 'enhanced'; zoom: window width in multiples of W0, 0 = fit; par: pixel aspect (1.4,
+//       default 1); returns {scale: S, W, H, P, D, par, origin: [x, y] device px, backing: [w, h],
+//        content: [round(W*S*par), H*S], crtLayer: [w, h], crtOrigin: [x, y]}   (Screen.info() gives origin/backing/crtLayer/crtOrigin)
 //   window.wbObrazTest.fill(kind) -> true      kind 'grey' | 'rows' | 'cols' (testPattern); the pattern must stay
 //       on the canvas until the next set() - a running game must not paint over it (pause it, or hold the pattern)
 // arek web test needs `pip install amiga-re-kit[web]` and `python -m playwright install chromium`.
 'use strict';
 const WBOBRAZ = (() => {
-    const VERSION = '1.3';
+    const VERSION = '1.4';
     const CRT_DETAILS = ['fine', 'standard', 'strong'];
     const CRT_SHAPES = ['lines', 'grid'];
     // 1.3 values (Alien Breed / Turrican II, 2026-10-22: larger steps between the levels)
@@ -30,11 +33,34 @@ const WBOBRAZ = (() => {
     const WORDS = { fit: 'fit', limited: 'limited to', actual: 'actually' };   // games pass their own (Czech: do okna, omezeno na, skutečně)
     const dprNow = () => (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
 
-    /** S, whole device pixels per game pixel (§1). zoom = window width in multiples of w0 (0 = fit), w = logical
-     *  canvas width, limit = the largest CSS px per game pixel that fits. Zoom: round(zoom*w0/w*dpr), fit: floor(limit*dpr). */
-    function deviceScale(zoom, w0, w, dpr, limit) {
+    /** S, whole device pixels per game row (§1). zoom = window width in multiples of w0 (0 = fit), w = logical
+     *  canvas width, limit = the largest CSS px per game pixel that fits (the page computes it with the aspect:
+     *  min(aw / (W * par), ah / H)). Zoom: round(zoom*w0/w*dpr/par), fit: floor(limit*dpr). par (1.4) default 1. */
+    function deviceScale(zoom, w0, w, dpr, limit, par) {
+        par = par > 0 ? par : 1;
         const floor = Math.max(1, Math.floor(limit * dpr + 1e-6));
-        return zoom > 0 ? Math.min(Math.max(1, Math.round(zoom * w0 / w * dpr)), floor) : floor;
+        return zoom > 0 ? Math.min(Math.max(1, Math.round(zoom * w0 / w * dpr / par)), floor) : floor;
+    }
+    /** The game content in device pixels (1.4): [round(W*S*par), H*S] - the aspect stretches the picture horizontally
+     *  inside the backing, rows stay S device pixels each. */
+    function contentSize(W, H, S, par) {
+        par = par > 0 ? par : 1;
+        return [Math.round(W * S * par), H * S];
+    }
+    let blitTmp = null;
+    /** Draw the W x H game picture `src` (a canvas, image or bitmap) into the backing `c` as its content (1.4): every
+     *  game row exactly S device rows; with par = 1 every column exactly S device columns (no smoothing), otherwise the
+     *  columns are resampled horizontally only (a W*S*par x H pass with smoothing, then rows replicated without). */
+    function blit(c, src, W, H, S, par) {
+        const [w, h] = contentSize(W, H, S, par), g = c.getContext('2d');
+        if (w === W * S) { g.imageSmoothingEnabled = false; g.drawImage(src, 0, 0, W, H, 0, 0, w, h); return [w, h]; }
+        if (!blitTmp) blitTmp = (typeof OffscreenCanvas !== 'undefined') ? new OffscreenCanvas(w, H) : document.createElement('canvas');
+        if (blitTmp.width !== w || blitTmp.height !== H) { blitTmp.width = w; blitTmp.height = H; }
+        const t = blitTmp.getContext('2d');
+        t.imageSmoothingEnabled = true; t.imageSmoothingQuality = 'high';
+        t.drawImage(src, 0, 0, W, H, 0, 0, w, H);                                  // horizontal resample at 1 row per row
+        g.imageSmoothingEnabled = false; g.drawImage(blitTmp, 0, 0, w, H, 0, 0, w, h);   // rows replicated S times, exact
+        return [w, h];
     }
     /** Period P and dark band D in device pixels (§2): Original P = max(2, S), D = round(P * row); Enhanced fixed P, D = 1. */
     function crtParams(mode, detail, S) {
@@ -81,13 +107,14 @@ const WBOBRAZ = (() => {
         return from + (to - from) * e;
     }
     const smoothstep = (t) => t * t * (3 - 2 * t);
-    /** The zoom as the player wished it and as whole device pixels made it ("3x - limited to 2.5x"). */
-    function zoomLabel(wish, S, dpr, w0, w, words) {
-        const t = Object.assign({}, WORDS, words || {}), real = S / dpr * w / w0;
+    /** The zoom as the player wished it and as whole device pixels made it ("3x - limited to 2.5x"); par (1.4) default 1. */
+    function zoomLabel(wish, S, dpr, w0, w, words, par) {
+        par = par > 0 ? par : 1;
+        const t = Object.assign({}, WORDS, words || {}), real = S * par / dpr * w / w0;
         const x = (n) => String(+n.toFixed(2)) + '×';
         if (!(wish > 0)) return t.fit + ' (' + x(real) + ')';
         if (Math.abs(real - wish) < .005) return x(wish);
-        return x(wish) + ' · ' + (S < Math.round(wish * w0 / w * dpr) ? t.limited : t.actual) + ' ' + x(real);
+        return x(wish) + ' · ' + (S < Math.round(wish * w0 / w * dpr / par) ? t.limited : t.actual) + ' ' + x(real);
     }
     /** Layout quantum (1.3): a canvas is drawn exactly only when its CSS position and size are whole CSS pixels
      *  (Chromium keeps layout in 1/64 CSS px and paints a half CSS px a device row off - Alien Breed, dpr 2).
@@ -105,25 +132,26 @@ const WBOBRAZ = (() => {
         const q = quantum(dpr), at = (v) => (Math.round(v * dpr / q) * q - v * dpr) / dpr;
         return [at(left), at(top)];
     }
-    /** Fill the W x H game picture (S device pixels per game pixel, top left of the canvas) with a test pattern
-     *  (§5): 'grey' (#808080, §5.4), 'rows' - game row y gets the grey 32 + 24 * (y mod 8), so a doubled or
-     *  missing row shows (§5.4b) - or 'cols', the same per game column. The padding beyond W*S x H*S stays black. */
-    function testPattern(c, kind, W, H, S) {
-        const g = c.getContext('2d');
+    /** Fill the game content (contentSize, top left of the canvas) with a test pattern (§5): 'grey' (#808080,
+     *  §5.4), 'rows' - game row y gets the grey 32 + 24 * (y mod 8), so a doubled or missing row shows (§5.4b) -
+     *  or 'cols', the same per game column (under an aspect the columns are round(x*S*par) wide, crisp, unequal).
+     *  The padding beyond the content stays black. par (1.4) default 1. */
+    function testPattern(c, kind, W, H, S, par) {
+        const [w, h] = contentSize(W, H, S, par), g = c.getContext('2d');
         g.fillStyle = '#000'; g.fillRect(0, 0, c.width, c.height);
-        if (kind === 'grey') { g.fillStyle = '#808080'; g.fillRect(0, 0, W * S, H * S); return; }
+        if (kind === 'grey') { g.fillStyle = '#808080'; g.fillRect(0, 0, w, h); return; }
         if (kind === 'cols') {
             for (let x = 0; x < W; x++) {
-                const v = 32 + 24 * (x % 8);
+                const v = 32 + 24 * (x % 8), x0 = Math.round(x * w / W), x1 = Math.round((x + 1) * w / W);
                 g.fillStyle = 'rgb(' + v + ',' + v + ',' + v + ')';
-                g.fillRect(x * S, 0, S, H * S);
+                g.fillRect(x0, 0, x1 - x0, h);
             }
             return;
         }
         for (let y = 0; y < H; y++) {
             const v = 32 + 24 * (y % 8);
             g.fillStyle = 'rgb(' + v + ',' + v + ',' + v + ')';
-            g.fillRect(0, y * S, W * S, S);
+            g.fillRect(0, y * S, w, S);
         }
     }
 
@@ -169,7 +197,8 @@ const WBOBRAZ = (() => {
         }
     }
     return { VERSION, CRT_DETAILS, CRT_SHAPES, CRT_ROW, CRT_SCREEN, CRT_LINE, CRT_RGB, MODE_MS, VIEW_DEFAULTS, WORDS,
-             deviceScale, crtParams, drawCrt, filter, crtOn, smoothstep, zoomLabel, quantum, padded, snap, testPattern, Screen };
+             deviceScale, contentSize, blit, crtParams, drawCrt, filter, crtOn, smoothstep, zoomLabel, quantum, padded, snap,
+             testPattern, Screen };
 })();
 if (typeof globalThis !== 'undefined') globalThis.WBOBRAZ = WBOBRAZ;
 if (typeof module !== 'undefined') module.exports = WBOBRAZ;

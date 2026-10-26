@@ -26,44 +26,48 @@
 <script>
 'use strict';
 // A game of W x H pixels, Original width W0 = W. Test hooks (arek web test):
-//   wbObrazTest.set(mode, {zoom, detail, shape, crt, blur}) -> info ; wbObrazTest.fill('grey'|'rows'|'picture')
+//   wbObrazTest.set(mode, {zoom, detail, shape, crt, blur, par}) -> info ; wbObrazTest.fill('grey'|'rows'|'cols'|'picture')
 const W = 320, H = 256, W0 = 320, O = WBOBRAZ;
+const pic = document.createElement('canvas'); pic.width = W; pic.height = H;   // the game's own W x H picture (1.4: blit scales it)
 const game = document.querySelector('.game'), screen = document.getElementById('screen'), stage = document.getElementById('stage');
 const scr = new O.Screen(game, screen);
 const state = { mode: 'original', cfg: JSON.parse(JSON.stringify(O.VIEW_DEFAULTS)), pattern: 'picture' };
 
+function par() { const v = state.cfg[state.mode].par; return v > 0 ? v : 1; }
 function limit() {
   const cs = getComputedStyle(stage);
   const aw = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
   const ah = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
-  return Math.min(aw / W, ah / H);
+  return Math.min(aw / (W * par()), ah / H);
 }
 let S = 1;
 function paint() {
-  if (state.pattern === 'picture') {                     // a synthetic picture: checker and colour bars
-    const g = screen.getContext('2d');
-    g.fillStyle = '#000'; g.fillRect(0, 0, screen.width, screen.height);
+  if (state.pattern === 'picture') {                     // a synthetic picture: checker and colour bars, drawn at 1:1 and blitted
+    const g = pic.getContext('2d');
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x += 8) {
       const c = ((x >> 3) + (y >> 3)) & 1 ? '#284878' : '#1a2a40';
       g.fillStyle = (x >> 3) % 10 === 0 ? ['#c33', '#3c3', '#33c', '#cc3', '#c3c', '#3cc', '#ccc', '#333'][(y >> 5) & 7] : c;
-      g.fillRect(x * S, y * S, 8 * S, S);
+      g.fillRect(x, y, 8, 1);
     }
-  } else O.testPattern(screen, state.pattern, W, H, S);
+    const s = screen.getContext('2d'); s.fillStyle = '#000'; s.fillRect(0, 0, screen.width, screen.height);
+    O.blit(screen, pic, W, H, S, par());
+  } else O.testPattern(screen, state.pattern, W, H, S, par());
 }
 function layout() {
   const dpr = window.devicePixelRatio || 1, c = state.cfg[state.mode];
-  S = O.deviceScale(c.zoom, W0, W, dpr, limit());
-  const bw = O.padded(W * S, dpr), bh = O.padded(H * S, dpr);      // the picture is W*S x H*S at the top left
+  S = O.deviceScale(c.zoom, W0, W, dpr, limit(), par());
+  const [cw, ch] = O.contentSize(W, H, S, par());
+  const bw = O.padded(cw, dpr), bh = O.padded(ch, dpr);            // the picture is cw x ch at the top left
   if (screen.width !== bw || screen.height !== bh) { screen.width = bw; screen.height = bh; }
   screen.style.width = bw / dpr + 'px'; screen.style.height = bh / dpr + 'px';
   screen.style.filter = O.filter({ blur: c.blur }, S / dpr);
   paint();
   const pd = scr.crt({ mode: state.mode, detail: c.crtDetail, shape: c.crtShape, S, dpr, w: bw, h: bh, on: c.crt ? 1 : 0 });
   scr.align();
-  document.getElementById('label').textContent = O.zoomLabel(c.zoom, S, dpr, W0, W) + ' · ' + state.mode;
-  return Object.assign(scr.info(), { scale: S, dpr, W, H, P: pd.P, D: pd.D, content: [W * S, H * S] });
+  document.getElementById('label').textContent = O.zoomLabel(c.zoom, S, dpr, W0, W, null, par()) + ' · ' + state.mode;
+  return Object.assign(scr.info(), { scale: S, dpr, W, H, P: pd.P, D: pd.D, par: par(), content: [cw, ch] });
 }
-window.display = () => Object.assign(scr.info(), { scale: S, dpr: window.devicePixelRatio || 1, content: [W * S, H * S] });
+window.display = () => Object.assign(scr.info(), { scale: S, dpr: window.devicePixelRatio || 1, par: par(), content: O.contentSize(W, H, S, par()) });
 window.wbObrazTest = {
   set(mode, cfg) { state.mode = mode; Object.assign(state.cfg[mode], cfg || {}); return layout(); },
   fill(kind) { state.pattern = kind; game.classList.toggle('no-vignette', kind !== 'picture'); paint(); return true; },

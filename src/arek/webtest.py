@@ -1,7 +1,7 @@
 """Display contract tests (WB-OBRAZ-CRT.md §5) in Chromium, for any page with the test hooks.
 
 The page provides ``window.wbObrazTest.set(mode, cfg) -> info`` (cfg: zoom, crtDetail,
-crtShape, crt, blur; info: scale, W, H, P, D, origin, backing, crtLayer, crtOrigin) and
+crtShape, crt, blur, par; info: scale, W, H, P, D, par, origin, backing, content, crtLayer, crtOrigin) and
 ``window.wbObrazTest.fill(kind)`` ('grey', 'rows' - see wb-obraz.js ``testPattern``).
 ``arek web demo`` serves a page that does, built on the reference ``wb-obraz.js``.
 
@@ -10,7 +10,9 @@ crtShape, crt, blur; info: scale, W, H, P, D, origin, backing, crtLayer, crtOrig
 Checks: §5.1-5.3 per dpr x window width x mode x detail x zoom (S whole, backing = W·S,
 CSS size x dpr = backing, content and CRT layer on whole device pixels, P and D);
 §5.4 grey picture with CRT - row brightness exactly periodic with P, columns with 3;
-§5.4b (1.3) a different grey per game row, CRT off - every game row exactly S device rows.
+§5.4b (1.3) a different grey per game row, CRT off - every game row exactly S device rows,
+and every game column exactly S device columns; 1.4: the same layouts with a pixel aspect
+(``par``, PAL lores) - content round(W*S*par) wide, rows still exact, columns not checked.
 Tolerances: Chromium keeps layout in 1/64 CSS px, so positions within 0.05 and sizes within
 0.025 device pixels.
 """
@@ -25,6 +27,7 @@ DETAILS = ('fine', 'standard', 'strong')
 ZOOMS = (1, 1.5, 2, 2.5, 3, 4, 6, 0)
 TOL_POS, TOL_SIZE = 0.05, 0.025
 SCREEN = {'fine': 2, 'standard': 3, 'strong': 4}
+PAR = 1.015                               # PAL lores: the 1.4 aspect the tests use (NTSC lores ~0.857)
 
 
 def png_rgb(data):
@@ -102,11 +105,13 @@ def _crop(rows, x0, y0, w, h):
 
 def check_layout(info, mode, detail, dpr, fails, tag):
     S, W, H = info['scale'], info['W'], info['H']
+    par = info.get('par', 1) or 1
+    cw, ch = round(W * S * par), H * S
     ok = lambda cond, what: cond or fails.append('%s: %s' % (tag, what))
     ok(S == int(S) and S >= 1, 'S %s not whole' % S)
     q = quantum(dpr)
-    ok(info.get('content', info['backing']) == [W * S, H * S], 'content %s != %dx%d' % (info.get('content'), W * S, H * S))
-    ok(all(b >= c and b % q == 0 for b, c in zip(info['backing'], (W * S, H * S))),
+    ok(info.get('content', info['backing']) == [cw, ch], 'content %s != %dx%d (par %s)' % (info.get('content'), cw, ch, par))
+    ok(all(b >= c and b % q == 0 for b, c in zip(info['backing'], (cw, ch))),
        'backing %s not the content rounded up to the layout quantum %d' % (info['backing'], q))
     ok(all(abs(v - round(v)) < TOL_POS and round(v) % q == 0 for v in info['origin']),
        'origin %s not on a multiple of %d device pixels' % (info['origin'], q))
@@ -132,10 +137,12 @@ def run(url, quick=False, log=print):
                 page = ctx.new_page()
                 page.goto(url)
                 page.wait_for_function('window.wbObrazTest')
-                for mode, detail, zoom in itertools.product(MODES, DETAILS, zooms):
-                    info = page.evaluate('([m, d, z]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crt: true, blur: 0})',
-                                         [mode, detail, zoom])
-                    check_layout(info, mode, detail, dpr, fails, 'dpr %s w%d %s/%s zoom %s' % (dpr, width, mode, detail, zoom))
+                for mode, detail, zoom, par in itertools.product(MODES, DETAILS, zooms, (1, PAR)):
+                    if par != 1 and zoom not in (2, 0):
+                        continue
+                    info = page.evaluate('([m, d, z, p]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crt: true, blur: 0, par: p})',
+                                         [mode, detail, zoom, par])
+                    check_layout(info, mode, detail, dpr, fails, 'dpr %s w%d %s/%s zoom %s par %s' % (dpr, width, mode, detail, zoom, par))
                     checks += 1
                 ctx.close()
         log('§5.1-5.3: %d layouts, %d failures' % (checks, len(fails)))
@@ -144,13 +151,15 @@ def run(url, quick=False, log=print):
             page = ctx.new_page()
             page.goto(url)
             page.wait_for_function('window.wbObrazTest')
-            for mode, detail, zoom in itertools.product(MODES, DETAILS, (2, 3, 0) if not quick else (2,)):
-                info = page.evaluate('([m, d, z]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crt: true, blur: 0})',
-                                     [mode, detail, zoom])
+            cases = [(m, d, z, 1) for m, d, z in itertools.product(MODES, DETAILS, (2, 3, 0) if not quick else (2,))]
+            cases += [('enhanced', 'fine', 2, PAR), ('original', 'strong', 0, PAR)]          # 1.4: with an aspect
+            for mode, detail, zoom, par in cases:
+                info = page.evaluate('([m, d, z, p]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crt: true, blur: 0, par: p})',
+                                     [mode, detail, zoom, par])
                 page.evaluate("wbObrazTest.fill('grey')")
                 page.wait_for_timeout(450)
                 sw, sh, rows = png_rgb(page.screenshot())
-                P, tag = info['P'], 'dpr %s %dx%d %s/%s zoom %s S %d' % (dpr, vw, vh, mode, detail, zoom, info['scale'])
+                P, tag = info['P'], 'dpr %s %dx%d %s/%s zoom %s par %s S %d' % (dpr, vw, vh, mode, detail, zoom, par, info['scale'])
                 checks += 1
                 if not _inside(info, sw, sh, '§5.4 ' + tag, fails):
                     continue
@@ -167,8 +176,8 @@ def run(url, quick=False, log=print):
                 if bad or badc:
                     fails.append('§5.4 %s: %d rows, %d columns off the period' % (tag, len(bad), len(badc)))
                 # §5.4b: CRT off, a grey per game row - each game row exactly S device rows
-                info = page.evaluate('([m, d, z]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crt: false, blur: 0})',
-                                     [mode, detail, zoom])
+                info = page.evaluate('([m, d, z, p]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crt: false, blur: 0, par: p})',
+                                     [mode, detail, zoom, par])
                 page.evaluate("wbObrazTest.fill('rows')")
                 page.wait_for_timeout(450)
                 sw, sh, rows = png_rgb(page.screenshot())
@@ -183,7 +192,9 @@ def run(url, quick=False, log=print):
                 if any(r != S for r in runs) or len(runs) != info['H']:
                     odd = [(i, r) for i, r in enumerate(runs) if r != S][:4]
                     fails.append('§5.4b %s: %d game rows seen, rows of other height %s' % (tag, len(runs), odd))
-                # and every game column exactly S device columns (a resampled width shows here)
+                # and every game column exactly S device columns (a resampled width shows here); not with an aspect (1.4)
+                if par != 1:
+                    continue
                 page.evaluate("wbObrazTest.fill('cols')")
                 page.wait_for_timeout(100)
                 sw, sh, rows = png_rgb(page.screenshot())

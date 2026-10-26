@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 2367 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2370 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -93,7 +93,7 @@ arek trace   run build/w.vtr --arm 3 --end 200 --break 0xc01b06 --poke c01b06:c0
 arek selftest inputs                                   # is this VAHeadless frame exact? (synthetic disk)
 
 # 4b. many scenarios at once (arek.parity.suite): state (traces), picture (--shots), sound (--reglog)
-# 5. the web page: display contract wb-shell obraz 1.3 (WB-OBRAZ-CRT.md)
+# 5. the web page: display contract wb-shell obraz 1.4 (WB-OBRAZ-CRT.md)
 arek web copy web/                                     # the reference wb-obraz.js into the game's page
 arek web demo                                          # a page built on it (http://127.0.0.1:8920/demo.html)
 arek web test http://localhost:8911/?test=1            # §5.1-5.4b in Chromium (needs playwright)
@@ -126,7 +126,7 @@ asks for (see `examples/profile.example.json`).
 | `arek.packers.scan` | brute-force scan: signatures (PP20, RNC, ATN!, IMP!, …) + verified blocks | S.W.I.V. |
 | `arek.hunk` | bounded HUNK reader: CODE/DATA/BSS, RELOC32, split streams; `build()` for probes | Superfrog |
 | `arek.copper` | copper list disassembler with custom register names | S.W.I.V. |
-| `arek.webtest`, `web/wb-obraz.js` | display contract 1.3: reference module (whole device pixels, CRT canvas, layout quantum of Chromium's 1/64 px), demo page, Chromium tests incl. the row test | Turrican II, Alien Breed, Superfrog (Sonnet) |
+| `arek.webtest`, `web/wb-obraz.js` | display contract 1.4: reference module (whole device pixels, CRT canvas, layout quantum of Chromium's 1/64 px), demo page, Chromium tests incl. the row test | Turrican II, Alien Breed, Superfrog (Sonnet) |
 | `arek.m68k.cover`, `arek.fuzz` | coverage of a translation run (`recomp --cover`: one bit per translated instruction, `arek cover` lists what never ran) and deterministic random joystick input (`arek fuzz`, one file for `trace run --inputs` and the rebuild) - where a long random run stalls, a bug hides | Superfrog |
 | `arek.bus` (`src/arek/bus/*.c`) | the Amiga bus per DMA slot: who owns each slot, the blitter cycle by cycle, the CPU by the accesses of its instructions - on which instruction an interrupt lands, when a blit ends, whether the original overran the frame; `arek_bus_vamiga.c` is MPL-2.0 (derived from vAmiga) | Alien Breed |
 | `arek.m68k.timing.bus` | bus cycles n(r/w) of every instruction, opcode and extension words included - what a model of the Amiga bus per DMA slot needs beyond the clock count | Alien Breed |

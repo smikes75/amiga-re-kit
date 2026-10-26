@@ -1,4 +1,4 @@
-"""The reference wb-obraz.js (display contract 1.3): its pure functions in Node, the package
+"""The reference wb-obraz.js (display contract 1.4): its pure functions in Node, the package
 files, `arek web copy`. The browser checks (arek web test) need Chromium and run separately."""
 import hashlib
 import json
@@ -22,11 +22,28 @@ def js(expr):
 
 
 def test_version_and_scale():
-    assert js('O.VERSION') == '1.3'
+    assert js('O.VERSION') == '1.4'
     assert js('O.deviceScale(2, 320, 320, 1.25, 10)') == 3          # round(2 * 1.25)
     assert js('O.deviceScale(2, 336, 448, 2, 10)') == 3             # wider window: zoom counts in W0
     assert js('O.deviceScale(6, 320, 320, 2, 2.4)') == 4            # limited by the window
     assert js('O.deviceScale(0, 320, 320, 1.5, 2.4)') == 3          # fit: floor(2.4 * 1.5)
+    # 1.4: an aspect divides the zoom (the picture is wider), fit is the page's limit as before
+    assert js('O.deviceScale(2, 320, 320, 2, 10, 1.015)') == 4 and js('O.deviceScale(3, 320, 320, 1, 10, 1.5)') == 2
+    assert js('O.deviceScale(0, 320, 320, 1, 2.9, 1.5)') == 2 and js('O.deviceScale(2, 320, 320, 1, 10, 0)') == 2
+
+
+def test_content_size_and_patterns_with_an_aspect():
+    assert js('O.contentSize(320, 256, 3, 1)') == [960, 768] and js('O.contentSize(320, 256, 3, 1.015)') == [974, 768]
+    assert js('O.contentSize(320, 200, 2, 0.857)') == [548, 400] and js('O.contentSize(320, 256, 3)') == [960, 768]
+    # a fake canvas records the fills: rows stay S high and content wide, columns are round(x*S*par) wide and crisp
+    rects = js("""(() => { const rects = []; const c = { width: 40, height: 8, getContext: () => ({ fillRect(x, y, w, h) {
+        rects.push([this.fillStyle, x, y, w, h]); } }) };
+        O.testPattern(c, 'rows', 8, 2, 2, 1.5); O.testPattern(c, 'cols', 8, 2, 2, 1.25); return rects; })()""")
+    rows = [r for r in rects if r[0].startswith('rgb(') and r[3] == 24]
+    assert [r[1:] for r in rows] == [[0, 0, 24, 2], [0, 2, 24, 2]] and [r[0] for r in rows] == ['rgb(32,32,32)', 'rgb(56,56,56)']
+    cols = [r for r in rects if r[0].startswith('rgb(') and r[4] == 4]
+    assert [(r[1], r[3]) for r in cols] == [(0, 3), (3, 2), (5, 3), (8, 2), (10, 3), (13, 2), (15, 3), (18, 2)]   # 20 px over 8 columns
+    assert sum(r[3] for r in cols) == 20
 
 
 def test_layout_quantum():
@@ -57,6 +74,23 @@ def test_crt_params_and_drawing():
     assert [2, 0, 2, 2] in grid and [0, 2, 8, 2] in grid               # a column end and a row
 
 
+def test_zoom_label_with_an_aspect():
+    assert js("O.zoomLabel(2, 4, 2, 320, 320, null, 1)") == '2×'
+    assert js("O.zoomLabel(2, 4, 2, 320, 320, null, 1.5)") == '2× · actually 3×'
+    assert js("O.zoomLabel(0, 2, 1, 320, 320, null, 1.5)") == 'fit (3×)'
+
+
+def test_check_layout_with_an_aspect():
+    fails = []
+    info = {'scale': 3, 'W': 320, 'H': 256, 'par': 1.015, 'content': [974, 768], 'backing': [974, 768], 'origin': [10, 20],
+            'crtLayer': [974, 768], 'crtOrigin': [10, 20], 'P': 2, 'D': 1}
+    webtest.check_layout(info, 'enhanced', 'fine', 1, fails, 't')
+    assert fails == []
+    info['content'] = [960, 768]
+    webtest.check_layout(info, 'enhanced', 'fine', 1, fails, 't')
+    assert fails and 'content' in fails[0] and 'par 1.015' in fails[0]
+
+
 def test_filter_and_labels():
     assert js("O.filter({blur: 0}, 2)") == 'none'
     assert js("O.filter({blur: 20, brightness: 110}, 1.5)") == 'brightness(1.100) blur(0.24px)'
@@ -70,7 +104,7 @@ def test_web_copy_and_package_files(tmp_path, capsys):
     assert cli.main(['web', 'copy', str(tmp_path / 'web')]) == 0
     out = capsys.readouterr().out
     data = (tmp_path / 'web' / 'wb-obraz.js').read_bytes()
-    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.3' in out
+    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.4' in out
 
 
 def test_png_decoder_reads_the_kits_png():
