@@ -60,17 +60,22 @@ const WBNASTAVENI = (() => {
     };
 
     /** The default of an item for a mode: the game's override (spec.defaults[section][mode][id]) wins. */
-    function defaults(section, mode, over) {
+    function defaults(section, mode, over, snap) {
         const out = {}, o = (over && over[section] && over[section][mode]) || {};
         for (const it of ITEMS[section]) {
             const d = it.def !== null && typeof it.def === 'object' ? it.def[mode] : it.def;
-            out[it.id] = it.id in o ? coerce(it, o[it.id]) : d;
+            out[it.id] = it.id in o ? coerce(it, o[it.id], snap) : d;
         }
         return out;
     }
-    /** A value into the item's domain (range clamped and rounded to the step, options checked, booleans). */
-    function coerce(it, v) {
+    /** A value into the item's domain (range clamped and rounded to the step, options checked, booleans). With zoom
+     *  snapping (snap = true) the zoom is any number 0..the largest option: the exact steps are the page's, snapZoom picks. */
+    function coerce(it, v, snap) {
         if (it.kind === 'check') return !!v && v !== 'false' && v !== '0';
+        if (snap && it.id === 'zoom') {
+            const n = Number(v), top = Math.max(...it.options);
+            return isFinite(n) ? Math.min(top, Math.max(0, n)) : it.options[0];
+        }
         if (it.kind === 'select') {
             const found = it.options.find((o) => String(o) === String(v));
             return found === undefined ? it.options[0] : found;
@@ -82,9 +87,9 @@ const WBNASTAVENI = (() => {
         return +(it.min + steps * it.step).toFixed(6);
     }
     /** Stored values (any shape) merged over the defaults: unknown ids dropped, every value coerced. */
-    function merge(section, mode, stored, over) {
-        const out = defaults(section, mode, over), s = (stored && stored[mode] && stored[mode][section]) || {};
-        for (const it of ITEMS[section]) if (it.id in s) out[it.id] = coerce(it, s[it.id]);
+    function merge(section, mode, stored, over, snap) {
+        const out = defaults(section, mode, over, snap), s = (stored && stored[mode] && stored[mode][section]) || {};
+        for (const it of ITEMS[section]) if (it.id in s) out[it.id] = coerce(it, s[it.id], snap);
         return out;
     }
 
@@ -99,7 +104,8 @@ const WBNASTAVENI = (() => {
             this.mode = MODES.includes(this.spec.mode) ? this.spec.mode : 'original';
             const stored = this.load();
             this.state = {};
-            for (const m of MODES) this.state[m] = { display: merge('display', m, stored, this.spec.defaults), sound: merge('sound', m, stored, this.spec.defaults) };
+            const snap = this.spec.zoom === 'snap';     // a stored exact zoom (e.g. 2 * 448 / 293) survives a reload; refreshZoom snaps it
+            for (const m of MODES) this.state[m] = { display: merge('display', m, stored, this.spec.defaults, snap), sound: merge('sound', m, stored, this.spec.defaults) };
             if (stored && MODES.includes(stored.mode) && !this.spec.mode) this.mode = stored.mode;
             this.controls = { display: {}, sound: {} }; this.extras = {};
             if (host) this.render();
@@ -191,7 +197,7 @@ const WBNASTAVENI = (() => {
             this.refresh(); this.save(); this.emit(section);
         }
         reset(section) {
-            for (const sec of section ? [section] : ['display', 'sound']) this.state[this.mode][sec] = defaults(sec, this.mode, this.spec.defaults);
+            for (const sec of section ? [section] : ['display', 'sound']) this.state[this.mode][sec] = defaults(sec, this.mode, this.spec.defaults, sec === 'display' && this.spec.zoom === 'snap');
             this.refresh(); this.save(); this.emit(section || 'all');
         }
         on(ev, fn) { this.listeners.push([ev, fn]); return this; }

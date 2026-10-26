@@ -84,6 +84,14 @@ def test_menu_zoom_snap():
     assert snap("(m.set('display', 'zoom', '0'), m.get('display').zoom)") == 0                                    # fit
     assert snap("(m.set('display', 'zoom', 2.6), [m.zoomSteps(), m.get('display').zoom])", "{}") == [[], 1]      # no snapping: coerce as before
     assert snap("m.snapZoom(2.4)", "{zoom: 'snap'}") == 2.4                                                      # snap without steps: unchanged
+    # an exact zoom survives a reload (Alien Breed K2: 2 * 448 / 293 fell back to options[0] = 1 in 0.6.2)
+    r = js("""(() => { const box = {}; globalThis.localStorage = { getItem: (k) => box[k] ?? null, setItem: (k, v) => { box[k] = String(v); } };
+        const steps = () => [1, 2, 3].map((S) => S * 448 / 293), spec = {zoom: 'snap', zoomSteps: steps, store: 'g', mode: 'enhanced'};
+        new M.Menu(null, spec).set('display', 'zoom', 3.05802);
+        const m = new M.Menu(null, spec), before = m.getMode('enhanced', 'display').zoom; m.refreshZoom();
+        const plain = new M.Menu(null, {store: 'g', mode: 'enhanced'});
+        return [before, m.get('display').zoom, plain.get('display').zoom, M.coerce(M.ITEMS.display[0], 9, true), M.coerce(M.ITEMS.display[0], 'x', true)]; })()""")
+    assert abs(r[0] - 2 * 448 / 293) < 1e-9 and abs(r[1] - 2 * 448 / 293) < 1e-9 and r[2] == 1 and r[3] == 6 and r[4] == 1
 
 
 def test_package_files_and_copy(tmp_path, capsys):
