@@ -240,3 +240,33 @@ def test_selftest_bus_disk_and_registers():
     assert cop == bytes.fromhex('01005200')                                 # BPLCON0 = 5 planes lores, the copper's first move
     assert selftest.BUS_REGS[0x096] & 0x0400 and selftest.BUS_REGS[0x122] == selftest.BUS_SPR0 & 0xffff
     assert pay[selftest.BUS_SPR0 - 0x40000:selftest.BUS_SPR0 - 0x40000 + 4] == bytes.fromhex('50807000')
+
+
+def test_blit_words_are_not_cpu_accesses(tmp_path):
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    # lea $dff000,a6 ; move.l #$10000,$50(a6) ; move.l #$20000,$54(a6) ; move.w #$09f0,$40(a6) ; clr.w $42(a6)
+    # move.w #-1,$44(a6) ; move.w #-1,$46(a6) ; clr.w $64(a6) ; clr.w $66(a6) ; move.w #$0814,$58(a6) ; rts   (32 x 20 words A->D)
+    prog = bytes.fromhex('4df900dff000 2d7c000100000050 2d7c000200000054 3d7c09f00040 426e0042 3d7cffff0044 3d7cffff0046 426e0064 426e0066 3d7c08140058 4e75'.replace(' ', ''))
+    base = 0x1000
+    src, _, _ = recomp.generate(prog, base, auto=[base], with_main=True, timing=True, bus_table=True)
+    glue = '''
+#include "arek_bus_glue.h"
+static uint8_t OWN[313 * 227]; static uint16_t REGS[0x100];
+static uint16_t rd(void *c, uint32_t a) { (void)c; return (uint16_t)((MEM[a & 0x7fffe] << 8) | MEM[(a & 0x7fffe) + 1]); }
+__attribute__((constructor)) static void init(void) { arek_glue_init(227, 312, 313, OWN, REGS, rd, 0); REGS[0x096 >> 1] = 0x82c0; }
+'''
+    c, exe = tmp_path / 'r.c', tmp_path / 'r'
+    c.write_text(src + glue)
+    subprocess.run([cc, '-O1', '-DTICK_HOOK', '-DBUS_HOOK', '-I', HERE, '-o', str(exe), str(c),
+                    os.path.join(HERE, 'arek_bus.c'), os.path.join(HERE, 'arek_bus_vamiga.c')], check=True)
+    ram = bytearray(0x80000)
+    ram[base:base + len(prog)] = prog
+    (tmp_path / 'ram.bin').write_bytes(ram)
+    (tmp_path / 'regs.txt').write_text(' '.join(['0'] * 15 + ['7ff00']) + '\n0 0 0 0 0\nf_001000\n')
+    log = tmp_path / 'log.txt'
+    subprocess.run([str(exe), str(tmp_path / 'ram.bin'), str(tmp_path / 'regs.txt'), str(tmp_path / 'out.bin'), str(log)], check=True)
+    text = log.read_text()
+    t = float([l for l in text.splitlines() if l.startswith('bus')][0].split()[1])
+    assert 'blits 1' in text and t < 120, t          # 11 instructions, not 640 blitted words as CPU accesses

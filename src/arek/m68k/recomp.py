@@ -264,12 +264,12 @@ static uint32_t rd8_raw(uint32_t a) {
     return *p;
 }
 static uint32_t rd8(uint32_t a) { BUS_ACCESS(a); return rd8_raw(a); }
-static uint32_t rd16(uint32_t a) {
-    BUS_ACCESS(a);
+static uint32_t rd16_raw(uint32_t a) {   /* the blitter's own reads (run_blit) go through here: they are not CPU accesses */
     if (CUSTOM(a)) return hw_read(a & 0x1fe);
     if (a + 1 < MEMSZ) return (MEM[a] << 8) | MEM[a + 1];
     return (rd8_raw(a) << 8) | rd8_raw(a + 1);
 }
+static uint32_t rd16(uint32_t a) { BUS_ACCESS(a); return rd16_raw(a); }
 static uint32_t rd32(uint32_t a) { return (rd16(a) << 16) | rd16(a + 2); }
 static void wr8_raw(uint32_t a, uint32_t v) {
     if (CUSTOM(a)) { v &= 0xff; hw_write(a & 0x1fe, (v << 8) | v); return; }   /* 68000: the byte on both halves of the bus */
@@ -283,11 +283,11 @@ static void wr8_raw(uint32_t a, uint32_t v) {
 #endif
 }
 static void wr8(uint32_t a, uint32_t v) { BUS_ACCESS(a); wr8_raw(a, v); }
-static void wr16(uint32_t a, uint32_t v) {
-    BUS_ACCESS(a);
+static void wr16_raw(uint32_t a, uint32_t v) {
     if (CUSTOM(a)) { hw_write(a & 0x1fe, v); return; }
     wr8_raw(a, v >> 8); wr8_raw(a + 1, v);
 }
+static void wr16(uint32_t a, uint32_t v) { BUS_ACCESS(a); wr16_raw(a, v); }
 static void wr32(uint32_t a, uint32_t v) { wr16(a, v >> 16); wr16(a + 2, v); }
 
 /* Blitter v rezimu oblasti: A/B/C -> D podle minterm tabulky (BLTCON0 bity 7-0),
@@ -327,7 +327,7 @@ static void run_blit_line(void) {
     uint32_t cpt = bltptr(0x048), dpt = bltptr(0x054);
     BZERO = 1; BLITS++;
     for (int i = 0; i < h; i++) {
-        uint16_t c = rd16(cpt), a = (uint16_t)(adat >> sh), b = (lb & 1) ? 0xffff : 0;
+        uint16_t c = rd16_raw(cpt), a = (uint16_t)(adat >> sh), b = (lb & 1) ? 0xffff : 0;
         uint16_t d = minterm(lf, a, b, c);
         int pix = !sing || !onedot; onedot = 1;
         #define LX_INC() do { if (++sh == 16) { sh = 0; cpt += 2; } } while (0)
@@ -339,7 +339,7 @@ static void run_blit_line(void) {
         if (con1 & 0x10) { if (con1 & 0x04) LX_DEC(); else LX_INC(); } else { if (con1 & 0x04) LY_DEC(); else LY_INC(); }
         sign = err < 0;
         lb = (uint16_t)((lb << 1) | (lb >> 15));
-        if (pix) { wr16(dpt, d); if (d) BZERO = 0; }
+        if (pix) { wr16_raw(dpt, d); if (d) BZERO = 0; }
         dpt = cpt;
         #undef LX_INC
         #undef LX_DEC
@@ -373,9 +373,9 @@ static void run_blit(void) {
     for (int y = 0; y < h; y++) {
         uint32_t aold = 0, bold = 0; int fc = (con1 >> 2) & 1;
         for (int x = 0; x < w; x++) {
-            uint32_t adat = usea ? rd16(apt) : CREG[0x074 >> 1];
-            uint32_t bdat = useb ? rd16(bpt) : CREG[0x072 >> 1];
-            uint32_t cdat = usec ? rd16(cpt) : CREG[0x070 >> 1];
+            uint32_t adat = usea ? rd16_raw(apt) : CREG[0x074 >> 1];
+            uint32_t bdat = useb ? rd16_raw(bpt) : CREG[0x072 >> 1];
+            uint32_t cdat = usec ? rd16_raw(cpt) : CREG[0x070 >> 1];
             if (x == 0) adat &= afwm;
             if (x == w - 1) adat &= alwm;
             uint32_t as, bs;
@@ -394,7 +394,7 @@ static void run_blit(void) {
                 d = o;
             }
             if (d) BZERO = 0;
-            if (used) wr16(dpt, d);
+            if (used) wr16_raw(dpt, d);
             if (usea) apt += step;
             if (useb) bpt += step;
             if (usec) cpt += step;
@@ -992,11 +992,11 @@ class Gen:
                     tgt = 'm->%s[%d]' % (kind, rg)
                     if i.mode == 4:
                         L.append('ma%06x -= %d;' % (i.addr, step))
-                        L.append(('wr16(ma%06x, %s);' if i.sz == SZ_W else 'wr32(ma%06x, %s);')
+                        L.append(('wr16_raw(ma%06x, %s);' if i.sz == SZ_W else 'wr32(ma%06x, %s);')
                                  % (i.addr, tgt))
                     else:
                         if i.sz == SZ_W:
-                            L.append('%s = (uint32_t)(int32_t)(int16_t)rd16(ma%06x);' % (tgt, i.addr))
+                            L.append('%s = (uint32_t)(int32_t)(int16_t)rd16_raw(ma%06x);' % (tgt, i.addr))
                         else:
                             L.append('%s = rd32(ma%06x);' % (tgt, i.addr))
                         L.append('ma%06x += %d;' % (i.addr, step))
@@ -1011,16 +1011,16 @@ class Gen:
                         continue
                     tgt = 'm->%s[%d]' % (kind, rg)
                     if i.to_mem:
-                        L.append((('wr16(ma%06x + %d, %s);' if i.sz == SZ_W
+                        L.append((('wr16_raw(ma%06x + %d, %s);' if i.sz == SZ_W
                                    else 'wr32(ma%06x + %d, %s);')) % (i.addr, off, tgt))
                     elif i.sz == SZ_W:   # cteni .w se vzdy rozsiruje znamenkem do 32 bitu
-                        L.append('%s = (uint32_t)(int32_t)(int16_t)rd16(ma%06x + %d);'
+                        L.append('%s = (uint32_t)(int32_t)(int16_t)rd16_raw(ma%06x + %d);'
                                  % (tgt, i.addr, off))
                     else:
                         L.append('%s = rd32(ma%06x + %d);' % (tgt, i.addr, off))
                     off += step
         elif k == 'rte':
-            L.append('{ uint32_t sp = m->a[7]; uint32_t sr = rd16(sp);')
+            L.append('{ uint32_t sp = m->a[7]; uint32_t sr = rd16_raw(sp);')
             L.append('  m->srhi = sr & 0xff00; m->x = (sr >> 4) & 1; m->n = (sr >> 3) & 1;')
             L.append('  m->z = (sr >> 2) & 1; m->v = (sr >> 1) & 1; m->c = sr & 1;')
             L.append('  m->a[7] = sp + 6; }')
@@ -1105,7 +1105,7 @@ class Gen:
             if i.addr in self.flow.indirect:
                 if mode in FLOW_MODES:                     # the program rewrites the operand
                     t = ('rd32(0x%xu)' % (i.addr + 2)) if i.end - i.addr == 6 else \
-                        ('(uint32_t)(int16_t)rd16(0x%xu)' % (i.addr + 2))
+                        ('(uint32_t)(int16_t)rd16_raw(0x%xu)' % (i.addr + 2))
                 else:
                     t = i.ea.addr
                 L.append('{ uint32_t t = %s; switch (t) {' % t)
