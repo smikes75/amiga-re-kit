@@ -24,7 +24,7 @@ Kickstart ROM stay on your machine, referenced from a git-ignored
 
 ```sh
 pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 2372 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2376 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -101,6 +101,8 @@ arek web seal build/present/engine.wasm --set disk1.adf --label "disk 1, retail"
 arek web seal build/present/engine.wasm --payload build/payload.bin --payload-label "the game files" --out build/present/sealed  # any disk version with the same game data opens it
 arek web check build/present                           # a bundle: no game data, derived files sealed, manifest right
 arek parity  suite.json                                # scenarios against the original: state, picture, sound per tick
+arek web copy web/                                     # also wb-menu.js (the shared Display / Sound menu) and wb-zvuk.js (sound contract 1.0)
+arek web test http://localhost:8911/?test=1            # ... and §6: the menu and the sound contract, when the page has the hooks
 
 # 6. time inside the frame: the bus model per DMA slot (docs/BUS.md)
 arek bus     copy lib/                                 # the model's C sources into a rebuild (arek_bus_glue.h behind the translation's hooks)
@@ -130,6 +132,7 @@ asks for (see `examples/profile.example.json`).
 | `arek.m68k.cover`, `arek.fuzz` | coverage of a translation run (`recomp --cover`: one bit per translated instruction, `arek cover` lists what never ran) and deterministic random joystick input (`arek fuzz`, one file for `trace run --inputs` and the rebuild) - where a long random run stalls, a bug hides | Superfrog |
 | `arek.bus` (`src/arek/bus/*.c`) | the Amiga bus per DMA slot: who owns each slot, the blitter cycle by cycle, the CPU by the accesses of its instructions - on which instruction an interrupt lands, when a blit ends, whether the original overran the frame; `arek_bus_vamiga.c` is MPL-2.0 (derived from vAmiga) | Alien Breed |
 | `arek.m68k.timing.bus` | bus cycles n(r/w) of every instruction, opcode and extension words included - what a model of the Amiga bus per DMA slot needs beyond the clock count | Alien Breed |
+| `web/wb-menu.js`, `web/wb-zvuk.js` | the shared Display / Sound menu of the rebuilds (same ids, ranges, defaults per mode, storage; the game adds its items and texts) and the sound contract 1.0: one stereo-width rule, 20 ms gain ramps, the Amiga 500's filters, test hooks for `arek web test` §6 | Alien Breed, Superfrog |
 | `arek.seal`, `web/wb-seal.js` | code derived from a game on a public page, encrypted (AES-GCM) under a key computed from the contents of the original disk, or from the game's own content as the page's loader rebuilds it (a payload key: every disk version with the same game files opens it); opened in the browser with WebCrypto | presentation pages |
 | `arek.parity` | long parity: record by record against the original's trace (first difference, addresses, phase shift); traces packed as XOR + zlib | Alien Breed, Turrican II, Superfrog (Sonnet) |
 | `arek.display` | the frame chip RAM shows: Copper timing, bitplanes, dual playfield, EHB, sprites; vAmiga's colours; 0 differing pixels on vAmiga screenshots (`arek selftest display`) | Superfrog (Sonnet), Alien Breed, Turrican II |

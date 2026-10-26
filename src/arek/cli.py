@@ -462,7 +462,7 @@ def cmd_web(a):
     if a.what == 'copy':
         dest = Path(a.target or '.')
         dest.mkdir(parents=True, exist_ok=True)
-        for name in ('wb-obraz.js', 'wb-seal.js'):
+        for name in ('wb-obraz.js', 'wb-seal.js', 'wb-menu.js', 'wb-zvuk.js'):
             out = dest / name
             shutil.copyfile(web / name, out)
             print('%s  sha256 %s' % (out, hashlib.sha256(out.read_bytes()).hexdigest()))

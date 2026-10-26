@@ -17,12 +17,19 @@
                  transition: opacity .36s ease-in-out; box-shadow: inset 0 0 42px rgba(0, 0, 0, var(--crt-edge, .5)); }
   .game.no-vignette::after { display: none; }
   .game[data-crt=fine] { --crt-edge: .25 } .game[data-crt=standard] { --crt-edge: .5 } .game[data-crt=strong] { --crt-edge: .65 }
+  #menu { position: absolute; top: 32px; right: 0; width: 320px; max-height: calc(100% - 32px); overflow: auto; background: #16161c; padding: 8px 12px; box-sizing: border-box; }
+  .wb-menu fieldset { border: 1px solid #333; margin: 0 0 8px; padding: 6px 8px; } .wb-menu legend { color: #fff; }
+  .wb-menu-row { display: grid; grid-template-columns: 1fr 120px 36px; gap: 6px; align-items: center; margin: 4px 0; }
+  .wb-menu-defaults { margin-top: 6px; }
 </style>
 </head>
 <body>
-<div id="bar"><span id="label"></span></div>
+<div id="bar"><span id="label"></span><button id="menu-toggle" type="button">Menu</button><button id="sound-test" type="button">Test sound</button></div>
 <div id="stage"><div class="game"><canvas id="screen"></canvas><canvas class="crt-layer" aria-hidden="true"></canvas></div></div>
+<div id="menu" hidden></div>
 <script src="wb-obraz.js"></script>
+<script src="wb-menu.js"></script>
+<script src="wb-zvuk.js"></script>
 <script>
 'use strict';
 // A game of W x H pixels, Original width W0 = W. Test hooks (arek web test):
@@ -71,6 +78,31 @@ window.display = () => Object.assign(scr.info(), { scale: S, dpr: window.deviceP
 window.wbObrazTest = {
   set(mode, cfg) { state.mode = mode; Object.assign(state.cfg[mode], cfg || {}); return layout(); },
   fill(kind) { state.pattern = kind; game.classList.toggle('no-vignette', kind !== 'picture'); paint(); return true; },
+};
+// the shared menu (wb-menu.js): its Display values drive this page's cfg, its Sound values the sound chain
+const menu = WBMENU.build(document.getElementById('menu'), { lang: 'en' });
+function fromMenu(st) {
+  const d = st.display;
+  state.cfg[st.mode] = { zoom: d.zoom, crt: d.crt, crtDetail: d['crt-detail'], crtShape: d['crt-shape'], blur: d.blur, par: d.par };
+  if (state.mode === st.mode) layout();
+  if (zvuk) WBZVUK.apply(zvuk, toSound(st.sound), false);
+}
+const toSound = (so) => ({ on: so.sound, volume: so.volume, stereo: so.stereo, filterFixed: so['filter-fixed'], filterLed: so['filter-led'], filterHp: so['filter-hp'] });
+menu.on('change', fromMenu);
+document.getElementById('menu-toggle').addEventListener('click', () => { const m = document.getElementById('menu'); m.hidden = !m.hidden; });
+let zvuk = null, osc = null;
+document.getElementById('sound-test').addEventListener('click', () => {           // a user gesture: a short test tone through the chain
+  const ctx = new AudioContext(); zvuk = WBZVUK.chain(ctx); WBZVUK.apply(zvuk, toSound(menu.get('sound')), false, 0);
+  const src = ctx.createBufferSource(), sig = WBZVUK.testSignal(ctx.sampleRate, ctx.sampleRate), buf = ctx.createBuffer(2, sig.l.length, ctx.sampleRate);
+  buf.copyToChannel(sig.l, 0); buf.copyToChannel(sig.r, 1); src.buffer = buf; src.connect(zvuk.input); src.start();
+});
+const SIG = WBZVUK.testSignal(4096, 44100);
+window.wbMenuTest = menu.testHooks();
+window.wbZvukTest = {
+  version: WBZVUK.VERSION,
+  signal: () => ({ l: Array.from(SIG.l), r: Array.from(SIG.r) }),
+  render: (settings, led) => WBZVUK.render(settings, !!led, SIG, 44100),
+  reference: (settings, led) => { const [l, r] = WBZVUK.process(SIG.l, SIG.r, settings, !!led, 44100); return { l: Array.from(l), r: Array.from(r) }; },
 };
 addEventListener('resize', layout);
 layout();

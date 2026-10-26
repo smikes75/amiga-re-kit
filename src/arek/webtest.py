@@ -10,6 +10,9 @@ crtShape, crt, blur, par; info: scale, W, H, P, D, par, origin, backing, content
 Checks: §5.1-5.3 per dpr x window width x mode x detail x zoom (S whole, backing = W·S,
 CSS size x dpr = backing, content and CRT layer on whole device pixels, P and D);
 §5.4 grey picture with CRT - row brightness exactly periodic with P, columns with 3;
+§6 (1.0, MENU-ZVUK.md): the shared menu (ids, values per mode, defaults, clamping) and the sound
+contract (identity at 100 %, mono at 0 %, the mix rule, volume, the filters against the reference
+``WBZVUK.process``) when the page has ``wbMenuTest`` and ``wbZvukTest``.
 §5.4b (1.3) a different grey per game row, CRT off - every game row exactly S device rows,
 and every game column exactly S device columns; 1.4: the same layouts with a pixel aspect
 (``par``, PAL lores) - content round(W*S*par) wide, rows still exact, columns not checked.
@@ -204,6 +207,68 @@ def run(url, quick=False, log=print):
                     odd = [(i, r) for i, r in enumerate(runs) if r != S][:4]
                     fails.append('§5.4b %s: %d game columns seen, columns of other width %s' % (tag, len(runs), odd))
             ctx.close()
+        # §6 (1.0): the shared menu and the sound contract, when the page has the hooks
+        ctx = br.new_context(viewport={'width': 1280, 'height': 900})
+        page = ctx.new_page()
+        page.goto(url)
+        page.wait_for_function('window.wbObrazTest')
+        if page.evaluate('!!(window.wbMenuTest && window.wbZvukTest)'):
+            n6 = check_menu_and_sound(page, fails)
+            checks += n6
+            log('§6 menu and sound: %d checks, %d failures so far' % (n6, len(fails)))
+        else:
+            log('§6 skipped: the page has no wbMenuTest / wbZvukTest hooks')
+        ctx.close()
         br.close()
     log('§5.4/5.4b done: %d checks, %d failures' % (checks, len(fails)))
     return {'checks': checks, 'fails': fails}
+
+
+MENU_IDS = ['wb-zoom', 'wb-crt', 'wb-crt-detail', 'wb-crt-shape', 'wb-blur', 'wb-brightness', 'wb-contrast', 'wb-saturation',
+            'wb-par', 'wb-smooth', 'wb-sound', 'wb-volume', 'wb-filter-fixed', 'wb-filter-led', 'wb-filter-hp', 'wb-stereo',
+            'wb-defaults-display', 'wb-defaults-sound']
+FLAT = {'volume': 100, 'stereo': 100, 'filterFixed': False, 'filterLed': 'off', 'filterHp': False}
+
+
+def _maxdiff(a, b):
+    return max(abs(x - y) for x, y in zip(a, b)) if a and b and len(a) == len(b) else float('inf')
+
+
+def check_menu_and_sound(page, fails):
+    """§6: menu ids and per-mode values (wbMenuTest), the sound contract (wbZvukTest): identity, mono, the mix rule,
+    volume, filters against the reference `process`. Returns the number of checks."""
+    n = 0
+    ok = lambda cond, what: cond or fails.append('§6 %s' % what)
+    missing = page.evaluate('(ids) => ids.filter((i) => !document.getElementById(i))', MENU_IDS)
+    ok(not missing, 'menu ids missing: %s' % missing); n += 1
+    page.evaluate("wbMenuTest.setMode('original'); wbMenuTest.reset(); wbMenuTest.setMode('enhanced'); wbMenuTest.reset()")
+    page.evaluate("wbMenuTest.set('sound', 'stereo', 30); wbMenuTest.set('display', 'par', 1.07)")
+    o = page.evaluate("wbMenuTest.getMode('original', 'sound')")
+    e = page.evaluate("wbMenuTest.getMode('enhanced', 'sound')")
+    ok(o['stereo'] == 100 and e['stereo'] == 30, 'a change in enhanced touched original: %s / %s' % (o['stereo'], e['stereo'])); n += 1
+    ok(page.evaluate("wbMenuTest.getMode('original', 'display').par") == 1 and page.evaluate("wbMenuTest.getMode('enhanced', 'display').par") == 1.07,
+       'pixel width not per mode'); n += 1
+    r = page.evaluate("wbMenuTest.reset('sound')")
+    ok(r['stereo'] == 70 and page.evaluate("wbMenuTest.getMode('original', 'sound').stereo") == 100, 'reset did not restore the defaults 100 / 70: %s' % r); n += 1
+    ok(page.evaluate("wbMenuTest.set('sound', 'volume', 250).volume") == 100 and page.evaluate("wbMenuTest.set('display', 'par', 0.5).par") == 1,
+       'values not clamped'); n += 1
+    page.evaluate("wbMenuTest.reset()")
+    sig = page.evaluate('wbZvukTest.signal()')
+    flat = page.evaluate('(s) => wbZvukTest.render(s, false)', FLAT)
+    ok(_maxdiff(flat['l'], sig['l']) < 1e-5 and _maxdiff(flat['r'], sig['r']) < 1e-5, 'original at 100 %% without filters is not the input (diff %.2g)' % _maxdiff(flat['l'], sig['l'])); n += 1
+    mono = page.evaluate('(s) => wbZvukTest.render(s, false)', dict(FLAT, stereo=0))
+    mid = [(a + b) / 2 for a, b in zip(sig['l'], sig['r'])]
+    ok(_maxdiff(mono['l'], mono['r']) < 1e-5 and _maxdiff(mono['l'], mid) < 1e-5, 'width 0 is not mono (l+r)/2'); n += 1
+    half = page.evaluate('(s) => wbZvukTest.render(s, false)', dict(FLAT, stereo=50))
+    ref = page.evaluate('(s) => wbZvukTest.reference(s, false)', dict(FLAT, stereo=50))
+    ok(_maxdiff(half['l'], ref['l']) < 1e-5 and _maxdiff(half['r'], ref['r']) < 1e-5, 'width 50 %% is not the mix rule'); n += 1
+    vol = page.evaluate('(s) => wbZvukTest.render(s, false)', dict(FLAT, volume=50))
+    ok(_maxdiff(vol['l'], [x / 2 for x in sig['l']]) < 1e-5, 'volume 50 %% is not half'); n += 1
+    filt = page.evaluate('(s) => wbZvukTest.render(s, true)', {'volume': 100, 'stereo': 100, 'filterFixed': True, 'filterLed': 'auto', 'filterHp': True})
+    fref = page.evaluate('(s) => wbZvukTest.reference(s, true)', {'volume': 100, 'stereo': 100, 'filterFixed': True, 'filterLed': 'auto', 'filterHp': True})
+    ok(_maxdiff(filt['l'], fref['l']) < 2e-3 and _maxdiff(filt['r'], fref['r']) < 2e-3,
+       'filters in the browser differ from the reference (diff %.2g)' % _maxdiff(filt['l'], fref['l'])); n += 1
+    ok(_maxdiff(filt['l'], sig['l']) > 1e-3, 'the filters changed nothing'); n += 1
+    off = page.evaluate('(s) => wbZvukTest.render(s, false)', dict(FLAT, on=False))
+    ok(max(abs(x) for x in off['l']) < 1e-6, 'sound off still plays'); n += 1
+    return n
