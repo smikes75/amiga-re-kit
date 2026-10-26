@@ -55,7 +55,7 @@ def test_filters_and_process():
 
 
 def test_menu_defaults_coerce_merge():
-    assert js('M.VERSION') == '1.1' and js('M.MODES') == ['original', 'enhanced']
+    assert js('M.VERSION') == '1.2' and js('M.MODES') == ['original', 'enhanced']
     d = js("M.defaults('display', 'enhanced')")
     assert d['par'] == 1.04 and d['smooth'] is True and d['zoom'] == 3 and d['crt-detail'] == 'fine'
     assert js("M.defaults('display', 'original').par") == 1 and js("M.defaults('display', 'original').smooth") is False
@@ -68,6 +68,7 @@ def test_menu_defaults_coerce_merge():
     assert js('M.coerce(%s, 1.0449)' % par) == 1.04 and js('M.coerce(%s, 5)' % par) == 1.1 and js('M.coerce(%s, "x")' % par) == 1
     zoom = "M.ITEMS.display.find((i) => i.id === 'zoom')"
     assert js('M.coerce(%s, "2.5")' % zoom) == 2.5 and js('M.coerce(%s, "x")' % zoom) == 1
+    assert js('[M.coerce(%s, 2.2), M.coerce(%s, "5.5"), M.coerce(%s, 0.1), M.coerce(%s, 0)]' % (zoom, zoom, zoom, zoom)) == [2, 6, 1, 0]   # nearest option
     assert js("M.coerce(M.ITEMS.sound[0], 'false')") is False and js("M.coerce(M.ITEMS.sound[0], 1)") is True
     m = js("M.merge('sound', 'enhanced', {enhanced: {sound: {stereo: 55, bogus: 1}}})")
     assert m['stereo'] == 55 and 'bogus' not in m and m['volume'] == 80
@@ -82,7 +83,7 @@ def test_menu_zoom_snap():
     assert snap("[m.snapZoom(2.4), m.snapZoom(2.6), m.snapZoom(9), m.snapZoom(0), m.snapZoom(0.2)]") == [2, 3, 4.5, 0, 1]
     assert snap("(m.set('display', 'zoom', 2.6), m.get('display').zoom)") == 3
     assert snap("(m.set('display', 'zoom', '0'), m.get('display').zoom)") == 0                                    # fit
-    assert snap("(m.set('display', 'zoom', 2.6), [m.zoomSteps(), m.get('display').zoom])", "{}") == [[], 1]      # no snapping: coerce as before
+    assert snap("(m.set('display', 'zoom', 2.6), [m.zoomSteps(), m.get('display').zoom])", "{}") == [[], 2.5]    # no snapping: the nearest option
     assert snap("m.snapZoom(2.4)", "{zoom: 'snap'}") == 2.4                                                      # snap without steps: unchanged
     # an exact zoom survives a reload (Alien Breed K2: 2 * 448 / 293 fell back to options[0] = 1 in 0.6.2)
     r = js("""(() => { const box = {}; globalThis.localStorage = { getItem: (k) => box[k] ?? null, setItem: (k, v) => { box[k] = String(v); } };
@@ -91,7 +92,7 @@ def test_menu_zoom_snap():
         const m = new M.Menu(null, spec), before = m.getMode('enhanced', 'display').zoom; m.refreshZoom();
         const plain = new M.Menu(null, {store: 'g', mode: 'enhanced'});
         return [before, m.get('display').zoom, plain.get('display').zoom, M.coerce(M.ITEMS.display[0], 9, true), M.coerce(M.ITEMS.display[0], 'x', true)]; })()""")
-    assert abs(r[0] - 2 * 448 / 293) < 1e-9 and abs(r[1] - 2 * 448 / 293) < 1e-9 and r[2] == 1 and r[3] == 6 and r[4] == 1
+    assert abs(r[0] - 2 * 448 / 293) < 1e-9 and abs(r[1] - 2 * 448 / 293) < 1e-9 and r[2] == 3 and r[3] == 6 and r[4] == 1
 
 
 def test_package_files_and_copy(tmp_path, capsys):
@@ -111,3 +112,18 @@ def test_package_files_and_copy(tmp_path, capsys):
     assert cli.main(['web', 'copy', str(tmp_path)]) == 1 and own.read_text().startswith("// the game's own")
     assert 'kept, not a kit file' in capsys.readouterr().out
     assert cli.main(['web', 'copy', str(tmp_path), '--force']) == 0 and 'WBNASTAVENI' in own.read_text()
+
+
+def test_menu_units_events_and_keep():
+    """SF KIT-GAPS 32 (units, Czech decimals), 35 (why a listener was called), 36 (refreshZoom keeps the wish)."""
+    r = js("""(() => { const m = new M.Menu(null, {lang: 'cs'}), e = new M.Menu(null, {}), it = (s, id) => M.ITEMS[s].find((i) => i.id === id);
+        return [m.valueText(it('display', 'par'), 1.04), m.valueText(it('sound', 'stereo'), 70), e.valueText(it('display', 'par'), 1.04),
+                e.valueText(it('sound', 'volume'), 80), m.optionText('display', 1.5), e.optionText('display', 1.5)]; })()""")
+    assert r == ['1,04', '70\u00a0%', '1.04', '80%', '1,5×', '1.5×']
+    ev = js("""(() => { const m = new M.Menu(null, {}), seen = []; m.on('change', (st, what, info) => seen.push([what, info]));
+        m.set('sound', 'stereo', 40); m.reset('sound'); m.setMode('enhanced'); return seen; })()""")
+    assert ev == [['sound', {'cause': 'set', 'id': 'stereo'}], ['sound', {'cause': 'reset', 'section': 'sound'}], ['mode', {'cause': 'mode'}]]
+    keep = js("""(() => { let steps = [1, 2, 3]; const m = new M.Menu(null, {zoom: 'snap', zoomSteps: () => steps});
+        m.set('display', 'zoom', 3); steps = [1.4, 2.8];                 // the window got smaller
+        m.refreshZoom({keep: true}); const kept = m.get('display').zoom; m.refreshZoom(); return [kept, m.get('display').zoom]; })()""")
+    assert keep == [3, 2.8]

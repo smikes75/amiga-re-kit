@@ -331,3 +331,28 @@ def test_jump_table_with_the_base_register_known_only_at_run_time(tmp_path):
     assert d[1] == 2                                      # a fixed origin = the table ignores a0
     fl = recomp.flow_from_specs(data, BASE, jtab=['1000:1010:3:4:bra:an'])
     assert fl.jtabs[BASE].base_reg and fl.jtabs[BASE].targets == targets
+
+
+def test_cia_hook_gets_every_byte(tmp_path):
+    """-DCIA_HOOK: $bfxxxx goes to the host byte by byte (Superfrog seeds its RNG from CIA-B TOD, move.l $bfd802,d0)."""
+    host = """
+uint8_t cia_read_hook(uint32_t a) { return (a & 1) ? 0xff : 0xab; }          /* CIA-B on the even bytes, nothing on the odd */
+void cia_write_hook(uint32_t a, uint8_t v) { MEM[0x4000] = (uint8_t)(a >> 8); MEM[0x4001] = (uint8_t)a; MEM[0x4002] = v; }
+"""
+    prog = '203900bfd802' + '13fc001200bfe001'              # move.l $bfd802,d0; move.b #$12,$bfe001
+    cc = shutil.which('cc') or shutil.which('gcc') or shutil.which('clang')
+    if not cc:
+        pytest.skip('no C compiler')
+    src, _, _ = recomp.generate(bytes.fromhex(prog + '4e75'), BASE, auto=[BASE], with_main=True)
+    assert src.count('cia_read_hook') == 2 and '#ifdef CIA_HOOK' in src
+    c, exe = tmp_path / 'h.c', tmp_path / 'h'
+    c.write_text(src + host)
+    subprocess.run([cc, '-O1', '-DCIA_HOOK', '-o', str(exe), str(c)], check=True)
+    ram = bytearray(0x80000)
+    ram[BASE:BASE + len(prog) // 2 + 2] = bytes.fromhex(prog + '4e75')
+    (tmp_path / 'ram.bin').write_bytes(ram)
+    (tmp_path / 'regs.txt').write_text(' '.join(['0'] * 15 + ['7ff00']) + '\n0 0 0 0 0\nf_%06x\n' % BASE)
+    subprocess.run([str(exe), str(tmp_path / 'ram.bin'), str(tmp_path / 'regs.txt'), str(tmp_path / 'out.bin'), str(tmp_path / 'log.txt')], check=True)
+    d0 = int((tmp_path / 'log.txt').read_text().split('\n')[0], 16)
+    assert d0 == 0xabffabff
+    assert (tmp_path / 'out.bin').read_bytes()[0x4000:0x4003] == bytes.fromhex('e00112')

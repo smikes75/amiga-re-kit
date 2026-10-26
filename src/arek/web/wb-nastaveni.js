@@ -1,7 +1,7 @@
-// wb-nastaveni.js - the shared Display / Sound menu of the rebuilds (amiga-re-kit, MENU-ZVUK.md, 1.0). One module builds
+// wb-nastaveni.js - the shared Display / Sound menu of the rebuilds (amiga-re-kit, MENU-ZVUK.md, 1.2). One module builds
 // the common controls with the same ids, ranges, defaults and storage in every game; the game adds its own items in
 // the `extras` slots and supplies texts (English and Czech are built in) and the defaults it wants per mode.
-// No game data, no CSS beyond the wb-menu* classes (the game styles it). Works as a <script> (global WBNASTAVENI) and as
+// No game data, no CSS beyond the wb-nastaveni* classes (the game styles it). Works as a <script> (global WBNASTAVENI) and as
 // CommonJS; the pure parts (ITEMS, defaults, coerce, merge) run in Node, build() needs a document.
 //
 //   const menu = WBNASTAVENI.build(host, { store: 'mygame-wb-menu-v1', lang: 'cs',
@@ -12,12 +12,14 @@
 //   menu.extras.display / menu.extras.sound: elements the game fills with its own rows
 //   spec.zoom = 'snap' with spec.zoomSteps = () => [{value, label}, ...]: the zoom becomes a slider over the zooms this
 //   display can show exactly (whole device pixels per game pixel - the page lists them with WBOBRAZ.deviceScale), the
-//   wished value snaps to the nearest step; `menu.refreshZoom()` after a resize or a dpr change.
+//   wished value snaps to the nearest step; `menu.refreshZoom()` after a resize or a dpr change (`{keep: true}`: the slider
+//   shows the nearest step, the stored wish stays). Listeners get (state, what, {cause: 'set'|'reset'|'mode', id|section}).
+//   Values show with the item's unit in the menu's language (`20 %`, `1,04`).
 //
 // The file is wb-nastaveni.js (not wb-menu.js: that name is the games' own Workbench bar). Every value is kept per mode (original / enhanced). Test hooks (arek web test §6): window.wbMenuTest = menu.testHooks().
 'use strict';
 const WBNASTAVENI = (() => {
-    const VERSION = '1.1';
+    const VERSION = '1.2';
     const MODES = ['original', 'enhanced'];
     const ITEMS = {
         display: [
@@ -25,23 +27,23 @@ const WBNASTAVENI = (() => {
             { id: 'crt', kind: 'check', def: true },
             { id: 'crt-detail', kind: 'select', options: ['fine', 'standard', 'strong'], def: { original: 'strong', enhanced: 'fine' } },
             { id: 'crt-shape', kind: 'select', options: ['lines', 'grid'], def: 'lines' },
-            { id: 'blur', kind: 'range', min: 0, max: 100, step: 1, def: { original: 0, enhanced: 20 } },
-            { id: 'brightness', kind: 'range', min: 50, max: 150, step: 1, def: 100 },
-            { id: 'contrast', kind: 'range', min: 50, max: 150, step: 1, def: 100 },
-            { id: 'saturation', kind: 'range', min: 0, max: 200, step: 1, def: 100 },
-            { id: 'red', kind: 'range', min: 50, max: 150, step: 1, def: 100 },
-            { id: 'green', kind: 'range', min: 50, max: 150, step: 1, def: 100 },
-            { id: 'blue', kind: 'range', min: 50, max: 150, step: 1, def: 100 },
-            { id: 'par', kind: 'range', min: 1, max: 1.1, step: 0.01, def: { original: 1, enhanced: 1.04 } },
+            { id: 'blur', kind: 'range', unit: '%', min: 0, max: 100, step: 1, def: { original: 0, enhanced: 20 } },
+            { id: 'brightness', kind: 'range', unit: '%', min: 50, max: 150, step: 1, def: 100 },
+            { id: 'contrast', kind: 'range', unit: '%', min: 50, max: 150, step: 1, def: 100 },
+            { id: 'saturation', kind: 'range', unit: '%', min: 0, max: 200, step: 1, def: 100 },
+            { id: 'red', kind: 'range', unit: '%', min: 50, max: 150, step: 1, def: 100 },
+            { id: 'green', kind: 'range', unit: '%', min: 50, max: 150, step: 1, def: 100 },
+            { id: 'blue', kind: 'range', unit: '%', min: 50, max: 150, step: 1, def: 100 },
+            { id: 'par', kind: 'range', digits: 2, min: 1, max: 1.1, step: 0.01, def: { original: 1, enhanced: 1.04 } },
             { id: 'smooth', kind: 'check', def: { original: false, enhanced: true } },
         ],
         sound: [
             { id: 'sound', kind: 'check', def: true },
-            { id: 'volume', kind: 'range', min: 0, max: 100, step: 1, def: 80 },
+            { id: 'volume', kind: 'range', unit: '%', min: 0, max: 100, step: 1, def: 80 },
             { id: 'filter-fixed', kind: 'check', def: true },
             { id: 'filter-led', kind: 'select', options: ['auto', 'on', 'off'], def: 'auto' },
             { id: 'filter-hp', kind: 'check', def: true },
-            { id: 'stereo', kind: 'range', min: 0, max: 100, step: 1, def: { original: 100, enhanced: 70 } },
+            { id: 'stereo', kind: 'range', unit: '%', min: 0, max: 100, step: 1, def: { original: 100, enhanced: 70 } },
         ],
     };
     const TEXTS = {
@@ -78,7 +80,11 @@ const WBNASTAVENI = (() => {
         }
         if (it.kind === 'select') {
             const found = it.options.find((o) => String(o) === String(v));
-            return found === undefined ? it.options[0] : found;
+            if (found !== undefined) return found;
+            const n = Number(v), nums = it.options.filter((o) => typeof o === 'number' && o > 0);   // 0 = fit only when asked for
+            if (v !== '' && v !== null && isFinite(n) && n > 0 && nums.length)
+                return nums.reduce((best, o) => (Math.abs(o - n) < Math.abs(best - n) ? o : best), nums[0]);   // e.g. an old 2.2 -> 2
+            return it.options[0];
         }
         let n = Number(v);
         if (!isFinite(n)) n = it.min;
@@ -151,15 +157,21 @@ const WBNASTAVENI = (() => {
             this.controls[section][it.id] = { ctl, out, it };
             return row;
         }
+        /** A number as the menu's language writes it (1,04 in Czech), with the item's unit (20 %). */
+        num(v, digits) {
+            const tag = this.lang === 'cs' ? 'cs-CZ' : 'en-GB';
+            return Number(v).toLocaleString(tag, { minimumFractionDigits: digits || 0, maximumFractionDigits: digits === undefined ? 2 : digits });
+        }
+        valueText(it, v) { return this.num(v, it.digits) + (it.unit ? (this.lang === 'cs' ? '\u00a0' : '') + it.unit : ''); }
         optionText(section, o) {
             if (o === 0 && section === 'display') return this.texts.display.fit;
             const t = this.texts[section][String(o)];
-            return t || (typeof o === 'number' ? String(o) + '×' : String(o));
+            return t || (typeof o === 'number' ? this.num(o) + '×' : String(o));
         }
         /** The zooms this display shows exactly (spec.zoomSteps), as [{value, label}] sorted by value; [] without snapping. */
         zoomSteps() {
             if (this.spec.zoom !== 'snap' || typeof this.spec.zoomSteps !== 'function') return [];
-            return (this.spec.zoomSteps() || []).map((z) => (typeof z === 'number' ? { value: z, label: String(+z.toFixed(2)) + '×' } : z))
+            return (this.spec.zoomSteps() || []).map((z) => (typeof z === 'number' ? { value: z, label: this.num(z) + '×' } : z))
                 .filter((z) => z && typeof z.value === 'number').sort((a, b) => a.value - b.value);
         }
         /** The nearest exact zoom to `v` (0 = fit stays fit). */
@@ -167,8 +179,13 @@ const WBNASTAVENI = (() => {
             const st = this.zoomSteps(); if (!st.length || !(v > 0)) return v;
             return st.reduce((best, z) => (Math.abs(z.value - v) < Math.abs(best - v) ? z.value : best), st[0].value);
         }
-        /** After a resize or a dpr change with snapping: the steps and the value may have changed. */
-        refreshZoom() { if (this.spec.zoom === 'snap') { const z = this.state[this.mode].display.zoom; this.state[this.mode].display.zoom = this.snapZoom(z); this.refresh(); } }
+        /** After a resize or a dpr change with snapping: the steps may have changed. The stored zoom snaps to the nearest step
+         *  (and is saved); with { keep: true } only the slider moves to the nearest step and the stored wish stays. */
+        refreshZoom(opts) {
+            if (this.spec.zoom !== 'snap') return;
+            if (!(opts && opts.keep)) { const z = this.state[this.mode].display.zoom; this.state[this.mode].display.zoom = this.snapZoom(z); this.save(); }
+            this.refresh();
+        }
         /** Controls show the current mode's values. */
         refresh() {
             if (!this.root) return;
@@ -177,12 +194,13 @@ const WBNASTAVENI = (() => {
                 const c = this.controls[section][it.id], v = this.state[this.mode][section][it.id];
                 if (c.ctl.dataset.snap) {
                     const st = this.zoomSteps(); c.ctl.max = Math.max(0, st.length - 1);
-                    const k = st.findIndex((z) => Math.abs(z.value - v) < 1e-9); c.ctl.value = String(k < 0 ? 0 : k);
-                    if (c.out) c.out.value = v > 0 ? (st[k] ? st[k].label : String(v) + '×') : this.texts.display.fit;
+                    const near = v > 0 ? this.snapZoom(v) : v, k = st.findIndex((z) => Math.abs(z.value - near) < 1e-9);   // off-step: nearest, value unchanged
+                    c.ctl.value = String(k < 0 ? 0 : k);
+                    if (c.out) c.out.value = v > 0 ? (st[k] ? st[k].label : this.num(v) + '×') : this.texts.display.fit;
                     continue;
                 }
                 if (it.kind === 'check') c.ctl.checked = !!v; else c.ctl.value = String(v);
-                if (c.out) c.out.value = it.id === 'par' ? Number(v).toFixed(2) : String(v);
+                if (c.out) c.out.value = this.valueText(it, v);
             }
         }
         get(section) {
@@ -190,18 +208,19 @@ const WBNASTAVENI = (() => {
             return section ? Object.assign({}, s[section]) : { mode: this.mode, display: Object.assign({}, s.display), sound: Object.assign({}, s.sound) };
         }
         getMode(mode, section) { return Object.assign({}, this.state[mode][section]); }
-        setMode(mode) { if (!MODES.includes(mode)) return; this.mode = mode; this.refresh(); this.save(); this.emit('mode'); }
+        setMode(mode) { if (!MODES.includes(mode)) return; this.mode = mode; this.refresh(); this.save(); this.emit('mode', { cause: 'mode' }); }
         set(section, id, value) {
             const it = ITEMS[section].find((x) => x.id === id); if (!it) return;
             this.state[this.mode][section][id] = (id === 'zoom' && this.spec.zoom === 'snap') ? this.snapZoom(Number(value) || 0) : coerce(it, value);
-            this.refresh(); this.save(); this.emit(section);
+            this.refresh(); this.save(); this.emit(section, { cause: 'set', id });
         }
         reset(section) {
             for (const sec of section ? [section] : ['display', 'sound']) this.state[this.mode][sec] = defaults(sec, this.mode, this.spec.defaults, sec === 'display' && this.spec.zoom === 'snap');
-            this.refresh(); this.save(); this.emit(section || 'all');
+            this.refresh(); this.save(); this.emit(section || 'all', { cause: 'reset', section: section || 'all' });
         }
         on(ev, fn) { this.listeners.push([ev, fn]); return this; }
-        emit(what) { const st = this.get(); for (const [ev, fn] of this.listeners) if (ev === 'change' || ev === what) fn(st, what); }
+        /** Listeners get (state, what, info): info.cause = 'set' (with info.id), 'reset' (with info.section) or 'mode'. */
+        emit(what, info) { const st = this.get(); for (const [ev, fn] of this.listeners) if (ev === 'change' || ev === what) fn(st, what, info || {}); }
         /** window.wbMenuTest for arek web test. */
         testHooks() {
             return { version: VERSION, ids: () => ['display', 'sound'].map((s) => ITEMS[s].map((it) => 'wb-' + it.id)).flat(),

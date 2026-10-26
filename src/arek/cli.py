@@ -505,7 +505,7 @@ def cmd_web(a):
         import http.server
         handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(web))
         srv = http.server.ThreadingHTTPServer(('127.0.0.1', a.port), handler)
-        print('http://127.0.0.1:%d/demo.html  (wb-obraz %s; Ctrl+C to stop)' % (a.port, _wb_version(web)))
+        print('http://127.0.0.1:%d/demo.html  (wb-obraz %s; Ctrl+C to stop)' % (a.port, _wb_version(web)), flush=True)
         try:
             srv.serve_forever()
         except KeyboardInterrupt:
@@ -931,7 +931,9 @@ def build_parser():
 
     s = sp.add_parser('web', help='display contract: reference wb-obraz.js, demo page, Chromium tests (WB-OBRAZ-CRT.md)')
     s.add_argument('what', choices=['copy', 'demo', 'test', 'seal', 'check'])
-    s.add_argument('target', nargs='?', help='copy: destination folder; test: URL of a page with window.wbObrazTest; '
+    s.add_argument('target', nargs='?', help='copy: destination folder (writes wb-obraz.js, wb-seal.js, wb-nastaveni.js, '
+                   'wb-zvuk.js); demo: nothing - it serves the package\'s demo.html on http://127.0.0.1:PORT/demo.html '
+                   '(the file itself is arek/web/demo.html in the installed package); test: URL of a page with window.wbObrazTest; '
                    'seal: the first file; check: a presentation bundle folder')
     s.add_argument('rest', nargs='*', help='seal: more files')
     s.add_argument('--set', action='append', metavar='DISK.adf[,DISK2.adf]',
@@ -944,7 +946,7 @@ def build_parser():
                         'every disk version that yields the same bytes opens the files (repeat for other contents)')
     s.add_argument('--payload-label', action='append', metavar='TEXT', help='seal: a name for each --payload, in order')
     s.add_argument('--gzip', action='store_true', help='seal: gzip the files before sealing (wb-seal.js inflates)')
-    s.add_argument('--port', type=int, default=8920, help='demo: port')
+    s.add_argument('--port', type=int, default=8920, help='demo: port of the local server (Ctrl+C stops it)')
     s.add_argument('--quick', action='store_true', help='test: fewer combinations')
     s.add_argument('--force', action='store_true', help='copy: overwrite a file under a kit name that is not from the kit')
     s.set_defaults(fn=cmd_web)

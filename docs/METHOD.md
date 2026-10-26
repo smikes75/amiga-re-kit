@@ -105,6 +105,19 @@ translation is the game (the Alien Breed project does exactly this). Generated
 C carries the kit version and the decoder/recompiler hashes in its first
 line; `arek --version` and the MCP `kit_info` tool print them for the record.
 
+**CIA reads are often the random seed.** A game that seeds its random numbers from a CIA counter (Superfrog reads
+CIA-B TOD, `move.l $bfd802,d0`, at start) gives a translation without a CIA model different random timings from the
+first frame on, and every later comparison drifts. `hwscan` lists the CIA accesses; compile the generated C with
+`-DCIA_HOOK` and the host gets every byte access to `$bfxxxx` (`cia_read_hook(a)`, `cia_write_hook(a, v)`; CIA-A is
+selected by A12 low on the odd bytes, CIA-B by A13 low on the even bytes, the register is `(a >> 8) & 15`). Feed the
+seed from the capture (`arek bpstate` at the read) or model TOD as the emulator counts it. Without `-DCIA_HOOK` the
+runtime is unchanged.
+
+The seed is not the only trap: a generator that also runs in the title or demo loop advances once per pass while the
+game waits for fire. To compare a level byte for byte, the harness presses fire at the same distance from the first
+pass of that wait loop as the emulator recording did (`arek trace run --inputs`), and the generator state at the start
+of the level then matches; check it before blaming the level code.
+
 ## 6. Reading the interpreters
 
 Level maps, sprite formats, animation scripts: the same rule. Find the

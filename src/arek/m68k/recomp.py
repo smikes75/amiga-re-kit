@@ -182,6 +182,11 @@ double bus_time_hook(void);
 #define BUS_BLIT(c0, c1, sz) ((void)0)
 #define BUS_BBUSY() 0
 #endif
+#ifdef CIA_HOOK                          /* the host models the CIAs ($bfxxxx): every byte access goes to it (-DCIA_HOOK) */
+uint8_t cia_read_hook(uint32_t a);       /* a = the full address; the host decodes CIA-A (A12 low, odd bytes) and CIA-B */
+void cia_write_hook(uint32_t a, uint8_t v);   /* (A13 low, even bytes), register = (a >> 8) & 15 - e.g. CIA-B TOD as a seed */
+#define CIA(a) (((a) & 0xff0000u) == 0xbf0000u)
+#endif
 #ifndef OOB_ZERO
 #define OOB_ZERO 0                      /* generate(oob='zero'): reads outside the modelled RAM give 0, writes are dropped */
 #endif
@@ -258,6 +263,9 @@ static void hw_write(uint32_t off, uint32_t v) {
 /* every access of the CPU to the chip bus is one BUS_ACCESS (a word or a byte); the _raw halves of a word do not count twice */
 static uint32_t rd8_raw(uint32_t a) {
     if (CUSTOM(a)) { uint32_t w = hw_read(a & 0x1fe); return (a & 1) ? (w & 0xff) : (w >> 8); }
+#ifdef CIA_HOOK
+    if (CIA(a)) return cia_read_hook(a);
+#endif
     if (a < MEMSZ) return MEM[a];
     uint8_t *p = slow_at(a);
     if (!p) { oob(a); return 0; }
@@ -273,6 +281,9 @@ static uint32_t rd16(uint32_t a) { BUS_ACCESS(a); return rd16_raw(a); }
 static uint32_t rd32(uint32_t a) { return (rd16(a) << 16) | rd16(a + 2); }
 static void wr8_raw(uint32_t a, uint32_t v) {
     if (CUSTOM(a)) { v &= 0xff; hw_write(a & 0x1fe, (v << 8) | v); return; }   /* 68000: the byte on both halves of the bus */
+#ifdef CIA_HOOK
+    if (CIA(a)) { cia_write_hook(a, (uint8_t)v); return; }
+#endif
     if (a < MEMSZ) { MEM[a] = v; WRLOG[a] = 1; PROF_WRITE(a); return; }
     uint8_t *p = slow_at(a);
     if (!p) { oob(a); return; }
