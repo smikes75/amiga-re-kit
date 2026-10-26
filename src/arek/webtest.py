@@ -27,7 +27,7 @@ DETAILS = ('fine', 'standard', 'strong')
 ZOOMS = (1, 1.5, 2, 2.5, 3, 4, 6, 0)
 TOL_POS, TOL_SIZE = 0.05, 0.025
 SCREEN = {'fine': 2, 'standard': 3, 'strong': 4}
-PAR = 1.015                               # PAL lores: the 1.4 aspect the tests use (NTSC lores ~0.857)
+PAR = 1.04                                # PAL lores (14.75 / 14.1875 MHz): the 1.4 aspect the tests use; any value is allowed (NTSC lores 0.857)
 
 
 def png_rgb(data):

@@ -82,13 +82,13 @@ def test_zoom_label_with_an_aspect():
 
 def test_check_layout_with_an_aspect():
     fails = []
-    info = {'scale': 3, 'W': 320, 'H': 256, 'par': 1.015, 'content': [974, 768], 'backing': [974, 768], 'origin': [10, 20],
-            'crtLayer': [974, 768], 'crtOrigin': [10, 20], 'P': 2, 'D': 1}
+    info = {'scale': 3, 'W': 320, 'H': 256, 'par': 1.04, 'content': [998, 768], 'backing': [998, 768], 'origin': [10, 20],
+            'crtLayer': [998, 768], 'crtOrigin': [10, 20], 'P': 2, 'D': 1}
     webtest.check_layout(info, 'enhanced', 'fine', 1, fails, 't')
     assert fails == []
     info['content'] = [960, 768]
     webtest.check_layout(info, 'enhanced', 'fine', 1, fails, 't')
-    assert fails and 'content' in fails[0] and 'par 1.015' in fails[0]
+    assert fails and 'content' in fails[0] and 'par 1.04' in fails[0]
 
 
 def test_filter_and_labels():

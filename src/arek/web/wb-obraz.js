@@ -2,7 +2,8 @@
 // (amiga-re-kit, WB-OBRAZ-CRT.md). Whole device pixels per game row (S), zoom = window width in
 // multiples of the Original's width W0, the CRT as a second canvas in device pixels, blur 0.8 game
 // pixel at 100 %, the content placed on a whole device pixel by layout (left/top) - never transform.
-// 1.4: a pixel aspect ratio `par` (PAL lores ~1.015, NTSC lores ~0.857, 1 = square) is applied INSIDE the
+// 1.4: a pixel aspect ratio `par` (PAL lores 1.04 = 14.75/14.1875, NTSC lores 0.857 = 12.2727/14.31818, 1 = square;
+// any value a game or its player picks) is applied INSIDE the
 // backing - the picture is W*S*par device pixels wide (contentSize, blit resamples horizontally only), the
 // rows stay exact, the CRT layer still equals the backing. Never stretch a canvas by CSS: that breaks §1-§2.
 // No game data. Works as a <script> (global WBOBRAZ, also globalThis.WBOBRAZ - an ES module that imports

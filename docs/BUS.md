@@ -42,9 +42,13 @@ the middle of a frame (the map is built at the frame's start; audio slots are th
 
 Explicit, never a constant: `hpos` (PAL 227 slots - the bus log's arrays have 228 entries, entry 227
 is never used), `lines` per frame (313 for a long frame, LOF = 1, which is what a cold VAHeadless
-starts with - `arek selftest bus` sees 313; 312 after the game or the boot cleared LOF - the Alien
-Breed and Superfrog logs have 312), `maxlines` (capacity; lines past the frame hold the accesses
-that ran over), `chipmask`. The host passes `lines` to `arek_bus_frame` every frame.
+starts with - `arek selftest bus` sees 313; 312 after LOF was cleared - the Alien Breed and Superfrog
+logs have 312), `maxlines` (capacity; lines past the frame hold the accesses that ran over),
+`chipmask`. The host passes `lines` to `arek_bus_frame` every frame. Where the 312 comes from (Alien
+Breed, measured from a cold start with `VAHL_REGLOG_POS`): the Kickstart writes VPOSW $8001 (LOF 1);
+the game's loader then runs a copper list with BPLCON0 $C204 (hires, LACE) for exactly 205 frames, and
+with LACE the emulator toggles LOF at the end of every frame - 205 is odd, so the game inherits LOF 0.
+The length of a frame is a legacy of what ran before: take it from the record, never assume 313.
 
 ## API
 
