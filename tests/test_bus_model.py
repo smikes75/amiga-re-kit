@@ -270,3 +270,14 @@ __attribute__((constructor)) static void init(void) { arek_glue_init(227, 312, 3
     text = log.read_text()
     t = float([l for l in text.splitlines() if l.startswith('bus')][0].split()[1])
     assert 'blits 1' in text and t < 120, t          # 11 instructions, not 640 blitted words as CPU accesses
+
+
+def test_operand_accesses_go_through_the_hooks():
+    # movem.w (a6)+,d0-d1 ; movem.w d0-d1,-(a6) ; rte  - their operand reads and writes are CPU bus accesses (KIT-GAPS 29)
+    src, _, _ = recomp.generate(bytes.fromhex('4c9e0003 48a6c000 4e73'.replace(' ', '')), 0x1000, funcs=[(0x1000, 0x100a, 0x1000)])
+    body = src[src.index('L001000:'):]
+    assert 'rd16(ma' in body and 'wr16(ma' in body and 'rd16(sp)' in body
+    assert 'rd16_raw(ma' not in body and 'wr16_raw(ma' not in body and 'rd16_raw(sp)' not in body
+    # the blitter's own traffic stays raw
+    rt = src[:src.index('L001000:')]
+    assert 'rd16_raw(apt)' in rt and 'wr16_raw(dpt, d)' in rt

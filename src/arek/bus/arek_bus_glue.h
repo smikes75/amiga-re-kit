@@ -12,7 +12,7 @@
  *   audio slots: arek_bus_mark(arek_glue_bus(), slot, AREK_BUS_AUDIO + n) from the host's Paula model
  * CIA accesses are not on the chip bus: a host that routes them through rd/wr should map them with arek_glue_slow().
  * The blitter's own memory traffic (run_blit) is not a CPU access: the runtime reads and writes it raw (0.5.17).
- * Interrupt entry (44 clocks) and the audio DMA slots are the host's: arek_glue_add_clocks(44), arek_bus_mark().
+ * Interrupt entry (44 clocks, 7 accesses) and the audio DMA slots are the host's: arek_glue_interrupt(), arek_bus_mark().
  * Without BUS_TAB (no --bus-table) every instruction counts its opcode word as its only prefetch and no internal cycles
  * before the accesses - coarse, but the time still moves.
  *
@@ -44,8 +44,14 @@ static inline void arek_glue_frame(int lines) {
 /* An access off the chip bus (CIA: 7 CCK on the E clock) counted against the current instruction. */
 static inline void arek_glue_slow(double cck) { if (AREK_GLUE.ready) AREK_GLUE.t = arek_bus_slow(&AREK_GLUE.bus, AREK_GLUE.t, cck); }
 
-/* Clocks the model does not see (interrupt entry: 44 on the 68000, i.e. 22 CCK; the CPU idles, the bus is free). */
+/* Clocks without bus accesses (the CPU idles, the bus is free). */
 static inline void arek_glue_add_clocks(uint32_t clocks) { AREK_GLUE.t += clocks * 0.5; }
+
+/* Interrupt entry: 44 clocks with 7 bus accesses (68000 UM 44(5/3): 3 stack writes, 2 vector reads, 2 prefetches) that
+ * compete for slots like an instruction's; the handler's instructions then count like any others (Superfrog). */
+static inline void arek_glue_interrupt(void) {
+    if (AREK_GLUE.ready) { AREK_GLUE.t = arek_bus_insn(&AREK_GLUE.bus, AREK_GLUE.t, 44, 7, 0); AREK_GLUE.t = arek_bus_insn_end(&AREK_GLUE.bus, AREK_GLUE.t); }
+}
 
 /* The instruction at pc with its clock count: what tick_hook() does. A host that keeps its own tick_hook defines
  * AREK_GLUE_NO_TICK before including this file and calls arek_glue_insn() from it. */

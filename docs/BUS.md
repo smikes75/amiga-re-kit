@@ -89,12 +89,14 @@ if (arek_glue_time() >= lines * 227) /* the original would not have finished thi
 
 Build with `cc -DTICK_HOOK -DBUS_HOOK -I lib game.c lib/arek_bus.c lib/arek_bus_vamiga.c`. The
 verification driver then reports `bus <time>` in its log. The host decides what an interrupt does
-with the time (the VBL is the frame boundary; `cop_int` is the copper's): the entry costs 44 clocks
-(`arek_glue_add_clocks(44)`), the handler's instructions count like any others. A host with its own
+with the time (the VBL is the frame boundary; `cop_int` is the copper's): the entry costs 44 clocks with
+7 bus accesses (`arek_glue_interrupt()`: 3 stack writes, 2 vector reads, 2 prefetches compete for slots),
+the handler's instructions count like any others. A host with its own
 `tick_hook` defines `AREK_GLUE_NO_TICK` and calls `arek_glue_insn(pc, clocks)` from it. The runtime's
 blitter (`run_blit`) moves its words raw - they are the blitter's slots in the model, not CPU accesses
-(Superfrog found 0.5.15 counting them: KIT-GAPS 28). Audio DMA slots come from the host's Paula model
-(`arek_bus_mark`).
+(Superfrog found 0.5.15 counting them: KIT-GAPS 28; 0.5.17 then moved movem.w and rte's SR read raw by
+mistake, 0.5.18 counts them again: KIT-GAPS 29 - the extension words an indirect jump re-reads stay raw,
+they are prefetch and in BUS_TAB). Audio DMA slots come from the host's Paula model (`arek_bus_mark`).
 
 ## Measured
 

@@ -992,11 +992,11 @@ class Gen:
                     tgt = 'm->%s[%d]' % (kind, rg)
                     if i.mode == 4:
                         L.append('ma%06x -= %d;' % (i.addr, step))
-                        L.append(('wr16_raw(ma%06x, %s);' if i.sz == SZ_W else 'wr32(ma%06x, %s);')
+                        L.append(('wr16(ma%06x, %s);' if i.sz == SZ_W else 'wr32(ma%06x, %s);')
                                  % (i.addr, tgt))
                     else:
                         if i.sz == SZ_W:
-                            L.append('%s = (uint32_t)(int32_t)(int16_t)rd16_raw(ma%06x);' % (tgt, i.addr))
+                            L.append('%s = (uint32_t)(int32_t)(int16_t)rd16(ma%06x);' % (tgt, i.addr))
                         else:
                             L.append('%s = rd32(ma%06x);' % (tgt, i.addr))
                         L.append('ma%06x += %d;' % (i.addr, step))
@@ -1011,16 +1011,16 @@ class Gen:
                         continue
                     tgt = 'm->%s[%d]' % (kind, rg)
                     if i.to_mem:
-                        L.append((('wr16_raw(ma%06x + %d, %s);' if i.sz == SZ_W
+                        L.append((('wr16(ma%06x + %d, %s);' if i.sz == SZ_W
                                    else 'wr32(ma%06x + %d, %s);')) % (i.addr, off, tgt))
                     elif i.sz == SZ_W:   # cteni .w se vzdy rozsiruje znamenkem do 32 bitu
-                        L.append('%s = (uint32_t)(int32_t)(int16_t)rd16_raw(ma%06x + %d);'
+                        L.append('%s = (uint32_t)(int32_t)(int16_t)rd16(ma%06x + %d);'
                                  % (tgt, i.addr, off))
                     else:
                         L.append('%s = rd32(ma%06x + %d);' % (tgt, i.addr, off))
                     off += step
         elif k == 'rte':
-            L.append('{ uint32_t sp = m->a[7]; uint32_t sr = rd16_raw(sp);')
+            L.append('{ uint32_t sp = m->a[7]; uint32_t sr = rd16(sp);')
             L.append('  m->srhi = sr & 0xff00; m->x = (sr >> 4) & 1; m->n = (sr >> 3) & 1;')
             L.append('  m->z = (sr >> 2) & 1; m->v = (sr >> 1) & 1; m->c = sr & 1;')
             L.append('  m->a[7] = sp + 6; }')
@@ -1103,9 +1103,9 @@ class Gen:
                 return L + self.jump_table(i, lambda t: '%s(m); return;' % self.flow.fname(t),
                                            'm->a[7] += 4; return;')
             if i.addr in self.flow.indirect:
-                if mode in FLOW_MODES:                     # the program rewrites the operand
-                    t = ('rd32(0x%xu)' % (i.addr + 2)) if i.end - i.addr == 6 else \
-                        ('(uint32_t)(int16_t)rd16_raw(0x%xu)' % (i.addr + 2))
+                if mode in FLOW_MODES:                     # the program rewrites the operand: read the instruction's own
+                    t = ('((rd16_raw(0x%xu) << 16) | rd16_raw(0x%xu))' % (i.addr + 2, i.addr + 4)) if i.end - i.addr == 6 else \
+                        ('(uint32_t)(int16_t)rd16_raw(0x%xu)' % (i.addr + 2))   # extension words raw - prefetch, in BUS_TAB
                 else:
                     t = i.ea.addr
                 L.append('{ uint32_t t = %s; switch (t) {' % t)
