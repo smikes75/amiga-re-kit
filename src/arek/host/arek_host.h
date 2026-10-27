@@ -31,7 +31,7 @@
 #ifndef HOST_MAXLINES
 #define HOST_MAXLINES 400
 #endif
-static int    H_LINES = 313;             /* PAL long frame (LOF 1, VPOSR bit 15); 312 for a short one */
+static int    H_LINES = 313;             /* PAL long frame (LOF 1, VPOSR bit 15); 312 for a short one; with BPLCON0 LACE the fields alternate */
 static int    H_LOF = 1;
 static uint16_t H_INTREQ = 0;            /* Paula INTREQ (read back as INTREQR) */
 static long   H_FRAME = 0;               /* frames since the host started */
@@ -65,6 +65,7 @@ static inline double h_now(void) { return arek_glue_time(); }
 static inline double h_abs(void) { return H_PAULA.frame_base + h_now(); }
 static double h_ephase(void) { double t2 = 2.0 * h_abs(); return fmod(floor(t2), 10.0); }
 static void h_sample(void *ctx, int ch, double t, int value) { (void)ctx; ara_event(ch, t, value); if (h_sample_cb) h_sample_cb(ch, t, value); }
+static void h_audio_irq(void *ctx, int ch, double t) { (void)ctx; (void)t; H_INTREQ |= (uint16_t)(0x80 << ch); }   /* AUDx: level 4 (HOST_L4) */
 
 /* the host starts: t0 = beam time of the first instruction (line * 227 + slot); the environment can recalibrate */
 static void host_init(double t0) {
@@ -81,6 +82,7 @@ static void host_init(double t0) {
     arek_glue_frame(H_LINES);
     arek_glue_set_time(t0);
     arek_paula_init(&H_PAULA, arek_glue_bus(), h_sample, 0);
+    H_PAULA.irq_cb = h_audio_irq;
     arek_paula_frame(&H_PAULA, (double)H_FRAME0 * H_LINES * HOST_HPOS);
     ara_reset();
 }
@@ -89,7 +91,7 @@ static void host_init(double t0) {
 static void host_display_init(void) {
     for (int i = 0x40; i < 0xe0; i++) { uint32_t off = 2u * i;
         if ((off >= 0x080 && off <= 0x086) || (off >= 0x08e && off <= 0x094) || (off >= 0x0e0 && off <= 0x10a) || (off >= 0x120 && off <= 0x1be)) ard_write(off, CREG[i]); }
-    ard_frame_start(); ARD_NEXT = (int)(h_now() / HOST_HPOS);
+    ard_frame_start(); ARD_NEXT = (int)(h_now() / HOST_HPOS); ARD_LAST = H_LINES - 1;
 }
 
 /* the runtime's hooks: custom registers it does not model, every register write, the CIAs */
@@ -108,9 +110,10 @@ int hw_read_hook(uint32_t off, uint32_t *v) {
 void hw_write_hook(uint32_t off, uint32_t v) {
     if ((off >= 0x080 && off <= 0x086) || (off >= 0x08e && off <= 0x094) || (off >= 0x0e0 && off <= 0x10a) ||
         (off >= 0x120 && off <= 0x1be)) { ard_until((int)(h_now() / HOST_HPOS)); ard_write(off, (uint16_t)v); }
+    if (off == 0x096) ard_until((int)(h_now() / HOST_HPOS));   /* the lines before a DMACON write see the old value (the runtime applies it) */
     if (h_wr_cb) h_wr_cb(off, v);
     if (off == 0x09c) { if (v & 0x8000) H_INTREQ |= v & 0x7fff; else H_INTREQ &= ~(v & 0x7fff); }
-    if ((off >= 0x0a0 && off < 0x0e0) || (off == 0x096 && (v & 0x000f))) arek_paula_write(&H_PAULA, h_abs(), off, (uint16_t)v);
+    if ((off >= 0x0a0 && off < 0x0e0) || (off == 0x096 && (v & 0x000f)) || (off == 0x09c && (v & 0x0780))) arek_paula_write(&H_PAULA, h_abs(), off, (uint16_t)v);
 }
 /* the E clock (10 CPU clocks = 5 CCK): a CIA access and an autovector wait for its phase (measured on 3 instructions) */
 static void h_cia_wait(void) {
@@ -157,6 +160,8 @@ static void host_events(void) {
               FILE *sf = fopen(pth, "wb"); if (sf) { fwrite(ARD_RGB, 1, sizeof ARD_RGB, sf); fclose(sf); } } }
         if (h_frame_done_cb) h_frame_done_cb();
         ard_frame_start();
+        if (CREG[0x100 >> 1] & 0x0004) { H_LOF ^= 1; H_LINES = H_LOF ? 313 : 312; }   /* LACE: the fields alternate long / short */
+        ARD_LAST = H_LINES - 1;
         arek_glue_frame(H_LINES);
         arek_paula_frame(&H_PAULA, H_PAULA.frame_base + len);
         H_FRAME++; H_COP_DONE = 0; H_NEXTMAP = 0;
@@ -169,8 +174,9 @@ static void host_events(void) {
 }
 
 /* an interrupt at an instruction boundary: the highest enabled level above the mask; SR and PC to the stack, the
- * translated handler runs, its rte restores SR. Levels: 1 TBE DSKBLK SOFT, 2 PORTS, 3 COPER VERTB BLIT, 4 AUD0-3,
- * 5 RBF DSKSYNC, 6 EXTER. Only the levels the host defines (HOST_Lx) are taken. */
+ * translated handler runs, its rte restores SR. Levels: 1 TBE DSKBLK SOFT, 2 PORTS, 3 COPER VERTB BLIT, 4 AUD0-3 (the
+ * Paula model's requests: the first word after DMA on, the last word of every block), 5 RBF DSKSYNC, 6 EXTER. Only the
+ * levels the host defines (HOST_Lx) are taken, the highest pending first. */
 static const uint16_t H_LEVEL_MASK[7] = { 0, 0x0007, 0x0008, 0x0070, 0x0780, 0x1800, 0x2000 };
 static void h_enter(M68 *m, uint32_t pc, int level, void (*handler)(M68 *)) {
     uint32_t sr = sr_get(m);

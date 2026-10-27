@@ -12,6 +12,9 @@ measured against the original per instruction, with the kit's models behind it:
 | `arek_host_pre.h` | the macros before the translation: `TICK_HOOK`, `BUS_HOOK`, `HW_HOOK`, `CIA_HOOK`, `AREK_GLUE_NO_TICK`, `main` renamed |
 | `arek_host.h` | time from the bus model (`arek_bus_glue.h`), the beam (VPOSR/VHPOSR), INTREQ and the interrupt levels 1-6 (entry cost 44 clocks / 7 accesses after the E-clock phase), CIA-A (PRA/SDR/ICR/DDRA, the LED bit, the E-clock cost of every access), Paula (`arek_bus_paula.h`) and the sound (`arek_audio.h`), the picture (`arek_display.h`), the next frame's map behind the current one, shots |
 | `arek_display.h` | `arek.display` in C, line by line as the beam passes, with CPU writes in mid-frame; the DDFSTRT delay and the sprite slot rule (below); `arek selftest display --c`: 0 of 204 060 pixels differ |
+| `arek_host_disk.h` | the game's disk reads from images given at run time (`AHD_EXTERN`, below) |
+| `arek_host_engine.c` | the engine of a web page: Emscripten ASYNCIFY, frames on demand, picture / sound / inputs / disks through its API; natively the check line (below) |
+| `arek_host_engine_check.js` | the wasm engine in Node, printing the check line of the native build |
 | `arek_audio.h` | the four channels' bytes as 48 kHz stereo int16 (left 0 + 3, right 1 + 2) |
 | `arek_host_trace.c` | the driver: the game from a state of the original with inputs per frame, records in the trace format, `--pclog`, `--own`, `--reglog`, `--audlog`, `--shots` |
 | `arek_display_render.c` | one frame from a RAM image with the C renderer (the tests and the self-test) |
@@ -27,7 +30,8 @@ cc -O2 -I lib -DGAME_SRC='"game.c"' -DTICK_PC=0xc01c72u -DHOST_ENTRY=f_c01c72 -D
 
 `HOST_L3` is the translated level-3 handler (the vector at $6C, measured with `arek bpstate`);
 `HOST_L1`, `HOST_L2`, `HOST_L4`, `HOST_L5`, `HOST_L6` likewise when the game enables those levels
-(a level without a handler stays pending). `TICK_PC` is the pc of the game's tick (the main loop's
+(a level without a handler stays pending; level 4 comes from the Paula model's interrupt requests - the first
+word after DMA on and the end of every block - as a sound driver that chains blocks through AUDxINT needs). `TICK_PC` is the pc of the game's tick (the main loop's
 head, where the records are taken) and `HOST_ENTRY` the translated routine the run starts in. A
 game that uses no slow RAM leaves `--slow` out; the driver follows `SLOWSZ`.
 
@@ -74,19 +78,82 @@ Environment for calibration: `HOST_VBL_LAT`, `HOST_IRQ_PRE`, `HOST_IRQ_CYC`, `HO
 The same model as `arek.display` (Copper MOVE/WAIT/SKIP, lowres bitplanes 1-6, dual playfield,
 EHB, sprites with attached pairs and priorities, vAmiga's colours), drawn line by line when the
 host's beam has passed the line, so a CPU write to a display register applies from that line.
-Two rules the Alien Breed II project measured, in both renderers (kit 0.7.0):
+The rules the Alien Breed II project and `arek selftest display` measured, in both renderers
+(kit 0.7.0, 0.7.1):
 
 - with DDFSTRT not a multiple of 8 the first pixel is delayed by `(scroll + 2 * (DDFSTRT & 7)) & 15`
   (measured for BPLCON1 $88 $FF $99 $77 $33 $11 against `VAHL_SHOTS`);
-- on a line with bitplane DMA the sprite DMA slots from `DDFSTRT - 1` on are not served (DDFSTRT
-  $24: sprite 3 gets one word, sprites 4-7 none); the missing word keeps the old register, which
-  the screen shows as a striped sprite and a vertical line, as the emulator does. `ARD_SPR_FULL = 1`
-  draws the sprites as if every slot were served (a rebuild's enhanced mode).
+- the sprites' DMA as vAmiga's Agnus and Denise do it: on line 25 (with sprite DMA on) VSTOP of
+  every sprite is forced to 25, so its control words are fetched; VSTART turns the data DMA on,
+  VSTOP off; the words are taken in the sprite's slots of the line ($15 + 4n: POS or the first
+  data word, $17 + 4n: CTL or the second; lines 25-310) after the Copper's writes before them
+  (a DMACON write at the start of the line counts for its slots); a data word arms Denise, a CTL
+  word (by DMA or a register write) disarms it;
+- a slot is not served without DMACON SPREN and DMAEN (a Copper write to DMACON sets or clears
+  its bits) or, on a line with bitplane DMA, from `DDFSTRT - 1` on (DDFSTRT $24: sprite 3 gets
+  one word, sprites 4-7 none); the missing word keeps the old register, which the screen shows
+  as a striped sprite and a vertical line, as the emulator does, and a sprite whose VSTOP passes
+  while its slots are not served keeps showing its last data (to the end of the vertical display
+  window; nothing is drawn outside the window). `ARD_SPR_FULL = 1` draws the sprites as if the
+  bitplanes took no slot (a rebuild's enhanced mode); `ARD_LAST` is the frame's last line (the
+  host sets it from its LOF), where sprite DMA stops;
+- HAM6 (bits 4-5 = palette / blue / red / green from the previous pixel, the chain starting at
+  COLOR00 on every line), hires (2 words per 8-CCK block, 4 planes, the first pixel at
+  `2 * DDFSTRT + 9`, the Copper's slots in 4-CCK blocks), with 6 lowres planes the Copper gets
+  both free even slots of a fetch group, and its WAIT/SKIP comparator sees the beam two colour
+  clocks ahead (`h + 2`, as the bus model).
 
 `ard_overlay(lo, hi, bytes, on)` lets the renderer read a window of chip RAM from a copy the host
 computes (smooth scrolling between the game's ticks without touching the game's RAM);
 `ard_line_cb` / `ard_spr_cb` / `ard_spri_cb` hand a rebuild the lines and the sprites (a wider
 view, sprites at full DMA).
+
+## Disk images at run time (`arek_host_disk.h`)
+
+A rebuild that ships no game data reads the game's files from disk images the visitor gives
+the page (or a file on the command line natively). The game's read routine is replaced with
+`arek recomp --extern ADDR=name` by a few lines of the project that call `ahd_read(disk,
+sector, count, dest)` - which registers carry the disk, the first sector, the count and the
+destination, the disk identities and any sector remapping are the project's, not the kit's:
+
+```c
+AHD_EXTERN(game_read, m->d[4] == 0x123111u ? 0 : 1, (int16_t)m->d[1], (uint16_t)m->d[2], m->a[0])
+/* = void game_read(M68 *m): the sectors to A0, D0 = 0 (or -1 when the image is missing), rts */
+```
+
+`ahd_set(n, bytes, len)` keeps image n (`AHD_DISKS`, 4), `ahd_set_file` natively; `AHD_READS`,
+`AHD_FAIL`, `AHD_LAST_*` for the page's diagnostics; `AHD_LOG=1` prints every read (native).
+
+## The engine of a web page (`arek_host_engine.c`)
+
+The translated game on the host, driven frame by frame by the page, which reads every frame's
+picture (`engine_rgb`, vAmiga's 716 x 285 screenshot layout; `engine_pix` the 12-bit colours)
+and sound (`engine_aud_ring`, 48 kHz stereo, `engine_fr_aud0` / `engine_fr_naud` per frame)
+and gives the inputs (`engine_keys` bits R L U D F on port 1, `engine_keys2` port 0,
+`engine_key` a raw key code) and the disk images (`engine_set_disk`). Built with Emscripten
+ASYNCIFY the game is a coroutine in the page's thread: when it has finished more frames than
+`engine_allow(n)` permits, its next wait loop (the translation's `WAIT_LOOP`: the beam, a
+counter an interrupt bumps) sleeps in `js_wait()` until the page allows more and calls
+`Module.__engineResume()`; meanwhile the page draws. ASYNCIFY instruments only the callers of
+`js_wait`, so the game sleeps in wait loops only (as the Superfrog and Alien Breed II rebuilds).
+A run-time target the translation does not know (`-DUNKNOWN_HOOK`, an unknown overlay module)
+sets `engine_error` and the game sleeps at its next wait loop instead of exiting.
+
+```
+arek host state cap/s0 state0 && arek host pack state0 state0.bin      # the state as one file (engine_init)
+arek host engine web/eng --game game.c --l3 f_c13e1c --entry f_c01c72 --src externs.c [--ovl overlays.c] [--dynamic] --run
+arek host engine out --game game.c --l3 ... --entry ... --native --run  # the same file with cc: the check line
+out/arek_host_engine state0.bin 300 --disk 0 disk1.adf                  # frames 300 frame 599 hash ...
+node lib/arek_host_engine_check.js web/eng state0.bin 300 disk1.adf     # must print the same line from wasm
+```
+
+`--src` is the project's file with its extern routines and hooks (included after the host),
+`--ovl` its overlay modules, `--dynamic` goes on at the popped return address when the entry
+routine returns (a level loop returning to a dispatcher). The native build runs N frames with
+the check's keys and prints the frames done, the last frame's number and the FNV-1a hash of its
+picture and chip RAM (`--shot`, `--dump` keep them); the Node script does the same through the
+page's API, so the wasm build is held against the native one on every change. The synthetic
+test builds both (`tests/test_host_engine.py`, emcc and node when installed).
 
 ## Measured
 

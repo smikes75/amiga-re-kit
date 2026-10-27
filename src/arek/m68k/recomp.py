@@ -27,8 +27,9 @@ TIMING_RT = r'''
 /* 68000 clocks of the translated code (generate(timing=True); arek.m68k.timing, no DMA
    contention). Compile with -DTICK_HOOK to route every instruction to the host instead.
    -DHW_HOOK: hw_read_hook/hw_write_hook for custom registers the runtime does not model and for observing writes;
-   -DCIA_HOOK: cia_read_hook/cia_write_hook for every byte access to $bfxxxx. The driver loads the custom registers
-   of a capture from $AREK_CREG (bpstate creg.bin). */
+   -DCIA_HOOK: cia_read_hook/cia_write_hook for every byte access to $bfxxxx; -DUNKNOWN_HOOK: unknown_hook(a) instead of
+   exit 4 on a run-time target the translation does not know. The driver loads the custom registers of a capture from
+   $AREK_CREG (bpstate creg.bin). */
 uint64_t CYCLES = 0;
 #ifndef PROF_TICK
 #define PROF_TICK(n) ((void)0)
@@ -605,17 +606,27 @@ static int cond(M68 *m, int c) {
     }
 }
 static void push32(M68 *m, uint32_t v) { m->a[7] -= 4; wr32(m->a[7], v); }
+#ifdef UNKNOWN_HOOK
+void unknown_hook(uint32_t a);          /* the host's: a run-time target the translation does not know (no exit) */
+static void unknown_call(uint32_t a) { unknown_hook(a); }
+#else
 static void unknown_call(uint32_t a) { fprintf(stderr, "unknown routine %06x\n", a); exit(4); }
+#endif
 static uint32_t INLINE_RET = 0;     /* where a routine with data after its call returned to */
 
-/* Overlays: code the program loads at run time into a fixed area. Each translated module registers
-   under the FNV-1a 64 of its first bytes (Flow.module); overlay_call hashes the area as it is now. */
+/* Overlays: code the program loads at run time into an area. Each translated module registers under the FNV-1a 64 of
+   its first `key` bytes at its own base (Flow.module); overlay_call hashes the RAM at every registered base inside the
+   area as it is now, so modules may lie anywhere in the area and several may share it. An unknown module stops the
+   run (exit 5) unless the host defines OVERLAY_HOOK and overlay_unknown_hook(m, base, entry, fp). */
 typedef void (*OvlFn)(M68 *m, uint32_t a);
-static struct { uint64_t fp; OvlFn fn; const char *name; } OVL[64];
+static struct { uint64_t fp; OvlFn fn; const char *name; uint32_t base, key; } OVL[64];
 static int OVL_N = 0;
-void overlay_register(uint64_t fp, OvlFn fn, const char *name) {
-    if (OVL_N < 64) { OVL[OVL_N].fp = fp; OVL[OVL_N].fn = fn; OVL[OVL_N].name = name; OVL_N++; }
+void overlay_register(uint64_t fp, OvlFn fn, const char *name, uint32_t base, uint32_t key) {
+    if (OVL_N < 64) { OVL[OVL_N].fp = fp; OVL[OVL_N].fn = fn; OVL[OVL_N].name = name; OVL[OVL_N].base = base; OVL[OVL_N].key = key; OVL_N++; }
 }
+#ifdef OVERLAY_HOOK
+void overlay_unknown_hook(M68 *m, uint32_t base, uint32_t entry, uint64_t fp);
+#endif
 static uint32_t rd8(uint32_t a);
 static uint64_t overlay_fp(uint32_t base, uint32_t n) {
     uint64_t h = 0xcbf29ce484222325ull;
@@ -675,7 +686,7 @@ class Gen:
         self.emit('void overlay_call(M68 *m, uint32_t a);')
         self.emit('void call_addr(M68 *m, uint32_t a);')
         if self.flow.module:
-            self.emit('void overlay_register(uint64_t fp, void (*fn)(M68 *, uint32_t), const char *name);')
+            self.emit('void overlay_register(uint64_t fp, void (*fn)(M68 *, uint32_t), const char *name, uint32_t base, uint32_t key);')
         self.emit()
         for s, e, entry in self.funcs:
             self.gen_func(s, e, entry)
@@ -734,15 +745,20 @@ class Gen:
         """overlay_call (the areas of Flow.overlays) and call_addr (every entry of this
         translation, the overlay areas, else unknown_call) for run-time targets."""
         self.emit('void overlay_call(M68 *m, uint32_t a) {')
-        self.emit('    uint32_t base = 0, key = 0;')
+        self.emit('    uint32_t base = 0, size = 0, key = 0;')
         for b, n, k in self.flow.overlays:
-            self.emit('    if (a - 0x%xu < 0x%xu) { base = 0x%xu; key = %du; }' % (b, n, b, k))
-        self.emit('    if (!key) unknown_call(a);')
-        self.emit('    uint64_t fp = overlay_fp(base, key);')
-        self.emit('    for (int i = 0; i < OVL_N; i++) if (OVL[i].fp == fp) { OVL[i].fn(m, a); return; }')
-        self.emit('    fprintf(stderr, "overlay_call: unknown module %016llx at %06x, entry %06x\\n", '
-                  '(unsigned long long)fp, base, a);')
+            self.emit('    if (a - 0x%xu < 0x%xu) { base = 0x%xu; size = 0x%xu; key = %du; }' % (b, n, b, n, k))
+        self.emit('    if (!size) unknown_call(a);')
+        self.emit('    for (int i = 0; i < OVL_N; i++)')
+        self.emit('        if (OVL[i].base - base < size && OVL[i].fp == overlay_fp(OVL[i].base, OVL[i].key)) { OVL[i].fn(m, a); return; }')
+        self.emit('    uint64_t fp = overlay_fp(a, key);')
+        self.emit('#ifdef OVERLAY_HOOK')
+        self.emit('    overlay_unknown_hook(m, base, a, fp); return;')
+        self.emit('#else')
+        self.emit('    fprintf(stderr, "overlay_call: unknown module at %06x (entry %06x, %u bytes there %016llx)\\n", '
+                  'base, a, key, (unsigned long long)fp);')
         self.emit('    exit(5);')
+        self.emit('#endif')
         self.emit('}')
         self.emit('void call_addr(M68 *m, uint32_t a) {')
         self.emit('    switch (a) {')
@@ -773,7 +789,7 @@ class Gen:
         self.emit('    unknown_call(a);')
         self.emit('}')
         self.emit('__attribute__((constructor)) static void ovl_%s_register(void) '
-                  '{ overlay_register(0x%016xull, ovl_%s, "%s"); }' % (name, fp, name, name))
+                  '{ overlay_register(0x%016xull, ovl_%s, "%s", 0x%xu, %du); }' % (name, fp, name, name, base, key))
         self.emit()
 
     def all_entries(self):
@@ -1465,7 +1481,7 @@ def refusal_json(e):
 
 def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow=NOFLOW,
              stub_impl=None, timing=False, memsz=None, slow=None, profile=False, cover=None, oob='stop',
-             cover_in_tick=False, bus_table=False):
+             cover_in_tick=False, bus_table=False, auto_soft=False, report=None):
     """Return (c_source, stats, entries). ``funcs`` are (start, end, entry) linear ranges,
     ``auto`` are entry addresses whose bodies are discovered by walking the
     flow graph (transitively over bsr/jsr). ``flow`` (a decoder.Flow) carries what the
@@ -1494,12 +1510,32 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
     ``memsz``: chip RAM bytes from 0 (default 512 KB); ``slow``: (base, size) of slow RAM, e.g.
     (0xc00000, 0x80000) - the driver then reads/writes it as optional files 5 and 6. Both can
     also be set when compiling (-DMEMSZ=..., -DSLOWBASE=..., -DSLOWSZ=...).
+    ``auto_soft``: an ``auto`` root whose own walk hits undecodable words (a root that leads into
+    data, as a static root scan produces) is dropped with a note instead of refusing the whole
+    translation; ``report`` (a dict) gets ``{'dropped': [(root, why)]}``. Frontiers inside routines the
+    roots reach still refuse.
     Raises Unsupported / SystemExit-free."""
     hi = min(hi if hi is not None else base + len(data), base + len(data))
     lo = max(lo, base)                           # nothing outside the image can be walked
     cfg = {}
+    if report is not None:
+        report['dropped'] = []
     if auto:
-        tree = call_tree(data, base, list(auto), lo, hi, flow)
+        auto = list(auto)
+        tree = call_tree(data, base, auto, lo, hi, flow)
+        if auto_soft:
+            while True:
+                called = set()
+                for e, (ins, calls, bad, ind) in tree.items():
+                    called |= set(calls)
+                dropped = [e for e in auto if e in tree and tree[e][2] and e not in called]
+                if not dropped:
+                    break
+                for e in dropped:
+                    if report is not None:
+                        report['dropped'].append((e, tree[e][2][0][1]))
+                    auto.remove(e)
+                tree = call_tree(data, base, auto, lo, hi, flow)
         first, found, seen = None, [], set()
         for e, (ins, calls, bad, ind) in tree.items():
             for site, why in bad + ind:

@@ -127,6 +127,20 @@ game waits for fire. To compare a level byte for byte, the harness presses fire 
 pass of that wait loop as the emulator recording did (`arek trace run --inputs`), and the generator state at the start
 of the level then matches; check it before blaming the level code.
 
+**A whole game, not one level.** The walker sees calls and branches; a game reaches the rest
+through tables and stored addresses. `arek roots image.bin --base B --lo CODE --hi END` lists the
+static roots: tables of `bra.w` slots, pointer tables into code, the bases `lea`/`pea` point at,
+and `move.l #code,...` (a handler stored into a structure at run time). Give them to
+`arek recomp --auto-file roots.txt --auto-soft`: a root that leads into data is dropped with a
+note instead of refusing the translation. Then the coverage loop (Alien Breed II, 17 levels):
+run the host with random play and level skips; every `unknown routine X` becomes a root and the
+translation is rebuilt; an unknown module in an overlay area (`--overlay BASE:SIZE:KEY`) is
+dumped from RAM by the host's `overlay_unknown_hook` (`-DOVERLAY_HOOK`) and translated as a
+module (`arek recomp --lib --prefix --overlay-module ADDR:KEY`), registered under the fingerprint
+of its first bytes at its own address, so modules may lie anywhere in the area. Disk reads go
+through the host (`--extern READ_ROUTINE=host_disk_read` with the game's register convention),
+so the data comes from the visitor's disk images at run time and never into the translation.
+
 ## 6. Reading the interpreters
 
 Level maps, sprite formats, animation scripts: the same rule. Find the

@@ -378,13 +378,26 @@ def test_selftest_audio_disk_and_conversions():
     pay = selftest.AUDIO_PAYLOAD
     assert d[12 + 26:12 + 26 + len(pay)] == pay and pay[:6] == bytes.fromhex('4df900dff000')
     assert pay[selftest.AUDIO_SAMP - 0x40000:selftest.AUDIO_SAMP - 0x40000 + 4] == bytes([0, 16, 32, 48])
-    assert pay[selftest.AUDIO_LOOP - 0x40000:selftest.AUDIO_LOOP - 0x40000 + 2] == bytes.fromhex('7064')      # moveq #100,d0
+    assert pay[selftest.AUDIO_LOOP - 0x40000:selftest.AUDIO_LOOP - 0x40000 + 6] == bytes.fromhex('4bf90003c000')   # lea $3c000,a5 (the loop's head)
     recs = [{'frame': 331, 'v': 100, 'h': 40, 'reg': 0x096, 'value': 0x8001, 'agnus': False},
             {'frame': 330, 'v': 100, 'h': 30, 'reg': 0x0a6, 'value': 200, 'agnus': False},
             {'frame': 330, 'v': 100, 'h': 31, 'reg': 0x09a, 'value': 0xc020, 'agnus': False}]   # INTENA: not Paula's
     w = bus.paula_writes(recs, 330, 313)
     assert w == [(100 * 227 + 30, 0x0a6, 200), (313 * 227 + 100 * 227 + 40, 0x096, 0x8001)]
     assert bus.paula_samples([(330, 5, 6, -64, 2)], 330, 313) == [(5 * 227 + 6, 2, -64)]
+    # the program's interrupt table: an entry per detection (bits, VPOSR, VHPOSR, frame counter); the counter maps to the
+    # records' frames (d7 counts at line 100: an entry below line 100 belongs to the next frame)
+    table = struct.pack('>4H', 0x0080, 0, 0x6410, 7) + struct.pack('>4H', 0x0300, 1, 0x0a20, 7) + struct.pack('>4H', 0x0080, 0, 0x3005, 8) + bytes(8)
+    recs = [{'frame': 340, 'd': [0] * 7 + [7], 'ranges': {}}, {'frame': 341, 'd': [0] * 7 + [8], 'ranges': {selftest.AUDIO_TABLE: table}}]
+    assert selftest.audio_table(recs) == [(0, 340, 100, 0x10), (1, 340, 0x10a, 0x20), (2, 340, 0x10a, 0x20), (0, 342, 0x30, 5)]
+    model = [(0, 10 * 313 * 227 + 100 * 227 + 13), (1, 10 * 313 * 227 + 0x10a * 227 + 15), (2, 10 * 313 * 227 + 0x10a * 227 + 17),
+             (0, 12 * 313 * 227 + 0x30 * 227 - 100), (3, 12 * 313 * 227)]
+    q = selftest.audio_irqs(recs, model, 330, 313, 0)
+    assert (q['detected'], q['model'], q['matched'], q['max_delay'], q['late'], q['missing']) == (4, 5, 4, 105, 0, 1)
+    assert q['unmatched'] == [] and q['orphans'] == [(3, 12 * 313 * 227)]
+    q = selftest.audio_irqs(recs, model, 330, 313, 0, window=80)
+    assert q['unmatched'] == [(0, 12 * 313 * 227 + 0x30 * 227 + 5)] and q['orphans'] == [(3, 12 * 313 * 227), (0, 12 * 313 * 227 + 0x30 * 227 - 100)]   # in time order
+    assert selftest.audio_irqs(recs, model, 330, 313, 0, to_t=11 * 313 * 227)['detected'] == 3   # the log's end bounds the detections
 
 
 def test_paula_check_program(tmp_path):
@@ -408,5 +421,9 @@ def test_paula_check_program(tmp_path):
     (tmp_path / 'full.abbl').write_bytes(b'ABBL' + struct.pack('<5I', H, NL, 0, 1, 0) + bytes(full))
     ram = bytearray(0x2000)
     ram[0x1000:0x1008] = bytes.fromhex('0102030405060708')
-    r = bus.paula_check(str(tmp_path / 'full.abbl'), writes, samples=[(2737, 0, 64), (2837, 0, 128)], exe=exe, ram=bytes(ram))
+    r = bus.paula_check(str(tmp_path / 'full.abbl'), writes, samples=[(2737, 0, 64), (2837, 0, 128)], exe=exe, ram=bytes(ram), irqs=True)
     assert r['slots'][0]['only_model'] == 0 and r['samples'][0]['exact'] == 2 and r['samples'][0]['model'] > 2
+    # the interrupt requests: the slot of the first (discarded) word after DMA on, then the slot of every block's last word
+    # the interrupt requests, one CCK after: the slot of the first (discarded) word after DMA on; the block's last word
+    # arrives at line 15 (4 words from line 12) and its request is raised at the next high byte (bytes every 100 CCK from 2737)
+    assert r['irqs'][:2] == [(0, 11 * 227 + 13 + 1), (0, 3537 + 1)] and 'interrupt requests:' in r['text']

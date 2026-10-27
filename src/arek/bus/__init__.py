@@ -121,11 +121,11 @@ def compile_paula_check(out=None, cc=None):
 
 
 def paula_writes(records, frame0, lines, hpos=227):
-    """``(t, off, value)`` of the writes to DMACON and the AUDx registers in ``trace.read_reglog`` records
+    """``(t, off, value)`` of the writes to DMACON, INTREQ and the AUDx registers in ``trace.read_reglog`` records
     (CPU and Copper alike), ``t`` in CCK relative to slot 0 of frame ``frame0`` (negative before it), sorted."""
     out = []
     for r in records:
-        if r['reg'] == 0x096 or 0x0a0 <= r['reg'] < 0x0e0:
+        if r['reg'] in (0x096, 0x09c) or 0x0a0 <= r['reg'] < 0x0e0:
             out.append(((r['frame'] - frame0) * lines * hpos + r['v'] * hpos + r['h'], r['reg'], r['value']))
     out.sort(key=lambda x: x[0])
     return out
@@ -136,13 +136,17 @@ def paula_samples(samples, frame0, lines, hpos=227):
     return sorted(((frame - frame0) * lines * hpos + v * hpos + h, ch, value) for frame, v, h, value, ch in samples)
 
 
-def paula_check(abbl, writes, samples=None, from_frame=0, exe=None, ram=None):
+def paula_check(abbl, writes, samples=None, from_frame=0, exe=None, ram=None, irqs=False):
     """Run ``arek_bus_paula_check`` (``ram``: the chip RAM image the samples are fetched from, path or bytes):
     ``{'agree', 'disagree', 'slots': {ch: {'log', 'model', 'agree', 'only_log', 'only_model'}},
-    'samples': {ch: {'log', 'model', 'exact', 'near'}}, 'text', 'rc'}``."""
+    'samples': {ch: {'log', 'model', 'exact', 'near'}}, 'text', 'rc'}``; ``irqs``: also ``'irqs'`` = the model's
+    interrupt requests ``[(ch, t)]`` (t in CCK from the log's first frame)."""
     import re
     exe = exe or compile_paula_check()
     d = os.path.dirname(os.path.abspath(abbl))
+    env = dict(os.environ)
+    if irqs:
+        env['AREK_PAULA_IRQ'] = os.path.join(d, 'paula_irqs.txt')
     wpath, spath = os.path.join(d, 'paula_writes.txt'), os.path.join(d, 'paula_samples.txt')
     with open(wpath, 'w') as f:
         for t, off, v in writes:
@@ -160,8 +164,11 @@ def paula_check(abbl, writes, samples=None, from_frame=0, exe=None, ram=None):
                 f.write(ram)
             ram = rpath
         args.append(ram)
-    r = subprocess.run(args, capture_output=True, text=True)
+    r = subprocess.run(args, capture_output=True, text=True, env=env)
     out = {'slots': {}, 'samples': {}, 'text': r.stdout + r.stderr, 'rc': r.returncode, 'agree': 0, 'disagree': -1}
+    if irqs:
+        with open(env['AREK_PAULA_IRQ']) as f:
+            out['irqs'] = [(int(a), float(b)) for a, b in (ln.split() for ln in f if ln.strip())]
     for m in re.finditer(r'slots ch(\d): log (\d+) model (\d+) agree (\d+) only-log (\d+) only-model (\d+)', r.stdout):
         out['slots'][int(m.group(1))] = dict(zip(('log', 'model', 'agree', 'only_log', 'only_model'), map(int, m.groups()[1:])))
     for m in re.finditer(r'samples ch(\d): log (\d+) model (\d+) exact (\d+) near (\d+)', r.stdout):

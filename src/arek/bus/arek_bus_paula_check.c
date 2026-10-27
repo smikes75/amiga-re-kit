@@ -6,7 +6,8 @@
  * sorted by t. SAMPLES.txt: lines `t ch value` (the log's output samples, byte * volume). FROM_FRAME: first frame of the
  * log to compare (default 0). RAM.bin: the chip RAM the samples are fetched from (zeros without it). Output: per channel
  * the slots that agree / only in the log / only in the model, the samples
- * that agree exactly and within 1 CCK; exit 0 when no slot disagrees in the compared frames. No game data. */
+ * that agree exactly and within 1 CCK; exit 0 when no slot disagrees in the compared frames. $AREK_PAULA_IRQ: a file
+ * that gets the model's interrupt requests (`ch t` per line, t relative to the log's first frame). No game data. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,9 @@ static void on_sample(void *ctx, int ch, double t, int value) {
     if (SN == SCAP) { SCAP = SCAP ? 2 * SCAP : 65536; SM = realloc(SM, (size_t)SCAP * sizeof *SM); }
     SM[SN].t = t; SM[SN].ch = ch; SM[SN].v = value; SN++;
 }
+static FILE *IRQF = 0, *TRF = 0;
+static void on_irq(void *ctx, int ch, double t) { (void)ctx; if (IRQF) fprintf(IRQF, "%d %.0f\n", ch, t); }
+static void on_state(void *ctx, int ch, double t, int st) { (void)ctx; if (TRF) fprintf(TRF, "%d %.0f %d\n", ch, t, st); }   /* $AREK_PAULA_TRACE: `ch t state` */
 static int cmp_sample(const void *a, const void *b) {
     const Sample *x = a, *y = b;
     if (x->ch != y->ch) return x->ch - y->ch;
@@ -54,6 +58,8 @@ int main(int argc, char **argv) {
     static uint16_t regs[0x100];
     ArekBus B; arek_bus_init(&B, (int)H, (int)NL, (int)NL, own, regs, rd16, 0);
     ArekPaula P; arek_paula_init(&P, &B, on_sample, 0);
+    if (getenv("AREK_PAULA_IRQ")) { IRQF = fopen(getenv("AREK_PAULA_IRQ"), "w"); P.irq_cb = on_irq; }
+    if (getenv("AREK_PAULA_TRACE")) { TRF = fopen(getenv("AREK_PAULA_TRACE"), "w"); P.state_cb = on_state; }
     long first_fr = 0;
     if (WN && WT[0] < 0) first_fr = (long)floor(WT[0] / FS);
     long ok[4] = { 0 }, only_log[4] = { 0 }, only_model[4] = { 0 }, logn[4] = { 0 }, modn[4] = { 0 };
@@ -110,5 +116,8 @@ int main(int argc, char **argv) {
             printf("\n");
         }
     }
+    printf("interrupt requests: %ld\n", P.irqs);
+    if (IRQF) fclose(IRQF);
+    if (TRF) fclose(TRF);
     return bad ? 1 : 0;
 }

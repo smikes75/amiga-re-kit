@@ -43,6 +43,7 @@ the kit's own tests; the ones that drive the emulator need ``local.conf``.
 """
 import argparse
 import json
+import shlex
 import os
 import sys
 from pathlib import Path
@@ -263,6 +264,17 @@ def cmd_xref(a):
         print(x.summary(a.top))
 
 
+def cmd_roots(a):
+    from .m68k import roots
+    data = rd(a.file)
+    r = roots.scan(data, a.base, a.lo, a.hi, min_slots=a.min_slots, min_run=a.min_run, kinds=tuple(a.kinds or ('slots', 'ptr', 'lea', 'imm')))
+    print(roots.format_roots(r))
+    if a.json:
+        with open(a.json, 'w') as f:
+            json.dump({'%x' % k: sorted(v) for k, v in sorted(r.items())}, f, indent=1)
+    print('%d roots (%s)' % (len(r), ', '.join('%s %d' % (k, sum(1 for v in r.values() if k in v)) for k in ('slots', 'ptr', 'lea', 'imm'))), file=sys.stderr)
+
+
 def cmd_recomp(a):
     from .m68k import recomp
     data = rd(a.file)
@@ -278,12 +290,20 @@ def cmd_recomp(a):
     if a.refusals and os.path.exists(a.refusals):
         os.unlink(a.refusals)
     cover = {} if a.cover else None
+    auto = list(a.auto or [])
+    for f in a.auto_file or []:
+        for line in Path(f).read_text().splitlines():
+            tok = line.split('#')[0].split()
+            if tok:
+                auto.append(int(tok[0], 16))
+    report = {}
     try:
         src, stats, entries = recomp.generate(
-            data, a.base, funcs, a.auto or [], a.lo or a.base, a.hi, with_main=a.main, flow=flow,
+            data, a.base, funcs, auto, a.lo or a.base, a.hi, with_main=a.main, flow=flow,
             stub_impl=impl, timing=a.timing, memsz=a.memsz,
             slow=tuple(_hex(x) for x in a.slow.split(':')) if a.slow else None, profile=a.profile,
-            cover=cover, oob=a.oob, cover_in_tick=a.cover_in_tick, bus_table=a.bus_table)
+            cover=cover, oob=a.oob, cover_in_tick=a.cover_in_tick, bus_table=a.bus_table,
+            auto_soft=a.auto_soft, report=report)
     except recomp.Unsupported as e:
         if a.refusals:
             Path(a.refusals).write_text(json.dumps(recomp.refusal_json(e), indent=1) + '\n')
@@ -292,6 +312,8 @@ def cmd_recomp(a):
                                                    else '; --refusals FILE lists them as JSON'), file=sys.stderr)
         raise
     Path(a.out).write_text(src)
+    for root, why in report.get('dropped', []):
+        print('arek recomp: root %06x dropped (leads into data: %s)' % (root, why), file=sys.stderr)
     if cover is not None:
         Path(a.out + '.cover.json').write_text(json.dumps(cover) + '\n')
     print('%s: %d entries (%s), %d instruction kinds, %d instructions' %
@@ -444,7 +466,24 @@ def cmd_host(a):
         r = host.state(a.target, a.out, trace=a.trace)
         print('%s: sr %04x frame %d time %d pc %06x' % (r['dir'], r['sr'], r['frame'], r['time'], r['pc']))
         return
-    raise ValueError('arek host copy DIR | state CAPTURE OUT')
+    if a.what == 'pack':
+        if not a.out:
+            raise ValueError('arek host pack STATE_DIR OUT.bin')
+        print('%s: %d bytes' % (a.out, host.pack(a.target, a.out)))
+        return
+    if a.what == 'engine':
+        if not (a.game and a.l3 and a.entry):
+            raise ValueError('arek host engine OUT_DIR --game game.c --l3 f_xxxxxx --entry f_xxxxxx [--native] [--dynamic] [--ovl F] [--src F] [--run]')
+        kw = dict(cc=a.cc, native=a.native, dynamic=a.dynamic, ovl=a.ovl, src=a.src, includes=a.include or (), defines=a.define or (),
+                  export=a.export, extra=a.extra or ())
+        if a.run:
+            cmd = host.engine_build(a.target, a.game, a.l3, a.entry, **kw)
+            print('built: ' + os.path.join(a.target, 'arek_host_engine' if a.native else 'engine.js'))
+        else:
+            cmd = host.engine_command(a.target, a.game, a.l3, a.entry, **kw)
+        print(' '.join(shlex.quote(x) for x in cmd))
+        return
+    raise ValueError('arek host copy DIR | state CAPTURE OUT | pack STATE OUT.bin | engine OUT_DIR --game ... --l3 ... --entry ...')
 
 
 def cmd_cover(a):
@@ -479,6 +518,16 @@ def cmd_parity(a):
         print(json.dumps(rows, indent=1))
     else:
         print(parity.format_suite(rows))
+
+
+def cmd_shots(a):
+    from . import parity
+    r = parity.compare_shots(a.orig, a.rebuild, a.tolerance, a.shift, a.align)
+    if a.json:
+        print(json.dumps(r, indent=1))
+    else:
+        print(parity.format_shots(r, a.all))
+    return 0 if r['pairs'] and r['equal'] == r['pairs'] else 1
 
 
 def cmd_profile(a):
@@ -550,12 +599,29 @@ def cmd_web(a):
             with open(a.content, 'w') as f:
                 json.dump(content, f, indent=1)
         print('%s: %d bytes, %d files%s' % (a.out, len(payload), len(content['files']), ' -> ' + a.content if a.content else ''))
+    elif a.what == 'strip':
+        from . import web as webmod
+        if not a.target or not a.rest:
+            raise ValueError('web strip IN OUT --drop TAG [--drop TAG2]')
+        with open(a.target, encoding='utf-8') as f:
+            text = f.read()
+        out = webmod.strip(text, tuple(a.drop or ('FULL',)))
+        with open(a.rest[0], 'w', encoding='utf-8') as f:
+            f.write(out)
+        print('%s: %d -> %d lines (without %s)' % (a.rest[0], text.count('\n') + 1, out.count('\n') + 1, ', '.join(a.drop or ('FULL',))))
+    elif a.what == 'longrun':
+        from . import web as webmod
+        if not a.target:
+            raise ValueError('web longrun URL [--minutes M] [--interval S] [--sample S]')
+        for row in webmod.longrun(a.target, a.minutes, a.interval, a.sample):
+            print(webmod.format_longrun(row), flush=True)
     elif a.what == 'serve':
         from . import web as webmod
         from .headless import config
         conf = config.load(a.conf) if os.path.exists(a.conf) else {}
-        srv = webmod.serve(a.target or '.', a.port, conf)
-        print('http://127.0.0.1:%d/  (%s; disks of %s at %s; Ctrl+C to stop)' % (a.port, a.target or '.', a.conf, ', '.join(sorted(srv.disks)) or 'none'), flush=True)
+        srv = webmod.serve(a.target or '.', a.port, conf, isolated=a.isolated)
+        print('http://127.0.0.1:%d/  (%s; disks of %s at %s%s; Ctrl+C to stop)' % (a.port, a.target or '.', a.conf, ', '.join(sorted(srv.disks)) or 'none',
+                                                                                  '; COOP/COEP' if a.isolated else ''), flush=True)
         try:
             srv.serve_forever()
         except KeyboardInterrupt:
@@ -609,7 +675,13 @@ def cmd_selftest(a):
         print('%s: Paula model against the logs of %d frames (from frame %d of the window): audio DMA slots %d agree / %d disagree; samples %s' % (
             conf['VAHL'], r['frames'], r['from'] if 'from' in r else 0, r['agree'], r['disagree'],
             ', '.join('ch%d %d/%d exact %d' % (ch, v['model'], v['log'], v['exact']) for ch, v in sorted(r['samples'].items()))))
-        if r['disagree'] or not r['agree']:
+        q = r.get('irq')
+        if q:
+            print('interrupt requests: %d detected by the program, %d in the model, %d detections explained (at most %d CCK after the request)%s%s' % (
+                q['detected'], q['model'], q['matched'], q['max_delay'],
+                '; unexplained detections: %s' % q['unmatched'] if q['unmatched'] else '', '; requests not seen: %s' % q['orphans'] if q['orphans'] else ''))
+        # a few detections lag more than the window at the program's own write bursts (line 100 of a setup frame)
+        if r['disagree'] or not r['agree'] or (q and q['late'] + q['missing'] > max(2, q['detected'] // 200)):
             raise RuntimeError('the Paula model and this emulator disagree (files in %s)' % r['dir'])
         return
     if a.what == 'display':
@@ -861,6 +933,9 @@ def build_parser():
     s.add_argument('--base', type=AH, required=True)
     s.add_argument('--func', nargs='*', metavar='START:END[:ENTRY]')
     s.add_argument('--auto', type=AH, nargs='*', metavar='ENTRY')
+    s.add_argument('--auto-file', nargs='*', metavar='FILE', help='more --auto entries, one hex address per line (arek roots)')
+    s.add_argument('--auto-soft', action='store_true', help='an --auto root that leads into data is dropped with a note '
+                   'instead of refusing the translation (static roots from arek roots)')
     s.add_argument('--stub', nargs='*', metavar='An:DISP:NAME')
     s.add_argument('--lo', type=AH)
     s.add_argument('--hi', type=AH)
@@ -1017,11 +1092,34 @@ def build_parser():
     s.add_argument('--max', type=int, default=3, help='calls per routine (3)')
     s.add_argument('--json', help='write the results here')
     s.set_defaults(fn=cmd_verify)
+    s = sp.add_parser('roots', help='static roots for a whole-game translation: bra.w slot tables, pointer tables, lea/pea table bases, move.l #code (docs/METHOD.md)')
+    s.add_argument('file')
+    s.add_argument('--base', type=AH, required=True)
+    s.add_argument('--lo', type=AH, help='code range start (default: the image)')
+    s.add_argument('--hi', type=AH, help='code range end')
+    s.add_argument('--min-slots', type=int, default=4, help='bra.w slots in a row that make a table (4)')
+    s.add_argument('--min-run', type=int, default=1, help='code pointers in a row that count (1: single pointers too)')
+    s.add_argument('--kinds', nargs='*', choices=['slots', 'ptr', 'lea', 'imm'], help='which kinds (default all)')
+    s.add_argument('--json', help='write {address: [kinds]} here')
+    s.set_defaults(fn=cmd_roots)
     s = sp.add_parser('host', help='the host of a translation (C sources: time, interrupts, CIAs, Paula, picture) and its state')
-    s.add_argument('what', choices=['copy', 'state'])
-    s.add_argument('target', help='copy: destination folder; state: a bpstate capture folder')
-    s.add_argument('out', nargs='?', help='state: the state folder to write')
+    s.add_argument('what', choices=['copy', 'state', 'pack', 'engine'])
+    s.add_argument('target', help='copy: destination folder; state: a bpstate capture folder; pack: the state folder; engine: the output folder')
+    s.add_argument('out', nargs='?', help='state: the state folder to write; pack: the file to write')
     s.add_argument('--trace', help='state: a trace armed at the same stop (its record 0 gives SR when cpu.json has none)')
+    s.add_argument('--game', help='engine: the translation (arek recomp --timing --bus-table, no --main)')
+    s.add_argument('--l3', help='engine: the translated level-3 handler (HOST_L3)')
+    s.add_argument('--entry', help='engine: the translated routine the run starts in (HOST_ENTRY)')
+    s.add_argument('--native', action='store_true', help='engine: build with the C compiler (the check line) instead of Emscripten')
+    s.add_argument('--dynamic', action='store_true', help='engine: go on at the popped return address when the entry returns (ENGINE_DYNAMIC)')
+    s.add_argument('--ovl', help='engine: the overlay modules file (OVL_SRC)')
+    s.add_argument('--src', help='engine: the project file with its extern routines and hooks (ENGINE_SRC)')
+    s.add_argument('--include', action='append', help='engine: an include folder (repeatable)')
+    s.add_argument('--define', action='append', help='engine: a NAME=VALUE for the compiler (repeatable)')
+    s.add_argument('--cc', help='engine: the compiler (emcc / cc)')
+    s.add_argument('--export', default='ArekEngine', help='engine: the module factory name (EXPORT_NAME)')
+    s.add_argument('--extra', action='append', help='engine: an extra compiler argument (repeatable)')
+    s.add_argument('--run', action='store_true', help='engine: run the command')
     s.set_defaults(fn=cmd_host)
     s = sp.add_parser('cover', help='coverage of a translation run (recomp --cover): what never ran')
     s.add_argument('file', nargs='+', help='dumps the runtime wrote (AREK_COVER or cov_dump; several = their union) '
@@ -1045,6 +1143,15 @@ def build_parser():
     s.add_argument('--no-run', action='store_true', help="do not run a scenario's make command for a missing original trace")
     s.add_argument('--json', action='store_true')
     s.set_defaults(fn=cmd_parity)
+    s = sp.add_parser('shots', help='the pictures of two runs (PREFIX_<frame>.raw, RGB24) paired by frame, with a screen-shake alignment')
+    s.add_argument('orig', help='the original\'s prefix (arek trace run --shots)')
+    s.add_argument('rebuild', help='the rebuild\'s prefix (host_trace --shots)')
+    s.add_argument('--align', type=int, default=0, help='try shifts up to N pixels per pair and take the best (a shake)')
+    s.add_argument('--tolerance', type=int, default=0, help='a channel difference up to this is equal')
+    s.add_argument('--shift', type=int, default=0, help='rebuild frame = original frame + N')
+    s.add_argument('--all', action='store_true', help='list every pair, not only the differing ones')
+    s.add_argument('--json', action='store_true')
+    s.set_defaults(fn=cmd_shots)
     s = sp.add_parser('profile', help='routine profile of a translation run (recomp --profile): what to rewrite first')
     s.add_argument('file', help='the profile the runtime wrote (AREK_PROFILE or prof_dump)')
     s.add_argument('--by', choices=['clocks', 'calls', 'bytes'], default='clocks')
@@ -1054,12 +1161,17 @@ def build_parser():
     s.set_defaults(fn=cmd_profile)
 
     s = sp.add_parser('web', help='display contract: reference wb-obraz.js, demo page, Chromium tests (WB-OBRAZ-CRT.md)')
-    s.add_argument('what', choices=['copy', 'demo', 'test', 'seal', 'check', 'payload', 'serve'])
+    s.add_argument('what', choices=['copy', 'demo', 'test', 'seal', 'check', 'payload', 'serve', 'strip', 'longrun'])
     s.add_argument('target', nargs='?', help='copy: destination folder (writes wb-obraz.js, wb-seal.js, wb-nastaveni.js, '
-                   'wb-zvuk.js, wb-atn.js, wb-content.js); serve: the bundle folder (default .); demo: nothing - it serves the package\'s demo.html on http://127.0.0.1:PORT/demo.html '
+                   'wb-zvuk.js, wb-atn.js, wb-content.js, wb-touch.js); serve: the bundle folder (default .); demo: nothing - it serves the package\'s demo.html on http://127.0.0.1:PORT/demo.html '
                    '(the file itself is arek/web/demo.html in the installed package); test: URL of a page with window.wbObrazTest; '
-                   'seal: the first file; check: a presentation bundle folder')
-    s.add_argument('rest', nargs='*', help='seal: more files')
+                   'seal: the first file; check: a presentation bundle folder; strip: the source file; longrun: the URL of a page with globalThis.WBLONGRUN')
+    s.add_argument('rest', nargs='*', help='seal: more files; strip: the output file')
+    s.add_argument('--drop', action='append', metavar='TAG', help='strip: the variant to cut out (lines //@TAG, blocks //@TAG{ ... //@}TAG); default FULL')
+    s.add_argument('--isolated', action='store_true', help='serve: send the COOP / COEP headers (cross-origin isolation)')
+    s.add_argument('--minutes', type=float, default=3.0, help='longrun: how long to play (default 3)')
+    s.add_argument('--interval', type=float, default=30.0, help='longrun: seconds between samples (default 30)')
+    s.add_argument('--sample', type=float, default=3.0, help='longrun: seconds of frames per sample (default 3)')
     s.add_argument('--set', action='append', metavar='DISK.adf[,DISK2.adf]',
                    help='seal: a disk set that opens the files (repeat for other versions)')
     s.add_argument('--out', help='seal: output folder (seal.json + FILE.sealed)')

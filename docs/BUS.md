@@ -102,32 +102,47 @@ blitter (`run_blit`) moves its words raw - they are the blitter's slots in the m
 mistake, 0.5.18 counts them again: KIT-GAPS 29 - the extension words an indirect jump re-reads stay raw,
 they are prefetch and in the bus table). Audio DMA slots come from the host's Paula model (`arek_bus_mark`).
 
-## Audio DMA (Paula), kit 0.7.0
+## Audio DMA (Paula), kit 0.7.0 / 0.7.1
 
-`arek_bus_paula.h` (header-only, MIT) marks the audio slots ($0D + 2n of every line) the way Paula uses them and
-outputs the channels' bytes, so a host has the complete slot map and the sound. Rules measured by the Alien Breed II
-project against `VAHL_BUSLOG` / `VAHL_AUDLOG` and checked by `arek selftest audio` (four channels, periods 124-300,
-lengths 4-32 words, DMA switched on and off at two points of the frame, a period and volume change while playing):
+`arek_bus_paula.h` (header-only, MIT) marks the audio slots ($0D + 2n of every line) the way Paula uses them,
+outputs the channels' bytes and raises their interrupt requests, so a host has the complete slot map, the sound
+and level 4. It is the hardware's state machine (the HRM's states 000 / 001 / 101 / 010 / 011) written from the
+behaviour measured by the Alien Breed II project against `VAHL_BUSLOG` / `VAHL_AUDLOG` and by `arek selftest
+audio` (four channels, periods 124-300, lengths 4-32 words, DMA switched on and off at two points of the frame, a
+period and volume change while playing; since 0.7.1 the program polls INTREQR, records every request with the beam
+position and clears it, so the interrupt times are measured too):
 
-- DMA on raises a request; a request raised in line v is served in the channel's slot of line v + 1, even if DMA was
-  switched off meanwhile. The first word after switching on is discarded and the pointer goes back to AUDxLC; the
-  second word starts the output and requests the next; then a byte every AUDxPER CCK (0 = 65536), and every high byte
-  (a new word on the output) requests the next word. The length counter wraps the pointer after AUDxLEN words.
+- DMA on in state 000 loads the length counter and raises a request; a request raised in line v is served in the
+  channel's slot of line v + 1, even if DMA was switched off meanwhile. The first word (001 -> 101) is discarded:
+  the pointer goes back to AUDxLC, the counter counts it (unless it is 1), the interrupt request is raised and the
+  next word requested. The second word (101 -> 010) starts the output: byte 0 = its high byte, the volume latched;
+  then a byte every AUDxPER CCK (0 = 65536): 010 -> 011 the low byte, 011 -> 010 the high byte of the next word,
+  which also requests the word after it. A word arriving in 010 / 011 counts the length; the one that finds the
+  counter at 1 (the block's last word) reloads it and the pointer from AUDxLEN / AUDxLC and marks the interrupt,
+  which is raised at the next high byte. INTREQ sees a request one CCK after its event.
 - Audio has priority on the bus: the slots a channel will use up to the end of the frame are marked ahead, so a blit
   scheduled by BLTSIZE does not take them; a register write re-plans them.
-- Output (vAmiga's state machine): each DMA word enables one high and one low byte; a byte whose turn comes before a
-  new word arrived is skipped while the period runs on, so a word fetched early costs the previous word's low byte.
-  AUDxVOL takes effect at the next high byte (min 64). After DMA off a pending low byte is still output, then the
-  channel stops.
-- Self-test (VAHeadless 899da5d, 60 frames, compared from the first full setup): **audio DMA slots 18 356 agree /
-  0 disagree; output samples ch0 12 533 / 12 533, ch1 6 156 / 6 156, ch2 4 894 / 4 894, ch3 10 346 / 10 346 exact in
-  time and value.** Not modelled: a game that clears the audio INTREQ bits and switches DMA off and on without a gap
-  keeps vAmiga's state machine looping (no first-word discard on the restart).
+- Output: each word enables one high and one low byte; a byte whose turn comes before a new word arrived is skipped
+  while the period runs on, so a word fetched early costs the previous word's low byte. AUDxVOL takes effect at the
+  next high byte (min 64).
+- DMA off in 001 / 101 stops the channel at once; in 010 / 011 the word finishes (the pending low byte is output)
+  and at its end the channel stops when its interrupt request is still pending (AUDxIP) - or keeps looping in the
+  CPU's mode when the request was cleared: the buffer plays again and the request is raised on every word. A word
+  written to AUDxDAT by the CPU in 000 with the request clear starts the same loop (CPU-driven sound); DMA switched
+  on in 010 / 011 continues with the pointer and counter as they are (no first-word discard). So the model takes
+  the INTREQ writes as well (`$9C`; a game that only ever leaves the bits set never sees the CPU's mode).
+- Self-test (VAHeadless 899da5d, 120 frames, compared from the first full setup, the program clearing every
+  request it sees so the channels loop in the CPU's mode between the DMA phases): **audio DMA slots 37 376
+  agree / 0 disagree; output samples ch0 25 097, ch1 13 068, ch2 9 944, ch3 21 021 - every one exact in time and
+  value; interrupt requests 53 541 detected / 53 542 in the model, 53 482 detections explained by a request at
+  most 300 CCK before them** (the rest lag up to about 650 CCK at the program's own register bursts at line 100;
+  0.7.0 measured 18 356 slots and every sample exact with the bits never cleared, which hid the CPU's mode).
 
-A host: `arek_paula_init(&P, &bus, sample_cb, ctx)`; after every `arek_bus_frame`: `arek_paula_frame(&P, absolute
-time of the frame start)`; `arek_paula_write(&P, t, off, v)` for every write to $DFF0A0-$DFF0DE and DMACON (from
-`hw_write_hook`); `arek_paula_run(&P, t)` at instruction boundaries and at the end of the frame; `sample_cb` gets
-every byte * volume with its absolute time (`arek_bus_paula_check.c` shows the whole loop).
+A host: `arek_paula_init(&P, &bus, sample_cb, ctx)`, `P.irq_cb = ...`; after every `arek_bus_frame`:
+`arek_paula_frame(&P, absolute time of the frame start)`; `arek_paula_write(&P, t, off, v)` for every write to
+$DFF0A0-$DFF0DE, DMACON and INTREQ (from `hw_write_hook`); `arek_paula_run(&P, t)` at instruction boundaries and at
+the end of the frame; `sample_cb` gets every byte * volume with its absolute time, `irq_cb` every request
+(`arek_bus_paula_check.c` shows the whole loop; `arek_host.h` raises INTREQ bit 7 + channel for level 4).
 
 ## Measured
 

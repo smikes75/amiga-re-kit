@@ -2,7 +2,8 @@
 
 ``display(conf)``: does ``arek.display`` render what this emulator shows? The disk
 (``selftest_display.s``: 6 planes of a pattern, dual playfield with scroll and changing
-priorities, EHB, sprites with an attached pair and control words reloaded at VSTOP) is run
+priorities, EHB, HAM6, a hires band, sprites with an attached pair and control words reloaded at VSTOP,
+sprite DMA switched off for a few lines, a Copper MOVE in a 6-plane line) is run
 to its idle loop, RAM and the screenshot are captured and compared pixel by pixel.
 
 ``inputs(conf)``: are inputs applied frame by frame? It runs its disk with ``VAHL_INPUTS``
@@ -64,23 +65,24 @@ def disk():
 
 DISPLAY_LOOP, DISPLAY_COPPER = 0x4004c, 0x4004e
 DISPLAY_BOOT = bytes.fromhex(
-    '41fa001843f900040000303c01d032d851c8fffc4ef9000400004df900dff0003d7c7fff009a3d7c7fff009641f90001'
+    '41fa001843f900040000303c01e832d851c8fffc4ef9000400004df900dff0003d7c7fff009a3d7c7fff009641f90001'
     '00007e053c3c00c77a133006e748bb40c0fc02b5ef7830c051cdfff051ceffea51cfffe22d7c0004004e00803d400088'
     '3d7c83a0009660fe010046000102003101040024008e2c810090f4c100920038009400d001080000010a000000e00001'
     '00e2000000e4000100e61f4000e8000100ea3e8000ec000100ee5dc000f0000100f27d0000f4000100f69c4001200004'
-    '0122018e012400040126039e01280004012a022a012c0004012e029201300004013202fa013400040136039e01380004'
-    '013a039e013c0004013e039e0180000001820f00018400f00186000f01880ff0018a0f0f018c00ff018e0fff01900800'
+    '012201ce01240004012603ce01280004012a026a012c0004012e02d2013000040132033a01340004013603ce01380004'
+    '013a03ce013c0004013e03ce0180000001820f00018400f00186000f01880ff0018a0f0f018c00ff018e0fff01900800'
     '01920080019400080196088001980808019a0088019c0888019e044401a00a5001a205a001a4050a01a60a0501a80c30'
-    '01aa03c001ac030c01ae0c0301b00e7101b2017e01b407e101b60e1701b80d4201ba024d01bc042d01be0d246c07fffe'
-    '010400098c07fffe01040052a007fffe010062000102000001040012c007fffe01005200fffffffe40805400f00f0ff0'
-    'f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0'
-    'f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff060907000aaaa5555aaaa5555aaaa5555aaaa5555'
+    '01aa03c001ac030c01ae0c0301b00e7101b2017e01b407e101b60e1701b80d4201ba024d01bc042d01be0d246407fffe'
+    '009600206a07fffe009680206c07fffe010400098c07fffe01040052a007fffe010062000102000001040012b053fffe'
+    '01800abcc007fffe01005200d007fffe01006a00e007fffe0100c2000092003c009400d4f007fffe0100520000920038'
+    '009400d0fffffffe40805400f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0'
+    'f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff0f00f0ff060907000'
     'aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555aaaa5555'
-    '0000000050a068003c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff'
+    'aaaa5555aaaa5555aaaa5555aaaa55550000000050a068003c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff'
     '3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff'
-    '3c3c00ff3c3c00ff0000000050a068800f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff00'
+    '3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff3c3c00ff0000000050a068800f0fff000f0fff000f0fff000f0fff00'
     '0f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff00'
-    '0f0fff000f0fff000f0fff000f0fff000000000070b89800ffffffffffffffffffffffffffffffffffffffffffffffff'
+    '0f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000f0fff000000000070b89400ffffffffffffffff'
     'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
     'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
     'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000')
@@ -108,12 +110,13 @@ def display(conf, timeout=300, keep=None, c=False):
         ram = f.read()
     with open(os.path.join(cap, 'stable.raw'), 'rb') as f:
         ref = f.read()
+    regs = {0x096: meta['chips'].get('agnus', {}).get('DMACON', 0)} if meta.get('chips') else None   # the CPU set DMACON
     if c:
         from .. import host
-        _, rgb = host.render(ram, DISPLAY_COPPER, regs={0x096: meta['chips'].get('agnus', {}).get('DMACON', 0)} if meta.get('chips') else None)
+        _, rgb = host.render(ram, DISPLAY_COPPER, regs=regs)
         d = dsp.diff(rgb, ref)
     else:
-        d = dsp.diff(dsp.to_screenshot(dsp.render(ram, DISPLAY_COPPER)), ref)
+        d = dsp.diff(dsp.to_screenshot(dsp.render(ram, DISPLAY_COPPER, regs=regs)), ref)
     d['dir'] = tmp
     return d
 
@@ -174,8 +177,8 @@ for _n in range(1, 8):
     BUS_REGS[0x120 + 4 * _n], BUS_REGS[0x122 + 4 * _n] = BUS_NUL >> 16, BUS_NUL & 0xffff
 
 
-AUDIO_LOOP, AUDIO_SAMP = 0x4001a, 0x40118
-AUDIO_PAYLOAD = bytes.fromhex('4df900dff0003d7c7fff009a3d7c7fff00963d7c820000967e00706461000084524733c70003fffe32070241000f66046100007cd241323b104a67043d41009632070241000f0c410009660c3d7c009600a63d7c003000a8303c00c86100004432070241000f0c41000566063d7c000200960c41000b66a23d7c800f00966000ff9a000000008001000080020000800c00000002000080030000000f000000000000322e0006e049b20066f64e752d7c0004011800a03d7c001000a43d7c00c800a63d7c004000a82d7c0004011800b03d7c000800b43d7c007c00b63d7c002000b82d7c0004011800c03d7c002000c43d7c012c00c63d7c004000c82d7c0004011800d03d7c000400d43d7c008300d63d7c002800d84e7500102030405060707f7060504030201000f0e0d0c0b0a0908090a0b0c0d0e0f003070b0f13171b1f23272b2f33373b3ffdf9f5f1ede9e5e1ddd9d5d1cdc9c5c1')
+AUDIO_LOOP, AUDIO_SAMP, AUDIO_TABLE = 0x40036, 0x4016c, 0x3c000   # the loop, the samples, the interrupt table
+AUDIO_PAYLOAD = bytes.fromhex('4df900dff0003d7c7fff009a3d7c7fff00963d7c820000963d7c0780009c4bf90003c000303c0fff425d51c8fffc4bf90003c0007e004bf90003c0004255706461000084524733c70003fffe32070241000f6604610000acd241323b104a67043d41009632070241000f0c410009660c3d7c009600a63d7c003000a8303c00c86100004432070241000f0c41000566063d7c000200960c41000b669a3d7c800f00966000ff92000000008001000080020000800c00000002000080030000000f000000000000322e001e024107806702610c322e0006e049b20066ea4e75bbfc0003e00064163ac13aee00043aee00063ac7bbfc0003e000640242553d41009c4e752d7c0004016c00a03d7c001000a43d7c00c800a63d7c004000a82d7c0004016c00b03d7c000800b43d7c007c00b63d7c002000b82d7c0004016c00c03d7c002000c43d7c012c00c63d7c004000c82d7c0004016c00d03d7c000400d43d7c008300d63d7c002800d84e7500102030405060707f7060504030201000f0e0d0c0b0a0908090a0b0c0d0e0f003070b0f13171b1f23272b2f33373b3ffdf9f5f1ede9e5e1ddd9d5d1cdc9c5c1')
 
 
 def audio_disk():
@@ -200,7 +203,7 @@ def audio(conf, frames=60, first=330, timeout=300, keep=None):
     out, log = os.path.join(tmp, 'audio.vtr'), os.path.join(tmp, 'audio.bus')
     reglog, audlog = os.path.join(tmp, 'audio.reglog'), os.path.join(tmp, 'audio.audlog')
     seconds = (first + frames) / 50.0 + 1
-    trace.capture(conf, out, [], 6, int(seconds) + 1, breaks=[AUDIO_LOOP], ranges=[(0x3fffe, 2)], adf=path,
+    trace.capture(conf, out, [], 6, int(seconds) + 1, breaks=[AUDIO_LOOP], ranges=[(0x3fffe, 2), (AUDIO_TABLE, 0x2000)], adf=path,
                   timeout=timeout, buslog=log, bus_frames=(first, first + frames - 1), reglog=reglog, audlog=audlog)
     recs = list(trace.records(out))
     if len(recs) < 2:
@@ -219,9 +222,76 @@ def audio(conf, frames=60, first=330, timeout=300, keep=None):
     r = busmod.paula_check(abbl, busmod.paula_writes(writes, info['frame0'], info['lines']),
                            busmod.paula_samples(trace.read_audlog(audlog), info['frame0'], info['lines']),
                            from_frame=start - info['frame0'] + 1, exe=busmod.compile_paula_check(os.path.join(tmp, 'arek_bus_paula_check')),
-                           ram=bytes(ram))
+                           ram=bytes(ram), irqs=True)
     r.update(frames=info['frames'], lines=info['lines'], dir=tmp, setup_frame=start, **{'from': start - info['frame0'] + 1})
+    r['irq'] = audio_irqs(recs, r.get('irqs', []), info['frame0'], info['lines'], (start - info['frame0'] + 1) * info['lines'] * 227,
+                          to_t=info['frames'] * info['lines'] * 227)
     return r
+
+
+def audio_table(recs):
+    """The interrupt table the self-test program fills (``AUDIO_TABLE``: bits, VPOSR, VHPOSR, frame counter per
+    entry, up to 1024; it starts over at the loop's head, where every record is taken), read from every record, as
+    ``(channel, frame, v, h)`` per request bit: the frame from the records' counter (d7 counts at line 100 of every
+    frame; an entry below line 100 belongs to the frame after)."""
+    counter = {}
+    for rec in recs:
+        counter.setdefault(rec['d'][7] & 0xffff, rec['frame'])
+    out = []
+    for rec in recs:
+        data = rec['ranges'].get(AUDIO_TABLE, b'')
+        for i in range(0, len(data) - 7, 8):
+            bits, vposr, vhposr, d7 = struct.unpack('>4H', data[i:i + 8])
+            if not bits:
+                break
+            v, h = ((vposr & 1) << 8) | (vhposr >> 8), vhposr & 0xff
+            fr = counter.get(d7)
+            if fr is None:
+                continue
+            if v < 100:
+                fr += 1
+            for ch in range(4):
+                if bits & (0x80 << ch):
+                    out.append((ch, fr, v, h))
+    return out
+
+
+def audio_irqs(recs, model, frame0, lines, from_t, window=300, hpos=227, to_t=None):
+    """The model's interrupt times (``(ch, t)`` relative to frame0's slot 0) against the program's detections in
+    ``[from_t, to_t)``. A detection is explained by a request of its channel at most ``window`` CCK before it (the
+    program's polling pass costs up to about 250 CCK when four channels loop and it writes registers at line 100; an
+    entry whose horizontal position reads 0 - the emulator returns that now and then - may lie anywhere in its line,
+    so a request up to a line after it counts too); a request is seen when a detection of its channel follows
+    before the next request's own window ends (the program polls INTREQR between the records of four channels, so
+    a request raised before the previous one was cleared merges into one set bit). ``{'detected', 'model',
+    'matched', 'late', 'missing', 'max_delay', 'unmatched', 'orphans'}``: late = detections without a request,
+    missing = requests without a detection (both 0 when the model is right), max_delay = the longest lag."""
+    import bisect
+    det = [(ch, (fr - frame0) * lines * hpos + v * hpos + h, h) for ch, fr, v, h in audio_table(recs)]
+    det = sorted(d for d in det if d[1] >= from_t and (to_t is None or d[1] < to_t))
+    mod = sorted((ch, t) for ch, t in model if t >= from_t and (to_t is None or t < to_t))
+    by_ch_m = {ch: [t for c, t in mod if c == ch] for ch in range(4)}
+    by_ch_d = {ch: [t for c, t, h in det if c == ch] for ch in range(4)}
+    unmatched, delays = [], []
+    for ch, td, h in det:
+        ts = by_ch_m[ch]
+        hi = td + (hpos if h == 0 else 0)                     # h = 0: the line is right, the position is not
+        k = bisect.bisect_right(ts, hi) - 1                   # the last request at or before the detection
+        if k >= 0 and td - ts[k] <= window:
+            delays.append(max(0, td - ts[k]))
+        else:
+            unmatched.append((ch, td))
+    orphans = []
+    for ch, ts in by_ch_m.items():
+        ds = by_ch_d[ch]
+        for i, tm in enumerate(ts):
+            limit = (ts[i + 1] if i + 1 < len(ts) else tm) + window
+            k = bisect.bisect_right(ds, tm)                   # the first detection after the request
+            if not (k < len(ds) and ds[k] <= limit):
+                orphans.append((ch, tm))
+    orphans.sort(key=lambda x: x[1])
+    return {'detected': len(det), 'model': len(mod), 'matched': len(delays), 'unmatched': unmatched[:10], 'orphans': orphans[:10],
+            'max_delay': max(delays) if delays else 0, 'late': len(unmatched), 'missing': len(orphans)}
 
 
 def bus(conf, frames=40, first=330, timeout=300, keep=None):

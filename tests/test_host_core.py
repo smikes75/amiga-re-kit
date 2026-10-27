@@ -25,6 +25,7 @@ PROG = {
           '52784000'              #       addq.w #1,$4000     ticks
           '60f0',                 #       bra.s loop
     L3: '52784002'                # addq.w #1,$4002
+        '33f900dff00400004004'    # move.w $dff004,$4004      VPOSR: LOF in bit 15
         '33fc002000dff09c'        # move.w #$20,$dff09c       clear VERTB
         '4e73',                   # rte
 }
@@ -68,6 +69,14 @@ def test_host_runs_a_synthetic_game(tmp_path):
     frames = [struct.unpack('>H', x['ranges'][0][0x4002:0x4004])[0] for x in ticks]
     assert counters == list(range(len(ticks))) and frames == [k for k in range(len(ticks))]   # one tick per frame
     assert 'irqs 4' in r.stderr and 'io_unknown 0' in r.stderr
+    lof = [struct.unpack('>H', x['ranges'][0][0x4004:0x4006])[0] >> 15 for x in irqs]
+    assert lof[1:] == [1, 1, 1]                                                             # (record 0 precedes the first write) no LACE: every field long
+    creg[0x100:0x102] = struct.pack('>H', 0x0004)                                            # BPLCON0 LACE
+    (st / 'creg.bin').write_bytes(creg)
+    r = subprocess.run([str(exe), str(st), str(out), '5', '--full'], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    irqs = [x for x in trace.records(str(out)) if x['pc'] == L3]
+    assert [struct.unpack('>H', x['ranges'][0][0x4004:0x4006])[0] >> 15 for x in irqs][1:] == [0, 1, 0]   # the fields alternate
 
 
 def test_state_from_a_capture(tmp_path):

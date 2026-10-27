@@ -97,11 +97,11 @@ def test_menu_zoom_snap():
 
 def test_package_files_and_copy(tmp_path, capsys):
     assert cli.main(['web', 'copy', str(tmp_path)]) == 0
-    for name in ('wb-obraz.js', 'wb-seal.js', 'wb-nastaveni.js', 'wb-zvuk.js', 'wb-atn.js', 'wb-content.js'):
+    for name in ('wb-obraz.js', 'wb-seal.js', 'wb-nastaveni.js', 'wb-zvuk.js', 'wb-atn.js', 'wb-content.js', 'wb-touch.js'):
         assert (tmp_path / name).exists()
     import tomllib                                                            # every file web copy ships is in the wheel
     data = tomllib.loads((Path(__file__).parent.parent / 'pyproject.toml').read_text())['tool']['setuptools']['package-data']['arek.web']
-    assert set(data) >= {'wb-obraz.js', 'wb-seal.js', 'wb-nastaveni.js', 'wb-zvuk.js', 'wb-atn.js', 'wb-content.js', 'demo.html'} and 'wb-menu.js' not in data
+    assert set(data) >= {'wb-obraz.js', 'wb-seal.js', 'wb-nastaveni.js', 'wb-zvuk.js', 'wb-atn.js', 'wb-content.js', 'wb-touch.js', 'demo.html'} and 'wb-menu.js' not in data
     assert webtest.MENU_IDS[0] == 'wb-zoom' and len(webtest.MENU_IDS) == 21 and 'wb-blue' in webtest.MENU_IDS
     assert "globalThis.WBNASTAVENI" in (WEB / 'wb-nastaveni.js').read_text() and "globalThis.WBZVUK" in (WEB / 'wb-zvuk.js').read_text()
     assert 'wbMenuTest' in (WEB / 'demo.html').read_text() and 'wbZvukTest' in (WEB / 'demo.html').read_text()

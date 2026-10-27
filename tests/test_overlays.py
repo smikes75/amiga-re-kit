@@ -45,7 +45,19 @@ def test_an_unknown_module_stops_with_its_fingerprint(tmp_path):
         run(tmp_path, MAIN, {}, auto=(0x1000, 0x1010), flow=MAIN_FLOW, extra_c=extra, ram_init={0x2000: MOD_X})
     assert e.value.returncode == 5
     src = module(MOD_A, 'ovA_')
-    assert '0x%016xull' % fnv1a64(MOD_A) in src and 'ovl_ovA__register' in src
+    assert '0x%016xull' % fnv1a64(MOD_A) in src and 'ovl_ovA__register' in src and ', 0x2000u, 4u); }' in src
+
+
+def test_module_anywhere_in_a_larger_area_and_the_unknown_hook(tmp_path):
+    """The area starts below the module (Alien Breed II: area $40000, module at $4D270): the module is found by the
+    fingerprint at its own base; an unknown module goes to overlay_unknown_hook when the host defines OVERLAY_HOOK."""
+    big = Flow(overlays=[(0x1f00, 0x400, 4)], dynamic={0x100a})
+    extra = '\n' + module(MOD_A, 'ovA_')
+    d, *_ = run(tmp_path, MAIN, {}, auto=(0x1000, 0x1010), flow=big, extra_c=extra, ram_init={0x2000: MOD_A})
+    assert d[0] == 1
+    hook = extra + '\nvoid overlay_unknown_hook(M68 *m, uint32_t base, uint32_t entry, uint64_t fp) { m->d[0] = 0x50 + (base == 0x1f00u) + (entry == 0x2000u) * 2 + (fp != 0) * 4; }\n'
+    d, *_ = run(tmp_path, MAIN, {}, auto=(0x1000, 0x1010), flow=big, extra_c=hook, ram_init={0x2000: MOD_X}, pre_c='#define OVERLAY_HOOK 1\n')
+    assert d[0] == 0x57 and d[1] == 4                      # the hook saw the area, the entry and a fingerprint; the run went on
 
 
 def test_flow_specs_and_cli(tmp_path):

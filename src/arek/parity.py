@@ -167,29 +167,81 @@ def compare_audio(orig, rebuild, shifts=range(-60, 61)):
     return {'frames': len(frames), 'equal': eq, 'shift': s, 'first': first}
 
 
-def compare_shots(orig_prefix, rebuild_prefix, tolerance=0, shift=0):
+def align_shot(a, b, width=716, max_shift=8, sample=4, step=1):
+    """The shift (dx, dy) of picture b against a (RGB24 rows of ``width``) with the fewest differing pixels on a grid
+    of every ``sample``-th pixel, |dx|, |dy| <= max_shift (dx in steps of ``step``; 2 for lowres pixels in a vAmiga
+    screenshot): a screen shake moves the rebuild's window against the original's."""
+    h = len(a) // (3 * width)
+    best = None
+    for dy in range(-max_shift, max_shift + 1):
+        for dx in range(-max_shift, max_shift + 1, step):
+            bad = 0
+            for y in range(max_shift, h - max_shift, sample):
+                ra, rb = (y * width) * 3, ((y + dy) * width) * 3
+                for x in range(max_shift, width - max_shift, sample):
+                    pa, pb = ra + 3 * x, rb + 3 * (x + dx)
+                    bad += a[pa:pa + 3] != b[pb:pb + 3]
+            if best is None or bad < best[0]:
+                best = (bad, dx, dy)
+    return best[1], best[2]
+
+
+def diff_shots(da, db, tolerance=0, dx=0, dy=0, width=716):
+    """Differing pixels of two RGB24 pictures, b shifted by (dx, dy) against a (the pixels a shift moves out are
+    left out): ``(n, box)``, box = (x0, y0, x1, y1) or None. A buffer that is not ``width`` wide counts as one row."""
+    if len(da) % (3 * width):
+        width = len(da) // 3
+    h = len(da) // (3 * width)
+    n, x0, y0, x1, y1 = 0, None, None, None, None
+    for y in range(h):
+        yb = y + dy
+        if not 0 <= yb < h:
+            continue
+        ra, rb = y * width * 3, yb * width * 3
+        for x in range(width):
+            xb = x + dx
+            if not 0 <= xb < width:
+                continue
+            i, j = ra + 3 * x, rb + 3 * xb
+            if abs(da[i] - db[j]) > tolerance or abs(da[i + 1] - db[j + 1]) > tolerance or abs(da[i + 2] - db[j + 2]) > tolerance:
+                n += 1
+                x0, y0 = x if x0 is None else min(x0, x), y if y0 is None else min(y0, y)
+                x1, y1 = x if x1 is None else max(x1, x), y if y1 is None else max(y1, y)
+    return n, (x0, y0, x1, y1) if n else None
+
+
+def compare_shots(orig_prefix, rebuild_prefix, tolerance=0, shift=0, align=0, width=716):
     """Pictures of both sides (``trace.shot_files``: PREFIX_<frame>.raw, RGB24), paired by frame
-    (rebuild frame = original + shift): ``{'pairs', 'equal', 'pixels', 'differing', 'worst'}``,
-    a pixel equal when every channel is within ``tolerance``."""
+    (rebuild frame = original + shift): ``{'pairs', 'equal', 'pixels', 'differing', 'worst', 'frames'}``,
+    a pixel equal when every channel is within ``tolerance``; ``align`` > 0: every pair is first aligned by the
+    best shift up to that many pixels (a screen shake), ``frames`` lists (frame, differing, (dx, dy), box)."""
     a, b = dict(trace.shot_files(orig_prefix)), dict(trace.shot_files(rebuild_prefix))
-    pairs, equal, px, total, worst = 0, 0, 0, 0, None
+    pairs, equal, px, total, worst, frames = 0, 0, 0, 0, None, []
     for f in sorted(a):
         if f + shift not in b:
             continue
         da, db = open(a[f], 'rb').read(), open(b[f + shift], 'rb').read()
         if len(da) != len(db):
             raise ValueError('shots %s and %s differ in size' % (a[f], b[f + shift]))
-        n = 0
-        for i in range(0, len(da), 3):
-            if abs(da[i] - db[i]) > tolerance or abs(da[i + 1] - db[i + 1]) > tolerance or abs(da[i + 2] - db[i + 2]) > tolerance:
-                n += 1
+        dx, dy = align_shot(da, db, width, align) if align else (0, 0)
+        n, box = diff_shots(da, db, tolerance, dx, dy, width)
         pairs += 1
         equal += n == 0
         px += n
         total += len(da) // 3
+        frames.append((f, n, (dx, dy), box))
         if worst is None or n > worst[1]:
             worst = (f, n)
-    return {'pairs': pairs, 'equal': equal, 'pixels': total, 'differing': px, 'worst': worst}
+    return {'pairs': pairs, 'equal': equal, 'pixels': total, 'differing': px, 'worst': worst, 'frames': frames}
+
+
+def format_shots(r, all_frames=False):
+    L = ['%d of %d pairs equal, %d of %d pixels differ%s' % (r['equal'], r['pairs'], r['differing'], r['pixels'],
+                                                           ', worst frame %d (%d)' % r['worst'] if r['worst'] else '')]
+    for f, n, (dx, dy), box in r['frames']:
+        if n or all_frames:
+            L.append('  frame %d: %d pixels, shift (%d, %d)%s' % (f, n, dx, dy, ', box %s' % (box,) if box else ''))
+    return '\n'.join(L)
 
 
 def suite(cfg, base='.', run=True):
@@ -229,7 +281,7 @@ def suite(cfg, base='.', run=True):
                             'first_hit': f['a']['hit'] if f else None,
                             'best_shift': shifts[0][0], 'equal_shifted': shifts[0][1]}
         if path('shots', o) and path('shots', r):
-            row['picture'] = compare_shots(path('shots', o), path('shots', r), sc.get('tolerance', 0), sc.get('shot_shift', 0))
+            row['picture'] = compare_shots(path('shots', o), path('shots', r), sc.get('tolerance', 0), sc.get('shot_shift', 0), sc.get('align', 0))
         if path('reglog', o) and path('reglog', r) and os.path.exists(path('reglog', o)) and os.path.exists(path('reglog', r)):
             n = sc.get('audio_shifts', 60)
             row['sound'] = compare_audio(path('reglog', o), path('reglog', r), range(-n, n + 1))
