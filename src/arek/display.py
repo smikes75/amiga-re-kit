@@ -22,8 +22,11 @@ red / green modified from the previous pixel, the chain starting at COLOR00 on e
 ``Frame.hires[v]`` holds the 912 hires pixels of such a line and ``to_screenshot`` uses them, the
 lowres ``pixels`` hold the average of each pair); sprite DMA only with DMACON SPREN and DMAEN (when
 DMACON is known; a Copper write to DMACON sets or clears its bits); with 6 lowres planes the Copper
-gets both free even slots of a fetch group; the Copper's WAIT/SKIP comparator sees the beam two
-colour clocks ahead (``h + 2``, as the bus model). Not modelled: superhires, collisions, interlace
+gets both free even slots of a fetch group; the Copper runs vAmiga's state machine (as the bus
+model does): FETCH, MOVE or WAIT_OR_SKIP, WAIT1, WAIT2, each in a free even cycle two cycles after
+the last, the comparator on the beam two colour clocks ahead of the current line, so a WAIT whose
+words end a line is first compared on the next one (WAIT 255,$DE then WAIT $21,0 passes on line
+289, as Alien Breed II measured, G36). Not modelled: superhires, collisions, interlace
 (the host alternates LOF), AGA. The HAM, hires, sprite DMA and 6-plane rules were measured by the
 Alien Breed II project and ``arek selftest display`` against vAmiga (kit 0.7.1).
 
@@ -178,42 +181,80 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES):
         elif off == 0x086:
             lc[1] = (lc[1] & 0x1f0000) | (v & 0xfffe)
 
-    cop = {'pc': lc[0], 'need': 2, 'wait': None, 'skip': False, 'done': False}
+    # the Copper as vAmiga's CopperEvents run it (and as the bus model does): every step needs a free bus cycle - even,
+    # not taken by the bitplanes, not $E0 - and the next step comes two cycles later: FETCH (word 1), MOVE or
+    # WAIT_OR_SKIP (word 2), then for a WAIT two more free cycles (WAIT1, WAIT2) before its comparator first runs, on
+    # the beam two colour clocks ahead of the current line (h - $E0 in the line's last three cycles), vertically the
+    # line's low byte. Passing at once, the next fetch follows two cycles later; otherwise the Copper wakes in the first
+    # cycle the comparator passes (any cycle) and fetches two cycles after the first free even one. So a WAIT whose
+    # words end a line is first compared on the next line (WAIT 255,$DE then WAIT $21,0 passes on line 289, G36). A
+    # SKIP takes SKIP1 and SKIP2 and its comparator runs at the next fetch: true, it drops a MOVE that follows (a WAIT
+    # clears it, as the emulator does). $FFFF $FFFE ends the list.
+    cop = {'pc': lc[0], 'st': 1, 'next': 2, 'w1': 0, 'skip': False, 'skipcmd': False, 'wait': (0, 0, 0, 0)}
 
-    def copper(line, cck):
-        if cop['done']:
+    def compare(v, c):
+        wv, wh, vm, hm = cop['wait']
+        vb = (v & 0xff) & vm
+        if vb != (wv & vm):
+            return vb > (wv & vm)
+        hc = c + 2 if c < 0xe0 else c - 0xe0
+        return (hc & hm) >= (wh & hm)
+
+    def copper(v, c, busy):
+        t, st = v * CCKS + c, cop['st']
+        if not st or t < cop['next']:
             return
-        hc = cck + 2 if cck < 0xe0 else cck - 0xe0        # the comparator sees h + 2 (vAmiga, the bus model)
-        if cop['wait'] is not None:
-            wv, wh, vm, hm = cop['wait']
-            if ((line & 0xff) & vm, hc & hm) >= (wv & vm, wh & hm):
-                cop['wait'] = None                      # waking costs this slot
+        if st == 6:                                     # waiting: the first cycle the comparator passes wakes it
+            if not compare(v, c):
+                cop['next'] = t + 1
+                return
+            st = cop['st'] = 9
+        free = not (c & 1) and not busy and (c != 0xe0 or st == 9)
+        if not free:
+            cop['next'] = t + 1
             return
-        cop['need'] -= 1
-        if cop['need']:
-            return
-        cop['need'] = 2
-        w1, w2 = rd(cop['pc']), rd(cop['pc'] + 2)
-        cop['pc'] += 4
-        if cop['skip']:
-            cop['skip'] = False
-            return
-        if not w1 & 1:                                  # MOVE
-            off = w1 & 0x1fe
-            if off == 0x088 or off == 0x08a:            # COPJMP1/2
-                cop['pc'] = lc[(off - 0x088) >> 1]
+        if st == 9:                                     # awake in a free even cycle: the fetch two cycles later
+            cop['st'] = 1
+        elif st == 1:                                   # FETCH: the first word
+            cop['w1'] = rd(cop['pc'])
+            cop['pc'] += 2
+            if cop['skipcmd']:
+                cop['skip'], cop['skipcmd'] = compare(v, c), False
+            cop['st'] = 3 if cop['w1'] & 1 else 2
+        elif st == 2:                                   # MOVE: the second word, the write
+            w2 = rd(cop['pc'])
+            cop['pc'] += 2
+            cop['st'] = 1
+            if cop['skip']:
+                cop['skip'] = False
             else:
-                write(off, w2, line, cck)
-            return
-        if w1 == 0xffff and w2 == 0xfffe:
-            cop['done'] = True
-            return
-        wv, wh = w1 >> 8, w1 & 0xfe
-        vm, hm = ((w2 >> 8) & 0x7f) | 0x80, w2 & 0xfe
-        if w2 & 1:                                      # SKIP
-            cop['skip'] = ((line & 0xff) & vm, hc & hm) >= (wv & vm, wh & hm)
-        else:
-            cop['wait'] = (wv, wh, vm, hm)
+                off = cop['w1'] & 0x1fe
+                if off == 0x088 or off == 0x08a:        # COPJMP1/2
+                    cop['pc'] = lc[(off - 0x088) >> 1]
+                else:
+                    write(off, w2, v, c)
+        elif st == 3:                                   # WAIT_OR_SKIP: the second word
+            w1, w2 = cop['w1'], rd(cop['pc'])
+            cop['pc'] += 2
+            if w1 == 0xffff and w2 == 0xfffe:
+                cop['st'] = 0
+                return
+            cop['wait'] = (w1 >> 8, w1 & 0xfe, ((w2 >> 8) & 0x7f) | 0x80, w2 & 0xfe)
+            cop['st'] = 7 if w2 & 1 else 4
+        elif st == 4:                                   # WAIT1
+            cop['st'] = 5
+        elif st == 5:                                   # WAIT2: the comparator for the first time
+            cop['skip'] = False
+            if compare(v, c):
+                cop['st'] = 1
+            else:
+                cop['st'], cop['next'] = 6, t + 1
+                return
+        elif st == 7:                                   # SKIP1
+            cop['st'] = 8
+        elif st == 8:                                   # SKIP2: the comparator runs at the next fetch
+            cop['st'], cop['skipcmd'] = 1, True
+        cop['next'] = t + 2
 
     def sprite_word(s):
         w = rd(s.pt)
@@ -300,16 +341,14 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES):
                     fetch_end, nplanes, fetch = ddfstrt + (4 if hr else 8) * nw, n, 1
                 else:
                     fetch = -1
-            if not c & 1:
-                busy = False
-                if fetch == 1 and ddfstrt <= c < fetch_end:
-                    if hr:
-                        busy = _PLANE_AT_HR[(c - ddfstrt) & 3] <= nplanes
-                    else:
-                        pos = (c - ddfstrt) & 7                 # with 6 planes the Copper gets both free even slots
-                        busy = _PLANE_AT[pos] <= nplanes or (pos == 4 and v >= 1 and nplanes < 6)
-                if not busy:
-                    copper(v, c)
+            busy = False
+            if not c & 1 and fetch == 1 and ddfstrt <= c < fetch_end:
+                if hr:
+                    busy = _PLANE_AT_HR[(c - ddfstrt) & 3] <= nplanes
+                else:
+                    pos = (c - ddfstrt) & 7                     # with 6 planes the Copper gets both free even slots
+                    busy = _PLANE_AT[pos] <= nplanes or (pos == 4 and v >= 1 and nplanes < 6)
+            copper(v, c, busy)
             for h in (2 * c, 2 * c + 1):
                 if hr and fetch == 1:
                     if hline is None:

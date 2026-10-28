@@ -72,6 +72,9 @@ CASES = {
                                     PLANES[:2] + [sprite(0x20000, 0x40, 0x4c, 0x120, [(0xffff, 0)] * 12),
                                                   sprite(0x20100, 0x40, 0x58, 0x140, [(0x8000, 0)] * 24),
                                                   sprite(0x20200, 0x100, 0x140, 0x160, [(0xffff, 0xffff)] * 64)]),
+    # the Copper's comparator sees the beam two CCK ahead: at the end of line 255 that is line 256, whose low byte is 0,
+    # so a WAIT for line $21 set there passes on line 289 (0x121), not at once (Alien Breed II, G36)
+    'copper wait wraps to the next line': ram_with(with_colours(setup(1, ptrs=[PLANES[0][0]])) + [0xffdf, 0xfffe, 0x2101, 0xfffe, 0x180, 0x0f0] + END, PLANES[:1]),
     'ddfstrt 24 with sprites 3 and 4': ram_with(with_colours(setup(3, con1=0x88, ddfstrt=0x24, ptrs=[p for p, _ in PLANES[:3]]))
                                                 + sprite_copper([0x20200, 0x20200, 0x20200, 0x20000, 0x20100]) + END,
                                                 PLANES[:3] + [sprite(0x20000, 0x40, 0x50, 0x180, [(0xf0f0, 0x0ff0)] * 16),
@@ -171,3 +174,10 @@ def test_sprite_dma_off_band_window_and_dmacon_writes_in_python():
                    + [0x4807, 0xfffe, 0x096, 0x0020] + END, PLANES[:2] + [sprite(0x20000, 0x40, 0x4c, 0x120, [(0xffff, 0)] * 12)])
     sv = display.render(ram, COP, regs={0x096: 0x83e0}).pixels                                             # DIWSTOP v $80
     assert any(sv[0x7f][h] for h in range(0x121, 0x131)) and not any(sv[0x80][h] for h in range(0x121, 0x131))
+
+
+def test_copper_wait_past_the_line_end_in_python():
+    f = display.render(CASES['copper wait wraps to the next line'], COP, regs={0x096: 0x83e0})
+    w = [x for x in f.writes if x[2] == 0x180 and x[3] == 0x0f0]
+    assert w and w[0][0] == 0x121 and w[0][1] <= 4                                  # the MOVE lands at the start of line 289
+    assert f.pixels[0x120][100] == 0 and f.pixels[0x121][100] == 0x0f0 and f.pixels[0xff][100] == 0

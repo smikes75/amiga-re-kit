@@ -13,7 +13,8 @@
  *   on (DDFSTRT $24: sprite 3 gets one word, sprites 4-7 none; the missing word keeps the old register - a striped
  *   sprite and a vertical line on the screen, as the emulator shows), and a sprite whose VSTOP passes while its slots
  *   are not served keeps showing its last data; sprites only inside the display window; with 6 lowres planes the Copper
- *   gets both free even slots of a fetch group; the Copper's WAIT/SKIP comparator sees the beam two CCK ahead (h + 2);
+ *   gets both free even slots of a fetch group; the Copper runs vAmiga's state machine (FETCH, MOVE / WAIT_OR_SKIP, WAIT1,
+ *   WAIT2 in free even cycles two apart, the comparator on the beam two CCK ahead of the current line - G36);
  *   HAM6 bits 4-5 = palette / blue / red / green from the previous pixel, the chain starting at COLOR00 on every line;
  *   hires: 2 words per 8-CCK block, 4 planes, the first pixel at 2 * DDFSTRT + 9, the Copper's slots in 4-CCK blocks.
  * Output: the 12-bit colour of every lowres pixel (ARD_PIX[v][h]) and 716 x 285 RGB24 like a VAHeadless screenshot
@@ -51,7 +52,7 @@ typedef struct { int k, hs; uint16_t da, db; int att; } ArdSpriteLine;   /* a sp
 static uint16_t ARD_R[0x100];                          /* the display registers as the renderer sees them */
 static uint32_t ARD_BPL[6], ARD_LC[2];
 static ArdSprite ARD_SPR[8], ARD_SPRI[8];              /* ARD_SPRI: the sprites at full DMA (ard_spri_cb) */
-static struct { uint32_t pc; int need, waiting, skip, done; int wv, wh, vm, hm; } ARD_COP;
+static struct { uint32_t pc; int st, skip, skipcmd; long next; uint16_t w1; int wv, wh, vm, hm; } ARD_COP;   /* st: 1 FETCH 2 MOVE 3 WAIT_OR_SKIP 4 WAIT1 5 WAIT2 6 waiting 9 wake 7 SKIP1 8 SKIP2 0 off */
 static uint16_t ARD_PIX[ARD_LINES][ARD_WIDTH];
 static uint16_t ARD_PIXH[ARD_LINES][2 * ARD_WIDTH];    /* hires lines: both pixels of every lowres pixel */
 static uint8_t ARD_HR[ARD_LINES];                      /* 1 = the line was drawn in hires (ARD_PIX holds the pair averages) */
@@ -116,31 +117,59 @@ static void ard_write(uint32_t off, uint16_t v) {
     else if (off == 0x086) ARD_LC[1] = (ARD_LC[1] & 0x1f0000) | (v & 0xfffe);
 }
 static void ard_frame_start(void) {
-    ARD_COP.pc = ARD_LC[0] & 0x1ffffe; ARD_COP.need = 2; ARD_COP.waiting = 0; ARD_COP.skip = 0; ARD_COP.done = 0;
+    ARD_COP.pc = ARD_LC[0] & 0x1ffffe; ARD_COP.st = 1; ARD_COP.next = 2; ARD_COP.skip = 0; ARD_COP.skipcmd = 0;   /* COP_VBLANK: the fetch at cycle 2 */
     ARD_NEXT = 0;                                      /* the sprites keep their state: Agnus forces VSTOP on line 25 */
 }
-static void ard_copper(int line, int cck) {
-    if (ARD_COP.done) return;
-    int hc = cck < 0xe0 ? cck + 2 : cck - 0xe0;        /* the comparator sees h + 2 (vAmiga, the bus model) */
-    if (ARD_COP.waiting) {
-        int a1 = (line & 0xff) & ARD_COP.vm, a2 = hc & ARD_COP.hm, b1 = ARD_COP.wv & ARD_COP.vm, b2 = ARD_COP.wh & ARD_COP.hm;
-        if (a1 > b1 || (a1 == b1 && a2 >= b2)) ARD_COP.waiting = 0;   /* waking costs this slot */
-        return;
+/* the Copper as vAmiga's CopperEvents run it (and as the bus model does): every step needs a free bus cycle - even, not
+ * taken by the bitplanes, not $E0 - and the next step comes two cycles later: FETCH (word 1), MOVE or WAIT_OR_SKIP (word
+ * 2), then for a WAIT two more free cycles (WAIT1, WAIT2) before its comparator first runs, on the beam two colour clocks
+ * ahead of the current line (h - $E0 in the line's last three cycles), vertically the line's low byte. Passing at once,
+ * the next fetch follows two cycles later; otherwise the Copper wakes in the first cycle the comparator passes (any
+ * cycle) and fetches two cycles after the first free even one. So a WAIT whose words end a line is first compared on the
+ * next line (WAIT 255,$DE then WAIT $21,0 passes on line 289, G36). A SKIP takes SKIP1 and SKIP2 and its comparator runs
+ * at the next fetch: true, it drops a MOVE that follows (a WAIT clears it, as the emulator does). $FFFF $FFFE ends it. */
+static int ard_compare(int v, int c) {
+    int vb = (v & 0xff) & ARD_COP.vm, wv = ARD_COP.wv & ARD_COP.vm;
+    if (vb != wv) return vb > wv;
+    int hc = c < 0xe0 ? c + 2 : c - 0xe0;
+    return (hc & ARD_COP.hm) >= (ARD_COP.wh & ARD_COP.hm);
+}
+static void ard_copper(int v, int c, int busy) {
+    long t = (long)v * ARD_CCKS + c; int st = ARD_COP.st;
+    if (!st || t < ARD_COP.next) return;
+    if (st == 6) {                                     /* waiting: the first cycle the comparator passes wakes it */
+        if (!ard_compare(v, c)) { ARD_COP.next = t + 1; return; }
+        st = ARD_COP.st = 9;
     }
-    if (--ARD_COP.need) return;
-    ARD_COP.need = 2;
-    uint16_t w1 = ard_rd(ARD_COP.pc), w2 = ard_rd(ARD_COP.pc + 2); ARD_COP.pc += 4;
-    if (ARD_COP.skip) { ARD_COP.skip = 0; return; }
-    if (!(w1 & 1)) {                                   /* MOVE */
-        uint32_t off = w1 & 0x1fe;
+    int free = !(c & 1) && !busy && (c != 0xe0 || st == 9);
+    if (!free) { ARD_COP.next = t + 1; return; }
+    switch (st) {
+    case 9: ARD_COP.st = 1; break;                     /* awake in a free even cycle: the fetch two cycles later */
+    case 1:                                            /* FETCH: the first word */
+        ARD_COP.w1 = ard_rd(ARD_COP.pc); ARD_COP.pc += 2;
+        if (ARD_COP.skipcmd) { ARD_COP.skip = ard_compare(v, c); ARD_COP.skipcmd = 0; }
+        ARD_COP.st = (ARD_COP.w1 & 1) ? 3 : 2; break;
+    case 2: {                                          /* MOVE: the second word, the write */
+        uint16_t w2 = ard_rd(ARD_COP.pc); ARD_COP.pc += 2; ARD_COP.st = 1;
+        if (ARD_COP.skip) { ARD_COP.skip = 0; break; }
+        uint32_t off = ARD_COP.w1 & 0x1fe;
         if (off == 0x088 || off == 0x08a) ARD_COP.pc = ARD_LC[(off - 0x088) >> 1] & 0x1ffffe;
         else ard_write(off, w2);
-        return;
+        break; }
+    case 3: {                                          /* WAIT_OR_SKIP: the second word */
+        uint16_t w1 = ARD_COP.w1, w2 = ard_rd(ARD_COP.pc); ARD_COP.pc += 2;
+        if (w1 == 0xffff && w2 == 0xfffe) { ARD_COP.st = 0; return; }
+        ARD_COP.wv = w1 >> 8; ARD_COP.wh = w1 & 0xfe; ARD_COP.vm = ((w2 >> 8) & 0x7f) | 0x80; ARD_COP.hm = w2 & 0xfe;
+        ARD_COP.st = (w2 & 1) ? 7 : 4; break; }
+    case 4: ARD_COP.st = 5; break;                     /* WAIT1 */
+    case 5:                                            /* WAIT2: the comparator for the first time */
+        ARD_COP.skip = 0;
+        if (ard_compare(v, c)) ARD_COP.st = 1; else { ARD_COP.st = 6; ARD_COP.next = t + 1; return; }
+        break;
+    case 7: ARD_COP.st = 8; break;                     /* SKIP1 */
+    case 8: ARD_COP.st = 1; ARD_COP.skipcmd = 1; break;   /* SKIP2: the comparator runs at the next fetch */
     }
-    if (w1 == 0xffff && w2 == 0xfffe) { ARD_COP.done = 1; return; }
-    int wv = w1 >> 8, wh = w1 & 0xfe, vm = ((w2 >> 8) & 0x7f) | 0x80, hm = w2 & 0xfe;
-    if (w2 & 1) { int a1 = (line & 0xff) & vm, a2 = hc & hm, b1 = wv & vm, b2 = wh & hm; ARD_COP.skip = a1 > b1 || (a1 == b1 && a2 >= b2); }
-    else { ARD_COP.waiting = 1; ARD_COP.wv = wv; ARD_COP.wh = wh; ARD_COP.vm = vm; ARD_COP.hm = hm; }
+    ARD_COP.next = t + 2;
 }
 static uint16_t ard_avg12(uint16_t a, uint16_t b) {       /* two hires pixels in one lowres pixel */
     return (uint16_t)(((((a >> 8) & 15) + ((b >> 8) & 15) + 1) >> 1 << 8) | ((((a >> 4) & 15) + ((b >> 4) & 15) + 1) >> 1 << 4) | (((a & 15) + (b & 15) + 1) >> 1));
@@ -261,13 +290,13 @@ static void ard_line(int v) {
                 if (hr) { ARD_HR[v] = 1; for (int x = 0; x < 4 * c; x++) ARD_PIXH[v][x] = ARD_PIX[v][x >> 1]; }
             } else fetch = -1;
         }
-        if (!(c & 1)) {                                /* the Copper: even slots not taken by bitplane DMA */
+        {                                              /* the Copper: free even cycles not taken by bitplane DMA */
             int busy = 0;
-            if (fetch == 1 && ddfstrt <= c && c < fetch_end) {
+            if (!(c & 1) && fetch == 1 && ddfstrt <= c && c < fetch_end) {
                 if (hr) busy = ARD_PLANE_AT_HR[(c - ddfstrt) & 3] <= nplanes;
                 else { int pos = (c - ddfstrt) & 7; busy = ARD_PLANE_AT[pos] <= nplanes || (pos == 4 && v >= 1 && nplanes < 6); }   /* 6 planes: both free even slots */
             }
-            if (!busy) ard_copper(v, c);
+            ard_copper(v, c, busy);
         }
         for (int h = 2 * c; h <= 2 * c + 1; h++) {
             if (hr && fetch == 1) {

@@ -31,7 +31,19 @@ cc -O2 -I lib -DGAME_SRC='"game.c"' -DTICK_PC=0xc01c72u -DHOST_ENTRY=f_c01c72 -D
 `HOST_L3` is the translated level-3 handler (the vector at $6C, measured with `arek bpstate`);
 `HOST_L1`, `HOST_L2`, `HOST_L4`, `HOST_L5`, `HOST_L6` likewise when the game enables those levels
 (a level without a handler stays pending; level 4 comes from the Paula model's interrupt requests - the first
-word after DMA on and the end of every block - as a sound driver that chains blocks through AUDxINT needs). `TICK_PC` is the pc of the game's tick (the main loop's
+word after DMA on and the end of every block - as a sound driver that chains blocks through AUDxINT needs).
+The host calls a handler directly (`H_ENTER`), never through a pointer, so a browser build with
+`ASYNCIFY_IGNORE_INDIRECT` can sleep in a wait loop inside the handler (Alien Breed II, G37).
+`HOST_ACK_HANDLER(name, bits)` makes a handler that only acknowledges INTREQ bits, for a level the
+game leaves to Kickstart (`-DHOST_L4=host_ack_audio` is predefined for the audio requests the Paula
+model raises); without it the request would be taken again and again.
+
+The CIAs: CIA-A PRA / DDRA / SDR / ICR as before, and both CIAs' timers A and B (the latch, one-shot
+or continuous, START, FORCE LOAD, the ICR status and mask; an E tick = 5 CCK; CIA-A raises PORTS,
+CIA-B EXTER), which a loader waiting on CIA-B timer A needs (G38). Other CIA registers answer $FF
+and count in `H_IO_UNKNOWN` unless the host defines `HOST_CIA_READ(a, &v)` / `HOST_CIA_WRITE(a, v)`
+(return 1 when handled). POTGO's output bits read back in POTGOR (G40), and LACE is taken from the
+renderer's registers, so the Copper's BPLCON0 alternates the fields too (G39). `TICK_PC` is the pc of the game's tick (the main loop's
 head, where the records are taken) and `HOST_ENTRY` the translated routine the run starts in. A
 game that uses no slow RAM leaves `--slow` out; the driver follows `SLOWSZ`.
 
@@ -100,8 +112,11 @@ The rules the Alien Breed II project and `arek selftest display` measured, in bo
 - HAM6 (bits 4-5 = palette / blue / red / green from the previous pixel, the chain starting at
   COLOR00 on every line), hires (2 words per 8-CCK block, 4 planes, the first pixel at
   `2 * DDFSTRT + 9`, the Copper's slots in 4-CCK blocks), with 6 lowres planes the Copper gets
-  both free even slots of a fetch group, and its WAIT/SKIP comparator sees the beam two colour
-  clocks ahead (`h + 2`, as the bus model).
+  both free even slots of a fetch group; the Copper runs the emulator's state machine as the bus
+  model does (FETCH, MOVE or WAIT_OR_SKIP, WAIT1, WAIT2, each in a free even cycle two cycles
+  after the last, the comparator on the beam two colour clocks ahead of the current line), so a
+  WAIT whose words end a line is first compared on the next one: WAIT 255,$DE then WAIT $21,0
+  passes on line 289, as Alien Breed II measured (G36, 0.7.2).
 
 `ard_overlay(lo, hi, bytes, on)` lets the renderer read a window of chip RAM from a copy the host
 computes (smooth scrolling between the game's ticks without touching the game's RAM);

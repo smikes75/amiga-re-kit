@@ -14,7 +14,12 @@
  * and the host calls the translated entry; tick_hook() does the rest on every instruction. Callbacks: h_frame_cb (the
  * start of a frame: inputs), h_frame_done_cb (the picture is in ARD_PIX), h_wr_cb (every CPU register write), h_pc_cb
  * (every instruction's pc, before an interrupt is accepted - as a breakpoint of the emulator), h_sample_cb (bytes).
- * Inputs: H_JOY0 / H_JOY1 (JOYxDAT), H_CIAA_PRA bits 6/7 (fire), H_POTGOR. No game data: nothing of a game but HOST_L3. */
+ * Inputs: H_JOY0 / H_JOY1 (JOYxDAT), H_CIAA_PRA bits 6/7 (fire), H_POTGOR (POTGO's output bits read back - G40). The CIAs:
+ * CIA-A PRA / DDRA / SDR / ICR and both CIAs' timers A and B (latch, one-shot or continuous, START, FORCE LOAD, the ICR
+ * status and mask, an E tick = 5 CCK; CIA-A raises PORTS, CIA-B EXTER - a loader waiting on CIA-B timer A, G38); other
+ * CIA registers answer $FF and count in H_IO_UNKNOWN unless the host defines HOST_CIA_READ(a, &v) / HOST_CIA_WRITE(a, v)
+ * (return 1 when handled). HOST_ACK_HANDLER(name, bits) makes a handler that only acknowledges INTREQ bits (a level the
+ * game serves through Kickstart, e.g. -DHOST_L4=host_ack_audio). No game data: nothing of a game but HOST_L3. */
 #ifndef AREK_HOST_H
 #define AREK_HOST_H
 #include <math.h>
@@ -33,13 +38,17 @@
 #endif
 static int    H_LINES = 313;             /* PAL long frame (LOF 1, VPOSR bit 15); 312 for a short one; with BPLCON0 LACE the fields alternate */
 static int    H_LOF = 1;
+static int    H_LINES_FORCED = 0;        /* HOST_LINES given: the frame length stays */
 static uint16_t H_INTREQ = 0;            /* Paula INTREQ (read back as INTREQR) */
 static long   H_FRAME = 0;               /* frames since the host started */
 static long   H_FRAME0 = 0;              /* the original's frame number at the start (records, shots) */
 static int    H_COP_DONE = 0;            /* the copper's interrupt of this frame already raised */
 static int    H_IRQ_DEPTH = 0;
 static uint8_t H_CIAA_PRA = 0xfe;        /* $BFE001: bits 6/7 = fire port 0/1 (0 = pressed), bit 1 = LED output */
-static uint8_t H_CIAA_SDR = 0, H_CIAA_ICR = 0, H_CIAA_DDRA = 0x03;
+static uint8_t H_CIAA_SDR = 0, H_CIAA_ICR = 0, H_CIAA_DDRA = 0x03, H_CIAB_ICR = 0;
+typedef struct { uint16_t latch, cnt; uint8_t cr; long e0; } HCiaTimer;   /* e0: the E tick of the last update */
+typedef struct { HCiaTimer t[2]; uint8_t mask; } HCia;
+static HCia H_CIA[2] = { { { { 0xffff, 0xffff, 0, 0 }, { 0xffff, 0xffff, 0, 0 } }, 0 }, { { { 0xffff, 0xffff, 0, 0 }, { 0xffff, 0xffff, 0, 0 } }, 0 } };   /* 0 = CIA-A, 1 = CIA-B */
 static int    H_LED_OFF = -1;            /* CIA-A PRA bit 1 as the game wrote it: 1 = LED off = filter off; -1 = not yet */
 static uint16_t H_JOY0 = 0, H_JOY1 = 0, H_POTGOR = 0x5500;
 static long   H_IO_UNKNOWN = 0;
@@ -64,6 +73,27 @@ static uint16_t h_rd16cb(void *ctx, uint32_t a) { (void)ctx; return (uint16_t)rd
 static inline double h_now(void) { return arek_glue_time(); }
 static inline double h_abs(void) { return H_PAULA.frame_base + h_now(); }
 static double h_ephase(void) { double t2 = 2.0 * h_abs(); return fmod(floor(t2), 10.0); }
+static long h_eticks(void) { return (long)floor(h_abs() / 5.0); }     /* E clock cycles: 10 CPU clocks = 5 CCK */
+/* the CIAs' timers: counted lazily in E ticks; an underflow reloads the latch, sets the ICR bit and, with the mask bit,
+ * raises PORTS (CIA-A) or EXTER (CIA-B); one-shot mode stops the timer */
+static uint8_t *h_cia_icr(int i) { return i ? &H_CIAB_ICR : &H_CIAA_ICR; }
+static void h_cia_raise(int i) { if (*h_cia_icr(i) & H_CIA[i].mask) H_INTREQ |= i ? 0x2000 : 0x0008; }
+static void h_cia_run(int i, int k) {
+    HCiaTimer *t = &H_CIA[i].t[k]; long now = h_eticks();
+    if (!(t->cr & 1)) { t->e0 = now; return; }
+    long n = now - t->e0; t->e0 = now;
+    if (n <= 0) return;
+    if (n <= t->cnt) { t->cnt = (uint16_t)(t->cnt - n); return; }
+    *h_cia_icr(i) |= (uint8_t)(1 << k); h_cia_raise(i);
+    if (t->cr & 8) { t->cr &= ~1; t->cnt = t->latch; return; }   /* one-shot: stops */
+    long per = (long)t->latch + 1, m = (n - t->cnt - 1) % per;
+    t->cnt = (uint16_t)(t->latch - m);
+}
+static int h_cia_reg(uint32_t a, int *i) {           /* the CIA and register of an address, or -1 */
+    if ((a & 0xbfe001) == 0xbfe001 && (a & 0xfff0ff) == 0xbfe001) { *i = 0; return (int)((a >> 8) & 15); }
+    if ((a & 0xfff0ff) == 0xbfd000) { *i = 1; return (int)((a >> 8) & 15); }
+    return -1;
+}
 static void h_sample(void *ctx, int ch, double t, int value) { (void)ctx; ara_event(ch, t, value); if (h_sample_cb) h_sample_cb(ch, t, value); }
 static void h_audio_irq(void *ctx, int ch, double t) { (void)ctx; (void)t; H_INTREQ |= (uint16_t)(0x80 << ch); }   /* AUDx: level 4 (HOST_L4) */
 
@@ -77,7 +107,7 @@ static void host_init(double t0) {
     if (getenv("HOST_CIA_A")) H_CIA_A = atoi(getenv("HOST_CIA_A"));
     if (getenv("HOST_CIA_B")) H_CIA_B = atoi(getenv("HOST_CIA_B"));
     if (getenv("HOST_IRQ_E")) H_IRQ_E = atoi(getenv("HOST_IRQ_E"));
-    if (getenv("HOST_LINES")) { H_LINES = atoi(getenv("HOST_LINES")); H_LOF = H_LINES == 313; }
+    if (getenv("HOST_LINES")) { H_LINES = atoi(getenv("HOST_LINES")); H_LOF = H_LINES == 313; H_LINES_FORCED = 1; }
     arek_glue_init(HOST_HPOS, H_LINES, HOST_MAXLINES, OWN, CREG, h_rd16cb, 0);
     arek_glue_frame(H_LINES);
     arek_glue_set_time(t0);
@@ -113,6 +143,7 @@ void hw_write_hook(uint32_t off, uint32_t v) {
     if (off == 0x096) ard_until((int)(h_now() / HOST_HPOS));   /* the lines before a DMACON write see the old value (the runtime applies it) */
     if (h_wr_cb) h_wr_cb(off, v);
     if (off == 0x09c) { if (v & 0x8000) H_INTREQ |= v & 0x7fff; else H_INTREQ &= ~(v & 0x7fff); }
+    if (off == 0x034) { for (int k = 8; k <= 14; k += 2) if (v & (1u << (k + 1))) H_POTGOR = (uint16_t)((H_POTGOR & ~(1u << k)) | (v & (1u << k))); }   /* POTGO: an output pin reads back (G40) */
     if ((off >= 0x0a0 && off < 0x0e0) || (off == 0x096 && (v & 0x000f)) || (off == 0x09c && (v & 0x0780))) arek_paula_write(&H_PAULA, h_abs(), off, (uint16_t)v);
 }
 /* the E clock (10 CPU clocks = 5 CCK): a CIA access and an autovector wait for its phase (measured on 3 instructions) */
@@ -124,14 +155,35 @@ static void h_cia_wait(void) {
 }
 uint8_t cia_read_hook(uint32_t a) {
     h_cia_wait();
+#ifdef HOST_CIA_READ
+    { uint8_t hv; if (HOST_CIA_READ(a, &hv)) return hv; }
+#endif
+    int i, reg = h_cia_reg(a, &i);
+    if (reg >= 4 && reg <= 7) { h_cia_run(i, (reg - 4) >> 1); HCiaTimer *t = &H_CIA[i].t[(reg - 4) >> 1]; return (uint8_t)((reg & 1) ? t->cnt >> 8 : t->cnt); }
+    if (reg == 13) { h_cia_run(i, 0); h_cia_run(i, 1); uint8_t *icr = h_cia_icr(i), r = (uint8_t)(*icr | ((*icr & H_CIA[i].mask) ? 0x80 : 0)); *icr = 0; return r; }
+    if (reg == 14 || reg == 15) { int k = reg - 14; h_cia_run(i, k); return H_CIA[i].t[k].cr; }
     switch (a) {
     case 0xbfe001: return H_CIAA_PRA;
     case 0xbfec01: return H_CIAA_SDR;
-    case 0xbfed01: { uint8_t r = H_CIAA_ICR; H_CIAA_ICR = 0; return r; }
     }
     H_IO_UNKNOWN++; H_IO_LAST = a; return 0xff;
 }
 void cia_write_hook(uint32_t a, uint8_t v) {
+#ifdef HOST_CIA_WRITE
+    if (HOST_CIA_WRITE(a, v)) { h_cia_wait(); return; }
+#endif
+    int i, reg = h_cia_reg(a, &i);
+    if (reg >= 4 && reg <= 7) {                         /* the latch; the high byte loads a stopped timer (and starts a one-shot) */
+        int k = (reg - 4) >> 1; HCiaTimer *t = &H_CIA[i].t[k]; h_cia_run(i, k);
+        if (reg & 1) { t->latch = (uint16_t)((t->latch & 0xff) | (v << 8)); if (!(t->cr & 1)) { t->cnt = t->latch; if (t->cr & 8) { t->cr |= 1; t->e0 = h_eticks(); } } }
+        else t->latch = (uint16_t)((t->latch & 0xff00) | v);
+    } else if (reg == 13) { if (v & 0x80) H_CIA[i].mask |= v & 0x7f; else H_CIA[i].mask &= (uint8_t)~v; h_cia_raise(i); }
+    else if (reg == 14 || reg == 15) {                 /* control: START (0), ONESHOT (3), FORCE LOAD (4, not stored) */
+        int k = reg - 14; HCiaTimer *t = &H_CIA[i].t[k]; h_cia_run(i, k);
+        if (v & 0x10) t->cnt = t->latch;
+        if ((v & 1) && !(t->cr & 1)) t->e0 = h_eticks();
+        t->cr = (uint8_t)(v & 0xef);
+    }
     if (a == 0xbfe201) H_CIAA_DDRA = v;
     if (a == 0xbfe001 && (H_CIAA_DDRA & 2)) { H_LED_OFF = (v >> 1) & 1; H_CIAA_PRA = (uint8_t)((H_CIAA_PRA & ~2) | (v & 2)); }
     h_cia_wait();
@@ -160,7 +212,8 @@ static void host_events(void) {
               FILE *sf = fopen(pth, "wb"); if (sf) { fwrite(ARD_RGB, 1, sizeof ARD_RGB, sf); fclose(sf); } } }
         if (h_frame_done_cb) h_frame_done_cb();
         ard_frame_start();
-        if (CREG[0x100 >> 1] & 0x0004) { H_LOF ^= 1; H_LINES = H_LOF ? 313 : 312; }   /* LACE: the fields alternate long / short */
+        if (ARD_R[0x100 >> 1] & 0x0004) { H_LOF ^= 1; H_LINES = H_LOF ? 313 : 312; }   /* LACE (by the CPU or the Copper, G39): the fields alternate long / short */
+        else if (!H_LINES_FORCED) { H_LOF = 1; H_LINES = 313; }                      /* without LACE every field is long (G35) */
         ARD_LAST = H_LINES - 1;
         arek_glue_frame(H_LINES);
         arek_paula_frame(&H_PAULA, H_PAULA.frame_base + len);
@@ -178,7 +231,9 @@ static void host_events(void) {
  * Paula model's requests: the first word after DMA on, the last word of every block), 5 RBF DSKSYNC, 6 EXTER. Only the
  * levels the host defines (HOST_Lx) are taken, the highest pending first. */
 static const uint16_t H_LEVEL_MASK[7] = { 0, 0x0007, 0x0008, 0x0070, 0x0780, 0x1800, 0x2000 };
-static void h_enter(M68 *m, uint32_t pc, int level, void (*handler)(M68 *)) {
+/* the entry (the stack frame, SR, the entry's time) and the exit; the handler is called directly through H_ENTER so a
+ * browser build with ASYNCIFY_IGNORE_INDIRECT can sleep in a wait loop inside it (Alien Breed II, G37) */
+static void h_enter_pre(M68 *m, uint32_t pc, int level) {
     uint32_t sr = sr_get(m);
     if (H_IRQ_E >= 0) { int ph = (int)h_ephase(); arek_glue_add_clocks((uint32_t)(((H_IRQ_E - ph) % 10 + 10) % 10)); }
     { ArekBus *bb = arek_glue_bus(); double tt = arek_bus_insn(bb, arek_glue_time(), H_IRQ_CYC, H_IRQ_ACC, H_IRQ_PRE);
@@ -188,9 +243,14 @@ static void h_enter(M68 *m, uint32_t pc, int level, void (*handler)(M68 *)) {
     m->srhi = (m->srhi & ~0x0700u) | 0x2000u | ((uint32_t)level << 8);
     if (getenv("HOST_IRQ_DEBUG") && H_IRQS < 12) fprintf(stderr, "irq level %d frame %ld t %.1f intreq %04x pc %06x\n", level, H_FRAME, h_now(), H_INTREQ, pc);
     H_IRQS++; H_IRQ_DEPTH++;
-    handler(m);
-    H_IRQ_DEPTH--;
 }
+static void h_enter_post(void) { H_IRQ_DEPTH--; }
+#define H_ENTER(m, pc, level, handler) do { h_enter_pre(m, pc, level); handler(m); h_enter_post(); } while (0)
+/* rte as the translation does it; HOST_ACK_HANDLER(name, bits) = a handler that only acknowledges INTREQ bits, for a
+ * level the game leaves to Kickstart (otherwise its request would be taken again and again) */
+static void h_rte(M68 *m) { uint32_t sp = m->a[7], sr = rd16_raw(sp); sr_set(m, sr, 1); m->a[7] = sp + 6; }
+#define HOST_ACK_HANDLER(name, bits) void name(M68 *m) { H_INTREQ &= (uint16_t)~(bits); h_rte(m); }
+HOST_ACK_HANDLER(host_ack_audio, 0x0780)
 static void host_irq(M68 *m, uint32_t pc) {
     uint16_t intena = CREG[0x09a >> 1];
     if (!(intena & 0x4000)) return;
@@ -201,20 +261,20 @@ static void host_irq(M68 *m, uint32_t pc) {
         if (!(pend & H_LEVEL_MASK[level])) continue;
         switch (level) {
 #ifdef HOST_L6
-        case 6: h_enter(m, pc, 6, HOST_L6); return;
+        case 6: H_ENTER(m, pc, 6, HOST_L6); return;
 #endif
 #ifdef HOST_L5
-        case 5: h_enter(m, pc, 5, HOST_L5); return;
+        case 5: H_ENTER(m, pc, 5, HOST_L5); return;
 #endif
 #ifdef HOST_L4
-        case 4: h_enter(m, pc, 4, HOST_L4); return;
+        case 4: H_ENTER(m, pc, 4, HOST_L4); return;
 #endif
-        case 3: h_enter(m, pc, 3, HOST_L3); return;
+        case 3: H_ENTER(m, pc, 3, HOST_L3); return;
 #ifdef HOST_L2
-        case 2: h_enter(m, pc, 2, HOST_L2); return;
+        case 2: H_ENTER(m, pc, 2, HOST_L2); return;
 #endif
 #ifdef HOST_L1
-        case 1: h_enter(m, pc, 1, HOST_L1); return;
+        case 1: H_ENTER(m, pc, 1, HOST_L1); return;
 #endif
         default: break;                                   /* a level the host does not serve stays pending */
         }
