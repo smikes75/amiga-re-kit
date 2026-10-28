@@ -475,10 +475,10 @@ def cmd_host(a):
         if not (a.game and a.l3 and a.entry):
             raise ValueError('arek host engine OUT_DIR --game game.c --l3 f_xxxxxx --entry f_xxxxxx [--native] [--dynamic] [--ovl F] [--src F] [--run]')
         kw = dict(cc=a.cc, native=a.native, dynamic=a.dynamic, ovl=a.ovl, src=a.src, includes=a.include or (), defines=a.define or (),
-                  export=a.export, extra=a.extra or ())
+                  export=a.export, extra=a.extra or (), thread=a.thread)
         if a.run:
             cmd = host.engine_build(a.target, a.game, a.l3, a.entry, **kw)
-            print('built: ' + os.path.join(a.target, 'arek_host_engine' if a.native else 'engine.js'))
+            print('built: ' + os.path.join(a.target, ('arek_host_engine_mt' if a.thread else 'arek_host_engine') if a.native else ('engine_mt.js' if a.thread else 'engine.js')))
         else:
             cmd = host.engine_command(a.target, a.game, a.l3, a.entry, **kw)
         print(' '.join(shlex.quote(x) for x in cmd))
@@ -615,6 +615,15 @@ def cmd_web(a):
             raise ValueError('web longrun URL [--minutes M] [--interval S] [--sample S]')
         for row in webmod.longrun(a.target, a.minutes, a.interval, a.sample):
             print(webmod.format_longrun(row), flush=True)
+    elif a.what == 'smooth':
+        from . import websmooth
+        if not a.target:
+            raise ValueError('web smooth URL [--seconds S] [--browser chromium|webkit|all] [--stalls N] [--stall-ms M] [--json]')
+        browsers = websmooth.BROWSERS if a.browser == 'all' else (a.browser,)
+        res = websmooth.run(a.target, a.seconds, browsers, a.stalls, a.stall_ms, log=(lambda *x: None) if a.json else print)
+        if a.json:
+            print(json.dumps(res, indent=1))
+        return 0 if all(r.get('passed') for r in res.values() if 'error' not in r) and any('error' not in r for r in res.values()) else 1
     elif a.what == 'serve':
         from . import web as webmod
         from .headless import config
@@ -1112,6 +1121,7 @@ def build_parser():
     s.add_argument('--entry', help='engine: the translated routine the run starts in (HOST_ENTRY)')
     s.add_argument('--native', action='store_true', help='engine: build with the C compiler (the check line) instead of Emscripten')
     s.add_argument('--dynamic', action='store_true', help='engine: go on at the popped return address when the entry returns (ENGINE_DYNAMIC)')
+    s.add_argument('--thread', action='store_true', help='engine: the game in its own thread over shared memory (pthreads, no ASYNCIFY; the page needs COOP/COEP)')
     s.add_argument('--ovl', help='engine: the overlay modules file (OVL_SRC)')
     s.add_argument('--src', help='engine: the project file with its extern routines and hooks (ENGINE_SRC)')
     s.add_argument('--include', action='append', help='engine: an include folder (repeatable)')
@@ -1161,17 +1171,22 @@ def build_parser():
     s.set_defaults(fn=cmd_profile)
 
     s = sp.add_parser('web', help='display contract: reference wb-obraz.js, demo page, Chromium tests (WB-OBRAZ-CRT.md)')
-    s.add_argument('what', choices=['copy', 'demo', 'test', 'seal', 'check', 'payload', 'serve', 'strip', 'longrun'])
+    s.add_argument('what', choices=['copy', 'demo', 'test', 'seal', 'check', 'payload', 'serve', 'strip', 'longrun', 'smooth'])
     s.add_argument('target', nargs='?', help='copy: destination folder (writes wb-obraz.js, wb-seal.js, wb-nastaveni.js, '
-                   'wb-zvuk.js, wb-atn.js, wb-content.js, wb-touch.js); serve: the bundle folder (default .); demo: nothing - it serves the package\'s demo.html on http://127.0.0.1:PORT/demo.html '
+                   'wb-zvuk.js, wb-atn.js, wb-content.js, wb-touch.js, wb-takt.js, wb-zvuk-out.js, wb-zvuk-worklet.js); serve: the bundle folder (default .); demo: nothing - it serves the package\'s demo.html on http://127.0.0.1:PORT/demo.html '
                    '(the file itself is arek/web/demo.html in the installed package); test: URL of a page with window.wbObrazTest; '
-                   'seal: the first file; check: a presentation bundle folder; strip: the source file; longrun: the URL of a page with globalThis.WBLONGRUN')
+                   'seal: the first file; check: a presentation bundle folder; strip: the source file; longrun / smooth: the URL of a page with globalThis.WBLONGRUN')
     s.add_argument('rest', nargs='*', help='seal: more files; strip: the output file')
     s.add_argument('--drop', action='append', metavar='TAG', help='strip: the variant to cut out (lines //@TAG, blocks //@TAG{ ... //@}TAG); default FULL')
     s.add_argument('--isolated', action='store_true', help='serve: send the COOP / COEP headers (cross-origin isolation)')
     s.add_argument('--minutes', type=float, default=3.0, help='longrun: how long to play (default 3)')
     s.add_argument('--interval', type=float, default=30.0, help='longrun: seconds between samples (default 30)')
     s.add_argument('--sample', type=float, default=3.0, help='longrun: seconds of frames per sample (default 3)')
+    s.add_argument('--seconds', type=float, default=30.0, help='smooth: seconds of scrolling to sample (default 30)')
+    s.add_argument('--browser', choices=['chromium', 'webkit', 'all'], default='all', help='smooth: which browsers (default all installed)')
+    s.add_argument('--stalls', type=int, default=10, help='smooth: artificial stalls of the main thread (default 10)')
+    s.add_argument('--stall-ms', type=int, default=150, help='smooth: length of a stall (default 150 ms)')
+    s.add_argument('--json', action='store_true', help='smooth: the metrics as JSON')
     s.add_argument('--set', action='append', metavar='DISK.adf[,DISK2.adf]',
                    help='seal: a disk set that opens the files (repeat for other versions)')
     s.add_argument('--out', help='seal: output folder (seal.json + FILE.sealed)')

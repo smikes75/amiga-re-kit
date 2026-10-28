@@ -107,6 +107,7 @@ arek web serve build/present --port 8930               # the bundle with the dis
 arek web serve build/present --isolated                 # ... with the COOP / COEP headers (an engine with shared memory)
 arek web strip web/page.js build/present/page.js --drop FULL   # the presentation's variant: lines //@FULL and blocks //@FULL{ ... //@}FULL cut out
 arek web longrun http://127.0.0.1:8930/ --minutes 3     # smoothness over a longer play (playwright; the page's globalThis.WBLONGRUN hook)
+arek web smooth http://127.0.0.1:8920/smooth-demo.html  # the canon's limits in Chromium and WebKit: dropped frames, camera and object steps, missing passes, key latency, sound under stalls (docs/WB-PLYNULOST.md)
 arek shots cap/shots/o build/shots/h --align 8          # the pictures of two runs paired by frame, each pair aligned for a screen shake
 arek web test http://localhost:8911/?test=1            # ... and §6: the menu and the sound contract, when the page has the hooks
 
@@ -119,6 +120,7 @@ arek selftest bus                                      # the model against this 
 arek selftest audio                                    # the Paula model (audio DMA slots, output bytes) against this VAHeadless's logs
 arek host copy lib && arek host state cap/s0 state0   # the host of a translation (docs/HOST.md) and the state a run starts from
 arek host pack state0 state0.bin && arek host engine web/eng --game game.c --l3 f_c13e1c --entry f_c01c72 --run   # the web engine (ASYNCIFY)
+arek host engine web/eng --game game.c --l3 f_c13e1c --entry f_c01c72 --thread --run   # ... in its own thread over shared memory (no ASYNCIFY; the page needs COOP/COEP)
 arek --version                                         # version + decoder/recompiler hashes
 ```
 
@@ -146,6 +148,8 @@ asks for (see `examples/profile.example.json`).
 | `host/` (`arek host copy`) | the host of a translation: time from the bus model, the beam, interrupts 1-6, CIA-A with the E clock, Paula, the picture line by line in C (`arek_display.h`, 0 px against the emulator), the trace driver (`arek_host_trace.c`), `arek host state` from a capture, disk images at run time (`arek_host_disk.h`), the web engine (`arek_host_engine.c`, Emscripten ASYNCIFY, `arek host engine`, held against its native build by `arek_host_engine_check.js`) (`docs/HOST.md`) | Alien Breed II |
 | `bus/arek_bus_paula.h` | Paula's audio DMA for the bus model: the channels' slots and output bytes, exact against the emulator (`arek selftest audio`) | Alien Breed II |
 | `web/wb-nastaveni.js`, `web/wb-zvuk.js` | the shared Display / Sound menu of the rebuilds (same ids, ranges, defaults per mode, storage, optional zoom snapping to the whole-device-pixel zooms; the game adds its items and texts) and the sound contract 1.1: one stereo-width rule, 20 ms gain ramps, the Amiga 500's filters from the schematic in prescribed digital forms, test hooks for `arek web test` §6 | Alien Breed, Superfrog |
+| `web/wb-takt.js` | the clock of a page (canon C): the game's frames allowed by the display's clock, the lock on a k x 50 Hz display, the timeline of the frames, the picture behind the game with pairs for the interpolation and extrapolation, keys at the event; the synthetic page `smooth-demo.html` runs on it | Alien Breed II, Superfrog (Sonnet) |
+| `web/wb-zvuk-worklet.js`, `web/wb-zvuk-out.js` | Paula's output into Web Audio (canon D): an AudioWorklet over a ring of stereo int16 - the engine's ring in shared memory with written / read counters (a stalled main thread does not interrupt the sound, the engine computes on when the reserve runs low) or the game's frames by messages; the reserve, dropouts and output latency for the hooks | Alien Breed II, Superfrog (Sonnet) |
 | `web/wb-touch.js` | touch controls for a page: a virtual stick and buttons (fire, the page's keys), shown on touch devices or with `?touch`; `WBTOUCH.bits()` as the keyboard's bits, its own styles | Alien Breed II |
 | `web/wb-atn.js`, `web/wb-content.js`, `arek web payload` | the ATN! decruncher for a page (a port of the kit's, 0 differences against the games' own) and the content key: the page unpacks every ATN! block of the visitor's disks, keeps the files whose size and SHA-256 content.json lists, joins them in order - the payload of `arek web seal --payload`, so any disk version with the same files opens the sealed code | Alien Breed II |
 | `arek.seal`, `web/wb-seal.js` | code derived from a game on a public page, encrypted (AES-GCM) under a key computed from the contents of the original disk, or from the game's own content as the page's loader rebuilds it (a payload key: every disk version with the same game files opens it); opened in the browser with WebCrypto | presentation pages |

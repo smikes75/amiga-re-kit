@@ -43,7 +43,7 @@ version = {attr = "arek.__version__"}
 
 [tool.setuptools.package-data]
 "arek.headless" = ["patches/*.patch", "selftest_display.s", "selftest_bus.s", "selftest_audio.s"]
-"arek.web" = ["wb-obraz.js", "wb-seal.js", "wb-nastaveni.js", "wb-zvuk.js", "wb-atn.js", "wb-content.js", "wb-touch.js", "demo.html"]
+"arek.web" = ["wb-obraz.js", "wb-seal.js", "wb-nastaveni.js", "wb-zvuk.js", "wb-atn.js", "wb-content.js", "wb-touch.js", "wb-takt.js", "wb-zvuk-out.js", "wb-zvuk-worklet.js", "demo.html", "smooth-demo.html"]
 "arek.bus" = ["*.c", "*.h"]
 "arek.host" = ["*.c", "*.h", "*.js"]
 

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wb smooth demo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d0d10; color: #ccc; font: 13px system-ui, sans-serif; }
+  #bar { height: 32px; display: flex; gap: 12px; align-items: center; padding: 0 12px; }
+  #stage { position: absolute; top: 32px; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; padding: 12px; box-sizing: border-box; overflow: hidden; }
+  .game { position: relative; line-height: 0; }
+  .game canvas#screen { display: block; image-rendering: pixelated; background: #000; }
+</style>
+</head>
+<body>
+<div id="bar"><span id="label">wb smooth demo: hold the arrow keys</span></div>
+<div id="stage"><div class="game"><canvas id="screen"></canvas></div></div>
+<script src="wb-obraz.js"></script>
+<script src="wb-takt.js"></script>
+<script src="wb-zvuk.js"></script>
+<script src="wb-zvuk-out.js"></script>
+<script>
+'use strict';
+// A synthetic game for `arek web smooth` (docs/WB-PLYNULOST.md) on the kit's clock (wb-takt.js): logic at 50 Hz
+// driven by the display's clock (game frames allowed up to "now + 1 frame"), the picture behind the game with the
+// camera and the objects interpolated between the two game frames around the display time, the keys taken at the
+// event. Hooks (WBLONGRUN 1.1): ready(), cam() -> [x, y] game px as drawn, objs() -> [[id, x, y], ...] game px as
+// drawn, missing() -> display frames drawn without the next game frame, ahead() -> game frames ahead of the display,
+// audio() -> the real output's reserve, dropouts and latency (wb-zvuk-out.js): with shared memory (the page served with
+// COOP/COEP, `arek web serve --isolated`) a worker fills the ring on its own and a stalled main thread does not interrupt
+// the sound; without it the page sends the frames by messages and a long stall runs the reserve dry - as the canon says
+const W = 320, H = 256, O = WBOBRAZ;
+const screen = document.getElementById('screen'), stage = document.getElementById('stage');
+const GL = new URLSearchParams(location.search).get('gl');
+const pr = new O.Presenter(screen, { gl: GL === '0' ? 'off' : GL === '1' ? 'on' : 'auto' });
+const pixels = new Uint8ClampedArray(W * H * 4);
+let S = 2, keys = 0, frames = [], done = 0, drawn = 0, shown = { cam: [0, 0], objs: [] };
+const SPEEDS = [[1.5, 0.25], [-0.75, 0.5], [2.25, -0.4]];                       // objects 1-3: game px per game frame
+let cam = 0, objs = SPEEDS.map((s, i) => [i + 1, 40 + 90 * i, 60 + 50 * i]);
+// the engine: a permit runs the game to frame n at once (as a coroutine resumed does); every frame gets its time
+const takt = WBTAKT.create({ fps: 50, ahead: 2, latC: 30, latO: 60, allow: (n) => { while (done < n) runFrame(); } });
+WBTAKT.keyboard(window, { ArrowRight: 1, ArrowLeft: 2 }, (b) => { keys = b; });   // the keys at the event
+function runFrame() {                                                          // one game frame (50 Hz logic)
+  const dir = keys & 1 ? 1 : keys & 2 ? -1 : 0;
+  cam += dir * 2;
+  objs = objs.map(([id, x, y], i) => [id, x + SPEEDS[i][0], y + SPEEDS[i][1]]);
+  done++;
+  frames.push({ t: takt.stamp(done), cam: [cam, 0], objs: objs.map((o) => o.slice()) });
+  if (frames.length > 8) frames.shift();
+  if (out && out.mode === 'messages') out.push(tone(960));                       // the frame's sound by messages (no shared memory)
+}
+// the sound: a 440 Hz tone as the game's output, 960 stereo samples per game frame
+let audio = null, out = null, phase = 0;
+function tone(n) {
+  const b = new Int16Array(n * 2);
+  for (let i = 0; i < n; i++) { const v = Math.round(6000 * Math.sin(phase)); phase += 2 * Math.PI * 440 / 48000; b[2 * i] = v; b[2 * i + 1] = v; }
+  return b;
+}
+const PRODUCER = `const n = 48000, ring = new Int16Array(sab, 0, n * 2), idx = new Int32Array(sab, n * 4, 2); let phase = 0, w = 0;
+  setInterval(() => { const rd = Atomics.load(idx, 1) < 0 ? w : Atomics.load(idx, 1);
+    while (w - rd < 2400 + 960) { for (let i = 0; i < 960; i++, w++) { const v = Math.round(6000 * Math.sin(phase)); phase += 2 * Math.PI * 440 / 48000; ring[(w % n) * 2] = v; ring[(w % n) * 2 + 1] = v; }
+      Atomics.store(idx, 0, w); } }, 10);`;
+async function startAudio() {
+  if (audio) { if (audio.state !== 'running') audio.resume(); return; }
+  audio = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
+  const chain = WBZVUK.chain(audio); WBZVUK.apply(chain, { on: true, volume: 100, stereo: 100, filterFixed: false, filterLed: 'off', filterHp: false }, false, 0);
+  out = await WBZVUKOUT.create(audio, { module: 'wb-zvuk-worklet.js' });
+  out.node.connect(chain.input);
+  if (window.crossOriginIsolated && typeof SharedArrayBuffer === 'function') {   // a worker fills the ring in shared memory, as an engine in a thread does
+    const n = 48000, sab = new SharedArrayBuffer(n * 4 + 8); new Int32Array(sab, n * 4, 2).fill(-1); new Int32Array(sab, n * 4, 1)[0] = 0;
+    const wk = new Worker(URL.createObjectURL(new Blob(['onmessage = (e) => { const sab = e.data; ' + PRODUCER + ' };'], { type: 'text/javascript' })));
+    wk.postMessage(sab);
+    out.bind({ sab, ring: 0, n, widx: n * 4, ridx: n * 4 + 4 });
+  }
+  if (audio.state !== 'running') audio.resume();
+}
+['pointerdown', 'keydown'].forEach((t) => addEventListener(t, () => { startAudio(); }, true));
+function layout() {
+  const dpr = window.devicePixelRatio || 1;
+  const cs = getComputedStyle(stage), aw = stage.clientWidth - 24, ah = stage.clientHeight - 24;
+  S = O.deviceScale(0, W, W, dpr, Math.min(aw / W, ah / H), 1);
+  pr.size(W, H, S, 1, dpr);
+}
+function draw(c, os) {                                                         // the world: a checker scrolled by the camera, the objects as squares
+  const cx = Math.floor(c[0]);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const k = ((((x + cx) >> 4) + (y >> 4)) & 1) ? 48 : 24, i = (y * W + x) * 4;
+    pixels[i] = k; pixels[i + 1] = k + 16; pixels[i + 2] = k + 40; pixels[i + 3] = 255;
+  }
+  for (const [id, ox, oy] of os) {
+    const x0 = Math.round(ox - c[0]), y0 = Math.round(oy);
+    for (let y = y0; y < y0 + 12; y++) for (let x = x0; x < x0 + 12; x++) {
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      const i = (y * W + x) * 4; pixels[i] = 200; pixels[i + 1] = 60 * id; pixels[i + 2] = 40; pixels[i + 3] = 255;
+    }
+  }
+  pr.present({ pixels });
+}
+function frame(ts) {
+  takt.tick(ts, done, document.hidden);                                        // the permits for this display frame
+  if (frames.length) {
+    const { tv, tvO } = takt.view(ts);                                         // the picture behind the game
+    const p = takt.pair(frames, tv), q = takt.pair(frames, tvO);
+    const lerp = (x, y, f) => x + (y - x) * f;
+    const cb = p.b || p.a, ob = q.b || q.a;
+    shown = { cam: [lerp(p.a.cam[0], cb.cam[0], p.f), 0], objs: q.a.objs.map((o, i) => [o[0], lerp(o[1], ob.objs[i][1], q.f), lerp(o[2], ob.objs[i][2], q.f)]) };
+    draw(shown.cam, shown.objs);
+    drawn++;
+  }
+  requestAnimationFrame(frame);
+}
+addEventListener('resize', layout);
+layout();
+requestAnimationFrame(frame);
+globalThis.WBLONGRUN = {
+  version: '1.1',
+  ready: () => drawn > 2,
+  cam: () => shown.cam.slice(),
+  objs: () => shown.objs.map((o) => o.slice()),
+  missing: () => takt.missing,
+  ahead: () => takt.stats().ahead / takt.fm(),
+  audio: () => { if (!out) return { reserve: 0, dropouts: 0, latency: 0, simulated: true }; const st = out.stats(); return { reserve: st.reserve, dropouts: st.dropouts, latency: st.latency, mode: st.mode, simulated: false }; },
+  status: () => { const st = takt.stats(); return 'frames ' + done + ' drawn ' + drawn + ' ' + (pr.gl ? 'webgl' : '2d') + ' display ' + st.hz + ' Hz lock ' + st.k + (out ? ' sound ' + out.mode : ' no sound yet'); },
+};
+</script>
+</body>
+</html>

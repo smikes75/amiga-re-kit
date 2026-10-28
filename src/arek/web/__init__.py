@@ -12,7 +12,7 @@ import os
 import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FILES = ('wb-obraz.js', 'wb-seal.js', 'wb-nastaveni.js', 'wb-zvuk.js', 'wb-atn.js', 'wb-content.js', 'wb-touch.js')
+FILES = ('wb-obraz.js', 'wb-seal.js', 'wb-nastaveni.js', 'wb-zvuk.js', 'wb-atn.js', 'wb-content.js', 'wb-touch.js', 'wb-takt.js', 'wb-zvuk-out.js', 'wb-zvuk-worklet.js')
 CONTENT_KIND = 'arek-atn-files-1'
 
 

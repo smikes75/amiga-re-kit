@@ -115,3 +115,28 @@ def test_pack_and_cli(tmp_path):
     assert cmd[0] == 'emcc' and '-DENGINE_DYNAMIC=1' in cmd and '-DOVL_SRC="ovl.c"' in cmd and '-DX=1' in cmd and '-DENGINE_ASYNC=1' in cmd
     assert any(x.startswith('EXPORTED_FUNCTIONS=') and '"_engine_run"' in x and '"_malloc"' in x for x in cmd)
     assert cli.main(['host', 'engine', str(tmp_path), '--game', 'g/game.c', '--l3', 'f_1', '--entry', 'f_2', '--native']) == 0
+
+
+def test_threaded_engine_native_and_wasm(tmp_path):
+    """--thread: the game in its own thread waits for each permit (a condition natively, a futex in wasm); the line equals
+    the coroutine build's, and the Node check drives the wasm thread the same way."""
+    if not bus.compiler():
+        pytest.skip('no C compiler')
+    build_state(tmp_path)
+    kw = dict(src=str(tmp_path / 'externs.c'), defines=['HOST_L4=f_001180'])
+    host.engine_build(str(tmp_path / 'n'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', native=True, **kw)
+    host.engine_build(str(tmp_path / 't'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', native=True, thread=True, **kw)
+    args = [str(tmp_path / 'state.bin'), '30', '--disk', '0', str(tmp_path / 'disk.adf')]
+    want = subprocess.run([str(tmp_path / 'n' / 'arek_host_engine')] + args, capture_output=True, text=True, check=True, timeout=60).stdout.strip()
+    got = subprocess.run([str(tmp_path / 't' / 'arek_host_engine_mt')] + args, capture_output=True, text=True, timeout=60)
+    assert got.returncode == 0, got.stderr
+    assert want.startswith('frames 30 ') and got.stdout.strip() == want
+    cmd = host.engine_command(str(tmp_path / 'w'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', thread=True, **kw)
+    assert '-pthread' in cmd and '-DENGINE_THREAD=1' in cmd and not any('ASYNCIFY' in x for x in cmd) and cmd[cmd.index('-o') + 1].endswith('engine_mt.js')
+    if not (shutil.which('emcc') and shutil.which('node')):
+        return
+    host.engine_build(str(tmp_path / 'w'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', thread=True, **kw)
+    r = subprocess.run(['node', os.path.join(HOST, 'arek_host_engine_check.js'), str(tmp_path / 'w'), str(tmp_path / 'state.bin'), '30',
+                        str(tmp_path / 'disk.adf')], capture_output=True, text=True, timeout=180)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().splitlines()[-1] == want

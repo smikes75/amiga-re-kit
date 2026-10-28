@@ -28,7 +28,8 @@ ENGINE_API = ('engine_alloc', 'engine_init', 'engine_set_disk', 'engine_run', 'e
               'engine_done', 'engine_allow', 'engine_keys', 'engine_keys2', 'engine_key', 'engine_fr_frame', 'engine_fr_aud0',
               'engine_fr_naud', 'engine_fr_led', 'engine_aud_ring', 'engine_aud_size', 'engine_rgb', 'engine_rgb_w', 'engine_rgb_h',
               'engine_pix', 'engine_pix_w', 'engine_pix_h', 'engine_led', 'engine_frame_no', 'engine_peek8', 'engine_poke8',
-              'engine_disk_reads', 'engine_disk_fails', 'engine_hash_hex')
+              'engine_disk_reads', 'engine_disk_fails', 'engine_hash_hex', 'engine_stop', 'engine_parked', 'engine_threaded',
+              'engine_aud_written', 'engine_aud_read', 'engine_aud_low', 'engine_hash_on')
 
 
 def copy(dest):
@@ -158,11 +159,13 @@ def pack(state_dir, out):
 
 
 def engine_command(out_dir, game, l3, entry, cc=None, native=False, dynamic=False, ovl=None, src=None, includes=(),
-                   defines=(), export='ArekEngine', extra=()):
+                   defines=(), export='ArekEngine', extra=(), thread=False):
     """The command that builds ``arek_host_engine.c`` with the translation ``game`` (a path; its folder is an include
     path), the level-3 handler ``l3`` and the entry routine ``entry``: with Emscripten (ASYNCIFY, ``OUT/engine.js`` +
     ``engine.wasm``, the API exported) or ``native=True`` with the C compiler (``OUT/arek_host_engine``). ``ovl``: the
-    overlay modules file (OVL_SRC), ``src``: the project's externs file (ENGINE_SRC), ``dynamic``: ENGINE_DYNAMIC."""
+    overlay modules file (OVL_SRC), ``src``: the project's externs file (ENGINE_SRC), ``dynamic``: ENGINE_DYNAMIC;
+    ``thread``: the engine in its own thread (ENGINE_THREAD: pthreads and shared memory, no ASYNCIFY; the page needs
+    COOP / COEP, `arek web serve --isolated`) - the wasm build is ``engine_mt.js`` + ``engine_mt.wasm``."""
     from .. import bus
     game = os.path.abspath(game)
     bus_dir = os.path.dirname(os.path.abspath(bus.__file__))
@@ -173,6 +176,8 @@ def engine_command(out_dir, game, l3, entry, cc=None, native=False, dynamic=Fals
     cmd += ['-DGAME_SRC="%s"' % os.path.basename(game), '-DHOST_L3=%s' % l3, '-DHOST_ENTRY=%s' % entry]
     if dynamic:
         cmd.append('-DENGINE_DYNAMIC=1')
+    if thread:
+        cmd += ['-pthread', '-DENGINE_THREAD=1']
     if ovl:
         cmd += ['-I', os.path.dirname(os.path.abspath(ovl)), '-DOVL_SRC="%s"' % os.path.basename(ovl)]
     if src:
@@ -181,7 +186,14 @@ def engine_command(out_dir, game, l3, entry, cc=None, native=False, dynamic=Fals
         cmd.append('-D' + d)
     cmd += [os.path.join(HERE, 'arek_host_engine.c'), os.path.join(bus_dir, 'arek_bus.c'), os.path.join(bus_dir, 'arek_bus_vamiga.c')]
     if native:
-        cmd += ['-lm', '-o', os.path.join(out_dir, 'arek_host_engine')]
+        cmd += ['-lm', '-o', os.path.join(out_dir, 'arek_host_engine' + ('_mt' if thread else ''))]
+    elif thread:
+        cmd += ['-w', '-o', os.path.join(out_dir, 'engine_mt.js'),
+                '-s', 'MODULARIZE=1', '-s', 'EXPORT_NAME=%s' % export, '-s', 'ENVIRONMENT=web,worker,node',
+                '-s', 'PTHREAD_POOL_SIZE=1', '-s', 'INITIAL_MEMORY=268435456', '-s', 'STACK_SIZE=1048576',
+                '-s', 'DEFAULT_PTHREAD_STACK_SIZE=8388608',
+                '-s', 'EXPORTED_FUNCTIONS=[%s]' % ','.join('"_%s"' % f for f in ENGINE_API + ('malloc', 'free')),
+                '-s', 'EXPORTED_RUNTIME_METHODS=["HEAPU8","HEAP16","HEAP32","ccall"]']
     else:
         cmd += ['-w', '-DENGINE_ASYNC=1', '-o', os.path.join(out_dir, 'engine.js'),
                 '-s', 'MODULARIZE=1', '-s', 'EXPORT_NAME=%s' % export, '-s', 'ENVIRONMENT=web,worker,node',

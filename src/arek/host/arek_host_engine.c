@@ -4,8 +4,15 @@
  * the game runs as a coroutine in the page's thread - when it has finished more frames than the page allowed, its next
  * wait loop (WAIT_LOOP of the translation, the beam or a counter an interrupt bumps) sleeps in js_wait() until
  * engine_allow(n) and Module.__engineResume(); meanwhile the page draws. ASYNCIFY instruments only js_wait's callers,
- * so the game sleeps in wait loops only (as the Superfrog and Alien Breed II rebuilds). Built natively (cc), the same
- * file runs the game for N frames and prints a line the Node check compares (arek_host_engine_check.js):
+ * so the game sleeps in wait loops only (as the Superfrog and Alien Breed II rebuilds). ENGINE_THREAD (arek host engine
+ * --thread; the page served with COOP/COEP): the game runs in its own thread (a pthread = a Web Worker) and waits at the
+ * end of every frame for the page's permit (a futex), no ASYNCIFY (the build takes minutes, not tens of them); the page
+ * composes from the same memory. The sound: the frames' samples go into the ring G_AUD with a count of samples written
+ * (engine_aud_written) that an AudioWorklet over the shared memory reads (wb-zvuk-worklet.js), writing the count read
+ * (engine_aud_read); when the reserve falls under engine_aud_low the thread computes on without a permit, so a stalled
+ * main thread does not interrupt the sound (canon D, E). engine_stop parks the thread (a longjmp in its own thread),
+ * engine_run after a new engine_init wakes it. Built natively (cc), the same file runs the game for N frames (in a
+ * thread with -DENGINE_THREAD) and prints a line the Node check compares (arek_host_engine_check.js):
  *
  *   arek host engine OUT --game game.c --l3 f_c13e1c --entry f_c01c72 [--dynamic] [--ovl overlays.c] [--src externs.c]
  *   arek_host_engine STATE.bin FRAMES [--disk N FILE]... [--keys alt|none] [--shot OUT.raw] [--dump CHIP.bin]  (native)
@@ -39,6 +46,13 @@ struct M68; void host_wait_loop(uint32_t pc, uint32_t addr);
 #endif
 #include "arek_host.h"
 #include "arek_host_disk.h"
+#ifdef ENGINE_THREAD
+#include <pthread.h>
+#include <time.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten/threading.h>
+#endif
+#endif
 #ifndef HOST_ENTRY
 #error "define HOST_ENTRY (the translated routine the run starts in, e.g. f_c01c72)"
 #endif
@@ -59,7 +73,9 @@ void HOST_ENTRY(M68 *m);
 typedef struct { long frame; int aud0, naud, led; } GFr;
 static GFr G_FR[G_NFR];
 static int16_t G_AUD[G_AUDN * 2]; static int G_AW = 0;
-static int G_DONE = 0, G_ALLOW = 0, G_END = 0, G_WAIT = 0; static uint32_t G_ERR = 0;
+static volatile int G_DONE = 0, G_ALLOW = 0, G_END = 0, G_WAIT = 0; static volatile uint32_t G_ERR = 0;
+static volatile int32_t G_AWT = 0, G_ARD = -1, G_ALOW = 0; static int G_HASHON = 0;
+static void g_hash_now(void);   /* samples written (stereo frames), read by the worklet (-1 = none), the low mark */
 static M68 E_M; static uint32_t E_ENTRY = 0;
 static int E_KEYS = 0, E_KEYS2 = -1, E_KEYMODE = 0; static volatile int E_KEY_CODE = -1, E_KEY_DOWN = 0;
 
@@ -67,6 +83,43 @@ static int E_KEYS = 0, E_KEYS2 = -1, E_KEYMODE = 0; static volatile int E_KEY_CO
 void unknown_hook(uint32_t a) { if (!G_ERR) G_ERR = a; }
 void overlay_unknown_hook(M68 *m, uint32_t base, uint32_t entry, uint64_t fp) { (void)m; (void)base; (void)fp; if (!G_ERR) G_ERR = entry; }
 
+#if defined(ENGINE_THREAD)
+/* the game's thread waits for the page: a futex in the browser, a condition natively; stop = a longjmp in the thread */
+static volatile int G_RUN = 0, G_STOP = 0, G_PARK = 0, G_GO = 0;
+static jmp_buf G_STOPJ;
+#ifdef __EMSCRIPTEN__
+static void g_wait_allow(int seen) { emscripten_futex_wait((void *)&G_ALLOW, (uint32_t)seen, 4.0); }
+static void g_wake_allow(void) { emscripten_futex_wake((void *)&G_ALLOW, 1); }
+static void g_wait_go(void) { emscripten_futex_wait((void *)&G_GO, 0, 100.0); }
+static void g_wake_go(void) { emscripten_futex_wake((void *)&G_GO, 1); }
+#else
+static pthread_mutex_t G_MX = PTHREAD_MUTEX_INITIALIZER; static pthread_cond_t G_CV = PTHREAD_COND_INITIALIZER;
+static void g_wait_ms(volatile int *var, int seen, int ms) {
+    struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts); ts.tv_nsec += (long)ms * 1000000L; if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
+    pthread_mutex_lock(&G_MX); if (*var == seen) pthread_cond_timedwait(&G_CV, &G_MX, &ts); pthread_mutex_unlock(&G_MX);
+}
+static void g_wake(void) { pthread_mutex_lock(&G_MX); pthread_cond_broadcast(&G_CV); pthread_mutex_unlock(&G_MX); }
+static void g_wait_allow(int seen) { g_wait_ms(&G_ALLOW, seen, 4); }
+static void g_wake_allow(void) { g_wake(); }
+static void g_wait_go(void) { g_wait_ms(&G_GO, 0, 100); }
+static void g_wake_go(void) { g_wake(); }
+#endif
+static void g_check_stop(void) { if (__atomic_load_n(&G_STOP, __ATOMIC_SEQ_CST)) longjmp(G_STOPJ, 1); }
+static void g_sleep_forever(void) { G_WAIT = 1; for (;;) { g_check_stop(); g_wait_allow(__atomic_load_n(&G_ALLOW, __ATOMIC_SEQ_CST)); } }
+/* the end of a frame in the thread: wait for the page's permit, unless the sound's reserve is under the low mark */
+static void g_pace(void) {
+    if (G_ERR || G_END) g_sleep_forever();
+    for (;;) {
+        g_check_stop();
+        int allow = __atomic_load_n(&G_ALLOW, __ATOMIC_SEQ_CST);
+        if (G_DONE < allow) break;
+        int32_t rd = __atomic_load_n(&G_ARD, __ATOMIC_SEQ_CST), lo = __atomic_load_n(&G_ALOW, __ATOMIC_SEQ_CST);
+        if (rd >= 0 && lo > 0 && G_AWT - rd < lo) break;
+        G_WAIT = 1; g_wait_allow(allow); G_WAIT = 0;
+    }
+}
+void host_wait_loop(uint32_t pc, uint32_t addr) { (void)pc; (void)addr; }
+#else
 #ifdef ENGINE_ASYNC
 EM_ASYNC_JS(void, js_wait, (void), { await new Promise((res) => { Module.__engineResume = res; }); Module.__engineResume = null; });
 #else
@@ -79,6 +132,7 @@ void host_wait_loop(uint32_t pc, uint32_t addr) {
     while (G_DONE >= G_ALLOW || G_ERR || G_END) { G_WAIT = 1; js_wait(); }
     G_WAIT = 0;
 }
+#endif
 /* inputs at the start of a frame: keys bits 1 R 2 L 4 U 8 D 16 F on port 1 (JOY1DAT, fire = CIA-A PRA bit 7), keys2 on
  * port 0 (-1 = none); a raw key as the keyboard sends it (~((code << 1) | released) into SDR, SP in ICR) */
 static void e_apply_keys(void) {
@@ -102,8 +156,12 @@ static void e_frame_done(void) {
     ara_until(H_PAULA.frame_base + (double)H_LINES * HOST_HPOS);
     f->frame = H_FRAME0 + H_FRAME; f->led = H_LED_OFF < 0 ? -1 : !H_LED_OFF; f->aud0 = G_AW; f->naud = ARA_N;
     for (int i = 0; i < ARA_N; i++) { int w = (G_AW + i) % G_AUDN; G_AUD[2 * w] = ARA_BUF[2 * i]; G_AUD[2 * w + 1] = ARA_BUF[2 * i + 1]; }
-    G_AW = (G_AW + ARA_N) % G_AUDN; ARA_N = 0;
-    G_DONE = n + 1;                                       /* the game sleeps at its next wait loop */
+    G_AW = (G_AW + ARA_N) % G_AUDN; __atomic_store_n(&G_AWT, G_AWT + ARA_N, __ATOMIC_SEQ_CST); ARA_N = 0;
+    if (G_HASHON) g_hash_now();
+    __atomic_store_n(&G_DONE, n + 1, __ATOMIC_SEQ_CST);  /* the game sleeps at its next wait loop (a thread: here) */
+#ifdef ENGINE_THREAD
+    g_pace();
+#endif
 }
 
 API uint8_t *engine_alloc(int n) { return (uint8_t *)malloc((size_t)(n > 0 ? n : 1)); }
@@ -141,22 +199,60 @@ API int engine_init(const uint8_t *p, int n) {
     return 0;
 }
 API int engine_set_disk(int n, const uint8_t *p, int len) { return ahd_set(n, p, len); }
-/* after engine_init (and the disks): the game from its entry; async it returns only when the game ends, natively when
- * it would wait for the page */
-API int engine_run(void) {
+static void g_game(void) {
     HOST_ENTRY(&E_M);
 #ifdef ENGINE_DYNAMIC
     for (;;) { uint32_t next = ((uint32_t)rd16_raw(E_M.a[7] - 4) << 16) | rd16_raw(E_M.a[7] - 2); call_addr(&E_M, next); }
 #endif
+}
+#ifdef ENGINE_THREAD
+static void *g_thread(void *arg) {
+    (void)arg;
+    for (;;) {
+        if (!setjmp(G_STOPJ)) { g_game(); G_END = 1; g_sleep_forever(); }
+        G_WAIT = 0; __atomic_store_n(&G_PARK, 1, __ATOMIC_SEQ_CST);
+        while (!__atomic_load_n(&G_GO, __ATOMIC_SEQ_CST)) g_wait_go();
+        __atomic_store_n(&G_GO, 0, __ATOMIC_SEQ_CST); __atomic_store_n(&G_STOP, 0, __ATOMIC_SEQ_CST); __atomic_store_n(&G_PARK, 0, __ATOMIC_SEQ_CST);
+    }
+    return 0;
+}
+/* after engine_init (and the disks): the first run creates the thread, a later one (after engine_stop and engine_parked)
+ * wakes it; returns at once */
+API int engine_run(void) {
+    if (G_RUN && !G_PARK) return -1;
+    if (G_RUN) { __atomic_store_n(&G_GO, 1, __ATOMIC_SEQ_CST); g_wake_go(); return 0; }
+    G_RUN = 1; pthread_t t;
+    if (pthread_create(&t, 0, g_thread, 0)) { G_RUN = 0; return -2; }
+    pthread_detach(t); return 0;
+}
+API void engine_stop(void) { __atomic_store_n(&G_STOP, 1, __ATOMIC_SEQ_CST); g_wake_allow(); }
+API int engine_parked(void) { return !G_RUN || __atomic_load_n(&G_PARK, __ATOMIC_SEQ_CST); }
+API int engine_threaded(void) { return 1; }
+#else
+/* after engine_init (and the disks): the game from its entry; async it returns only when the game ends, natively when
+ * it would wait for the page */
+API int engine_run(void) {
+    g_game();
     G_END = 1;
     for (;;) { G_WAIT = 1; js_wait(); }
     return 0;
 }
+API void engine_stop(void) {}
+API int engine_parked(void) { return 0; }
+API int engine_threaded(void) { return 0; }
+#endif
 API int engine_waiting(void) { return G_WAIT; }
 API int engine_ended(void) { return G_END; }
 API uint32_t engine_error(void) { return G_ERR; }
-API int engine_done(void) { return G_DONE; }
-API void engine_allow(int n) { G_ALLOW = n; }
+API int engine_done(void) { return __atomic_load_n(&G_DONE, __ATOMIC_SEQ_CST); }
+API void engine_allow(int n) { __atomic_store_n(&G_ALLOW, n, __ATOMIC_SEQ_CST);
+#ifdef ENGINE_THREAD
+    g_wake_allow();
+#endif
+}
+API volatile int32_t *engine_aud_written(void) { return &G_AWT; }   /* the AudioWorklet over shared memory: samples written */
+API volatile int32_t *engine_aud_read(void) { return &G_ARD; }      /* ... and read (the worklet writes it) */
+API void engine_aud_low(int samples) { __atomic_store_n(&G_ALOW, samples, __ATOMIC_SEQ_CST); }   /* under it the thread computes on */
 API void engine_keys(int k) { E_KEYS = k; }
 API void engine_keys2(int k) { E_KEYS2 = k; }
 API void engine_key(int code, int down) { E_KEY_DOWN = down; E_KEY_CODE = code & 0x7f; }
@@ -186,14 +282,18 @@ API void engine_poke8(uint32_t a, int v) { if (a < MEMSZ) MEM[a] = (uint8_t)v;
 }
 API double engine_disk_reads(void) { return (double)AHD_READS; }
 API double engine_disk_fails(void) { return (double)AHD_FAIL; }
-/* FNV-1a 64 of the last frame's picture and the chip RAM: the native and the wasm build must agree */
-static char G_HASH[17];
-API const char *engine_hash_hex(void) {
+/* FNV-1a 64 of the last frame's picture and the chip RAM at the frame's end (engine_hash_on(1): taken in every frame's
+ * end, so the coroutine - which runs on to its next wait loop - and the thread - which stops at the frame's end - agree);
+ * the native and the wasm builds must agree */
+static char G_HASH[17] = "0000000000000000";
+static void g_hash_now(void) {
     uint64_t h = 0xcbf29ce484222325ull;
     for (size_t i = 0; i < sizeof ARD_RGB; i++) { h ^= ARD_RGB[i]; h *= 0x100000001b3ull; }
     for (size_t i = 0; i < MEMSZ; i++) { h ^= MEM[i]; h *= 0x100000001b3ull; }
-    snprintf(G_HASH, sizeof G_HASH, "%016llx", (unsigned long long)h); return G_HASH;
+    snprintf(G_HASH, sizeof G_HASH, "%016llx", (unsigned long long)h);
 }
+API void engine_hash_on(int on) { G_HASHON = on; }
+API const char *engine_hash_hex(void) { if (!G_HASHON) g_hash_now(); return G_HASH; }
 
 #ifndef ENGINE_ASYNC
 static uint8_t *rdall(const char *path, long *len) {
@@ -208,14 +308,26 @@ int main(int argc, char **argv) {
     long len; uint8_t *st = rdall(argv[1], &len);
     int r = engine_init(st, (int)len);
     if (r) { fprintf(stderr, "engine_init %d\n", r); return 2; }
-    G_ALLOW = atoi(argv[2]); E_KEYMODE = 1; const char *shot = 0, *dump = 0;
+    int nframes = atoi(argv[2]); E_KEYMODE = 1; const char *shot = 0, *dump = 0; G_HASHON = 1;
+#ifndef ENGINE_THREAD
+    G_ALLOW = nframes;
+#endif
     for (int i = 3; i < argc; i++) {
         if (!strcmp(argv[i], "--disk") && i + 2 < argc) { int n = atoi(argv[i + 1]); if (ahd_set_file(n, argv[i + 2])) { fprintf(stderr, "disk %s\n", argv[i + 2]); return 2; } i += 2; }
         else if (!strcmp(argv[i], "--keys") && i + 1 < argc) { E_KEYMODE = strcmp(argv[++i], "none") ? 1 : 0; }
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--dump") && i + 1 < argc) dump = argv[++i];
     }
+#ifdef ENGINE_THREAD
+    if (engine_run()) { fprintf(stderr, "engine_run failed\n"); return 2; }
+    for (int f = 0; f < nframes; f++) {                       /* the page's side: one frame at a time, as the Node check does */
+        engine_allow(f + 1);
+        for (int i = 0; i < 100000 && engine_done() < f + 1 && !G_ERR; i++) { struct timespec ts = { 0, 1000000 }; nanosleep(&ts, 0); }
+        if (engine_done() < f + 1) { fprintf(stderr, "frame %d never came\n", f + 1); return 3; }
+    }
+#else
     if (!setjmp(G_STOPJ)) engine_run();
+#endif
     if (G_ERR) fprintf(stderr, "unknown routine %06x\n", G_ERR);
     printf("frames %d frame %ld hash %s\n", G_DONE, G_DONE ? G_FR[(G_DONE - 1) % G_NFR].frame : -1L, engine_hash_hex());
     if (shot) { FILE *f = fopen(shot, "wb"); if (f) { fwrite(ARD_RGB, 1, sizeof ARD_RGB, f); fclose(f); } }
