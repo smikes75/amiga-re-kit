@@ -94,9 +94,9 @@ arek selftest inputs                                   # is this VAHeadless fram
 
 # 4b. many scenarios at once (arek.parity.suite): state (traces), picture (--shots), sound (--reglog)
 # 5. the web page: display contract wb-shell obraz 1.4 (WB-OBRAZ-CRT.md)
-arek web copy web/                                     # the reference wb-obraz.js into the game's page
+arek web copy web/                                     # the reference wb-obraz.js into the game's page (1.5: WebGL2 or 2D presenter, one API)
 arek web demo                                          # a page built on it (http://127.0.0.1:8920/demo.html)
-arek web test http://localhost:8911/?test=1            # §5.1-5.4b in Chromium (needs playwright)
+arek web test http://localhost:8911/?test=1            # §5.1-5.4b in Chromium on both presenter paths (?gl=0 / ?gl=1) and §5.7 their equality (needs playwright)
 arek web seal build/present/engine.wasm --set disk1.adf --label "disk 1, retail" --gzip --out build/present/sealed
 arek web seal build/present/engine.wasm --payload build/payload.bin --payload-label "the game files" --out build/present/sealed  # any disk version with the same game data opens it
 arek web check build/present                           # a bundle: no game data, derived files sealed, manifest right
@@ -139,7 +139,7 @@ asks for (see `examples/profile.example.json`).
 | `arek.packers.scan` | brute-force scan: signatures (PP20, RNC, ATN!, IMP!, …) + verified blocks | S.W.I.V. |
 | `arek.hunk` | bounded HUNK reader: CODE/DATA/BSS, RELOC32, split streams; `build()` for probes | Superfrog |
 | `arek.copper` | copper list disassembler with custom register names | S.W.I.V. |
-| `arek.webtest`, `web/wb-obraz.js` | display contract 1.4: reference module (whole device pixels, CRT canvas, layout quantum of Chromium's 1/64 px), demo page, Chromium tests incl. the row test | Turrican II, Alien Breed, Superfrog (Sonnet) |
+| `arek.webtest`, `web/wb-obraz.js` | display contract 1.5: reference module (whole device pixels, CRT canvas, layout quantum of Chromium's 1/64 px, the pixel aspect, a presenter that owns the visible canvas on WebGL2 or 2D with one API - one canvas, no copy between contexts, §3 in the shader), demo page, Chromium tests incl. the row test on both paths and their pixel equality | Turrican II, Alien Breed, Superfrog (Sonnet), Alien Breed II |
 | `arek.m68k.cover`, `arek.fuzz` | coverage of a translation run (`recomp --cover`: one bit per translated instruction, `arek cover` lists what never ran) and deterministic random joystick input (`arek fuzz`, one file for `trace run --inputs` and the rebuild) - where a long random run stalls, a bug hides | Superfrog |
 | `arek.bus` (`src/arek/bus/*.c`) | the Amiga bus per DMA slot: who owns each slot, the blitter cycle by cycle, the CPU by the accesses of its instructions - on which instruction an interrupt lands, when a blit ends, whether the original overran the frame; `arek_bus_vamiga.c` is MPL-2.0 (derived from vAmiga) | Alien Breed |
 | `arek.m68k.timing.bus` | bus cycles n(r/w) of every instruction, opcode and extension words included - what a model of the Amiga bus per DMA slot needs beyond the clock count | Alien Breed |

@@ -1,4 +1,4 @@
-"""The reference wb-obraz.js (display contract 1.4): its pure functions in Node, the package
+"""The reference wb-obraz.js (display contract 1.5): its pure functions in Node, the package
 files, `arek web copy`. The browser checks (arek web test) need Chromium and run separately."""
 import hashlib
 import json
@@ -22,7 +22,7 @@ def js(expr):
 
 
 def test_version_and_scale():
-    assert js('O.VERSION') == '1.4'
+    assert js('O.VERSION') == '1.5'
     assert js('O.deviceScale(2, 320, 320, 1.25, 10)') == 3          # round(2 * 1.25)
     assert js('O.deviceScale(2, 336, 448, 2, 10)') == 3             # wider window: zoom counts in W0
     assert js('O.deviceScale(6, 320, 320, 2, 2.4)') == 4            # limited by the window
@@ -104,7 +104,7 @@ def test_web_copy_and_package_files(tmp_path, capsys):
     assert cli.main(['web', 'copy', str(tmp_path / 'web')]) == 0
     out = capsys.readouterr().out
     data = (tmp_path / 'web' / 'wb-obraz.js').read_bytes()
-    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.4' in out
+    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.5' in out
 
 
 def test_png_decoder_reads_the_kits_png():
@@ -123,3 +123,29 @@ def test_global_name_for_es_modules():
     assert js("(() => { delete globalThis.WBOBRAZ; delete require.cache[require.resolve(%s)]; require(%s); "
               "return typeof globalThis.WBOBRAZ.quantum; })()" % ((json.dumps(str(WEB / 'wb-obraz.js')),) * 2)) == 'function'
     assert 'wbObrazTest.set(mode' in (WEB / 'wb-obraz.js').read_text()
+
+
+def test_presenter_2d_path_and_patterns():
+    """1.5: the Presenter falls back to the 2D path when the canvas has no WebGL2 (a fake canvas records the fills), the
+    pixel patterns match testPattern's greys, and the shaders are there for the WebGL path."""
+    rows = js("Array.from(O.patternPixels('rows', 2, 3)).filter((v, i) => i % 4 === 0)")
+    assert rows == [32, 32, 56, 56, 80, 80]
+    cols = js("Array.from(O.patternPixels('cols', 3, 1)).filter((v, i) => i % 4 === 0)")
+    assert cols == [32, 56, 80] and js("O.patternPixels('grey', 1, 1)[0]") == 128 and js("O.patternPixels('grey', 1, 1)[3]") == 255
+    assert js("[O.GLSL.vs, O.GLSL.scale, O.GLSL.final].every((s) => s.startsWith('#version 300 es'))")
+    assert js("O.GLSL.final.includes('par') && O.GLSL.final.includes('look') && O.GLSL.scale.includes('geo')")
+    r = js("""(() => { const calls = []; const c = { width: 0, height: 0, style: {}, getContext(kind) {
+        if (kind !== '2d') return null; return { fillStyle: '', fillRect(x, y, w, h) { calls.push(['fill', this.fillStyle, x, y, w, h]); },
+            drawImage() { calls.push(['draw']); }, putImageData() { calls.push(['put']); } }; } };
+        const p = new O.Presenter(c, { gl: 'auto' }); const sz = p.size(8, 2, 2, 1, 1.25);
+        const noDraw = p.present({ draw: () => {} }); p.fill('rows');
+        return { gl: p.gl, sz, noDraw, css: c.style, w: c.width, h: c.height, calls: calls.length, rows: calls.filter((k) => k[0] === 'fill' && k[1].startsWith('rgb(')).map((k) => k.slice(2)), info: p.info() }; })()""")
+    assert r['gl'] is False and r['noDraw'] is False and r['sz'] == {'backing': [20, 5], 'content': [16, 4]}
+    assert r['w'] == 20 and r['h'] == 5 and r['css']['width'] == '16px' and r['css']['height'] == '4px'   # padded to the quantum 5 at dpr 1.25
+    assert r['rows'] == [[0, 0, 16, 2], [0, 2, 16, 2]] and r['info'] == {'gl': False, 'content': [16, 4], 'backing': [20, 5]}
+    assert js("(() => { try { new O.Presenter({ getContext: () => null }, { gl: 'on' }); return 'no'; } catch (e) { return e.message; } })()") == 'wb-obraz: no WebGL2'
+
+
+def test_webtest_gl_url():
+    assert webtest.with_gl('http://x/demo.html', 1) == 'http://x/demo.html?gl=1'
+    assert webtest.with_gl('http://x/demo.html?test=1', 0) == 'http://x/demo.html?test=1&gl=0'

@@ -1,4 +1,4 @@
-// wb-obraz.js - reference implementation of the display contract "wb-shell obraz 1.4"
+// wb-obraz.js - reference implementation of the display contract "wb-shell obraz 1.5"
 // (amiga-re-kit, WB-OBRAZ-CRT.md). Whole device pixels per game row (S), zoom = window width in
 // multiples of the Original's width W0, the CRT as a second canvas in device pixels, blur 0.8 game
 // pixel at 100 %, the content placed on a whole device pixel by layout (left/top) - never transform.
@@ -6,6 +6,12 @@
 // any value a game or its player picks) is applied INSIDE the
 // backing - the picture is W*S*par device pixels wide (contentSize, blit resamples horizontally only), the
 // rows stay exact, the CRT layer still equals the backing. Never stretch a canvas by CSS: that breaks §1-§2.
+// 1.5: a Presenter owns the visible game canvas - WebGL2 when the browser has it (one canvas, no copy between
+// contexts: Safari keeps a 2D canvas the CPU writes to in CPU memory and a drawImage from a WebGL canvas waits for
+// the GPU every frame - Alien Breed II, G31) or the 2D path with the same API. present({pixels}) shows a W x H RGBA
+// frame, present({draw}) lets the game draw its own layers into the presenter's framebuffer in device pixels
+// (W*S x H*S, before the aspect; both together: pixels first, draw on top); the geometry of 1.4 holds on both paths
+// and §3 (brightness, contrast, saturation, blur) runs in the shader on the WebGL path.
 // No game data. Works as a <script> (global WBOBRAZ, also globalThis.WBOBRAZ - an ES module that imports
 // nothing can read it there), as CommonJS (require) and in Node for tests.
 // Projects copy this file (`arek web copy DIR`) and keep its sha256 in their docs.
@@ -14,13 +20,14 @@
 //   window.wbObrazTest.set(mode, {zoom, crtDetail, crtShape, crt, blur, par}) -> info
 //       mode 'original' | 'enhanced'; zoom: window width in multiples of W0, 0 = fit; par: pixel aspect (1.4,
 //       default 1); returns {scale: S, W, H, P, D, par, origin: [x, y] device px, backing: [w, h],
-//        content: [round(W*S*par), H*S], crtLayer: [w, h], crtOrigin: [x, y]}   (Screen.info() gives origin/backing/crtLayer/crtOrigin)
+//        content: [round(W*S*par), H*S], crtLayer: [w, h], crtOrigin: [x, y], gl: bool (1.5)}   (Screen.info() gives origin/backing/crtLayer/crtOrigin)
 //   window.wbObrazTest.fill(kind) -> true      kind 'grey' | 'rows' | 'cols' (testPattern); the pattern must stay
 //       on the canvas until the next set() - a running game must not paint over it (pause it, or hold the pattern)
+//   window.wbObrazTest.gl() -> bool (1.5)      the WebGL path is on; a page honours ?gl=0 / ?gl=1 so the test runs both
 // arek web test needs `pip install amiga-re-kit[web]` and `python -m playwright install chromium`.
 'use strict';
 const WBOBRAZ = (() => {
-    const VERSION = '1.4';
+    const VERSION = '1.5';
     const CRT_DETAILS = ['fine', 'standard', 'strong'];
     const CRT_SHAPES = ['lines', 'grid'];
     // 1.3 values (Alien Breed / Turrican II, 2026-10-22: larger steps between the levels)
@@ -156,6 +163,195 @@ const WBOBRAZ = (() => {
         }
     }
 
+    /** A W x H RGBA test pattern as pixels (1.5): 'grey' #808080, 'rows' 32 + 24 * (y mod 8), 'cols' the same per column. */
+    function patternPixels(kind, W, H) {
+        const p = new Uint8ClampedArray(W * H * 4);
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+            const v = kind === 'grey' ? 0x80 : 32 + 24 * ((kind === 'cols' ? x : y) % 8), i = (y * W + x) * 4;
+            p[i] = p[i + 1] = p[i + 2] = v; p[i + 3] = 255;
+        }
+        return p;
+    }
+    // the WebGL path's shaders (1.5): a full-screen triangle; SCALE puts the W x H frame into the framebuffer with every
+    // game pixel exactly S x S device pixels (the frame's row 0 is the top, the framebuffer's row 0 the bottom, as GL has
+    // it); BLUR_H a horizontal gaussian; FINAL samples the framebuffer for the canvas: exact rows, the columns resampled
+    // by the aspect (linear between device columns; 1:1 texel fetch at par 1), the vertical blur and §3 as CSS defines
+    // them (brightness, contrast, saturate), the padding beyond the content black.
+    const GLSL = {
+        vs: '#version 300 es\nvoid main() { vec2 p = vec2((gl_VertexID & 1) * 4 - 1, (gl_VertexID & 2) * 2 - 1); gl_Position = vec4(p, 0.0, 1.0); }',
+        scale: '#version 300 es\nprecision highp float; uniform sampler2D tex; uniform ivec3 geo; out vec4 o;\n' +
+               'void main() { ivec2 d = ivec2(gl_FragCoord.xy); ivec2 g = ivec2(d.x / geo.z, geo.y - 1 - d.y / geo.z);\n' +
+               '  o = vec4(texelFetch(tex, g, 0).rgb, 1.0); }',
+        blurh: '#version 300 es\nprecision highp float; uniform sampler2D tex; uniform float sigma; uniform vec2 size; out vec4 o;\n' +
+               'void main() { int r = int(ceil(3.0 * sigma)); vec3 acc = vec3(0.0); float wsum = 0.0;\n' +
+               '  for (int k = -r; k <= r; k++) { float w = exp(-float(k * k) / (2.0 * sigma * sigma));\n' +
+               '    acc += w * texture(tex, (gl_FragCoord.xy + vec2(float(k), 0.0)) / size).rgb; wsum += w; }\n' +
+               '  o = vec4(acc / wsum, 1.0); }',
+        final: '#version 300 es\nprecision highp float; uniform sampler2D tex; uniform vec2 size; uniform vec2 content; uniform float pad;\n' +
+               'uniform float par; uniform float sigma; uniform vec4 look; out vec4 o;\n' +
+               'vec3 fetch(float x, float y) { vec2 uv = vec2((x + 0.5) / par, floor(y) + 0.5) / size;\n' +
+               '  return (par == 1.0 ? texelFetch(tex, ivec2(int(x), int(y)), 0) : texture(tex, uv)).rgb; }\n' +
+               'void main() { float x = floor(gl_FragCoord.x), y = floor(gl_FragCoord.y) - pad;\n' +
+               '  if (x >= content.x || y < 0.0) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }\n' +
+               '  vec3 c;\n' +
+               '  if (sigma > 0.0) { int r = int(ceil(3.0 * sigma)); vec3 acc = vec3(0.0); float wsum = 0.0;\n' +
+               '    for (int k = -r; k <= r; k++) { float yy = y + float(k); if (yy < 0.0 || yy >= content.y) continue;\n' +
+               '      float w = exp(-float(k * k) / (2.0 * sigma * sigma)); acc += w * fetch(x, yy); wsum += w; }\n' +
+               '    c = acc / wsum; } else c = fetch(x, y);\n' +
+               '  c = c * look.x; c = (c - 0.5) * look.y + 0.5;\n' +
+               '  float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); c = mix(vec3(l), c, look.z);\n' +
+               '  o = vec4(clamp(c, 0.0, 1.0), 1.0); }',
+    };
+    const isShared = (v) => typeof SharedArrayBuffer !== 'undefined' && v && v.buffer instanceof SharedArrayBuffer;
+
+    /** The visible game canvas (1.5): the WebGL2 path when the browser has it and opts.gl is not 'off' ('on' insists:
+     *  no fallback), otherwise the 2D path - the same API, so a page is written once; .gl is true on the WebGL path. Methods:
+     *    size(W, H, S, par, dpr) -> { backing, content }   allocates the backing (padded, §1.4), the framebuffer and the
+     *        textures in one call (W, H may change every frame, e.g. during the mode transition), sets the CSS size
+     *    look({ brightness, contrast, saturation, blur })   §3; the WebGL path in the shader, the 2D path as CSS filter
+     *    present({ pixels | source, draw }) -> bool          pixels: W x H RGBA (Uint8Array / Uint8ClampedArray /
+     *        ImageData; a view over a SharedArrayBuffer is copied), source: a canvas / image / bitmap; draw(gl, fbo,
+     *        { w: W*S, h: H*S }): the game draws into the presenter's framebuffer in device pixels before the aspect,
+     *        row 0 at the bottom (GL); the presenter restores its own state afterwards. On the 2D path draw is not
+     *        possible: present returns false and the game sends pixels (check .gl first).
+     *    fill(kind) -> true                                  the test pattern (§5) through the same path
+     *    info() -> { gl, content, backing } */
+    class Presenter {
+        constructor(canvas, opts) {
+            opts = opts || {};
+            this.canvas = canvas; this.W = 0; this.H = 0; this.S = 1; this.par = 1; this.dpr = 1;
+            this.content = [0, 0]; this.backing = [0, 0]; this.lookv = { brightness: 100, contrast: 100, saturation: 100, blur: 0 };
+            const want = opts.gl || 'auto';
+            this.g = null; this.gl = false;
+            if (want !== 'off' && canvas.getContext) {
+                const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: !!opts.preserve });
+                if (gl) { this._glInit(gl); this.gl = true; }
+                else if (want === 'on') throw new Error('wb-obraz: no WebGL2');
+            }
+            if (!this.g) { this.ctx = canvas.getContext('2d'); this.frame = null; }
+        }
+        _program(gl, fs) {
+            const mk = (type, src) => { const sh = gl.createShader(type); gl.shaderSource(sh, src); gl.compileShader(sh);
+                if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('wb-obraz shader: ' + gl.getShaderInfoLog(sh)); return sh; };
+            const pr = gl.createProgram(); gl.attachShader(pr, mk(gl.VERTEX_SHADER, GLSL.vs)); gl.attachShader(pr, mk(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(pr);
+            if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error('wb-obraz program: ' + gl.getProgramInfoLog(pr));
+            return pr;
+        }
+        _tex(gl) {
+            const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            return t;
+        }
+        _glInit(gl) {
+            this.g = gl;
+            this.vao = gl.createVertexArray();
+            this.pScale = this._program(gl, GLSL.scale); this.pBlur = this._program(gl, GLSL.blurh); this.pFinal = this._program(gl, GLSL.final);
+            this.tFrame = this._tex(gl); this.tFbo = this._tex(gl); this.tBlur = this._tex(gl);
+            this.fbo = gl.createFramebuffer(); this.fboBlur = gl.createFramebuffer();
+            this.u = {};
+            for (const [name, pr] of [['scale', this.pScale], ['blur', this.pBlur], ['final', this.pFinal]]) {
+                this.u[name] = {};
+                for (const n of ['tex', 'geo', 'sigma', 'size', 'content', 'pad', 'par', 'look']) this.u[name][n] = gl.getUniformLocation(pr, n);
+            }
+            this.fboSize = [0, 0]; this.frameSize = [0, 0]; this.copy = null;
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        }
+        size(W, H, S, par, dpr) {
+            par = par > 0 ? par : 1; dpr = dpr || dprNow();
+            this.W = W; this.H = H; this.S = S; this.par = par; this.dpr = dpr;
+            const [cw, ch] = contentSize(W, H, S, par), bw = padded(cw, dpr), bh = padded(ch, dpr);
+            this.content = [cw, ch]; this.backing = [bw, bh];
+            const c = this.canvas;
+            if (c.width !== bw || c.height !== bh) { c.width = bw; c.height = bh; }
+            if (c.style) { c.style.width = bw / dpr + 'px'; c.style.height = bh / dpr + 'px'; }
+            const gl = this.g;
+            if (gl) {
+                const fw = W * S, fh = H * S;
+                if (this.fboSize[0] !== fw || this.fboSize[1] !== fh) {
+                    this.fboSize = [fw, fh];
+                    for (const [t, f] of [[this.tFbo, this.fbo], [this.tBlur, this.fboBlur]]) {
+                        gl.bindTexture(gl.TEXTURE_2D, t); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, fw, fh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+                        gl.bindFramebuffer(gl.FRAMEBUFFER, f); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+                    }
+                    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+                }
+                if (this.frameSize[0] !== W || this.frameSize[1] !== H) {
+                    this.frameSize = [W, H];
+                    gl.bindTexture(gl.TEXTURE_2D, this.tFrame); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+                }
+            } else this.look(this.lookv);
+            return { backing: this.backing, content: this.content };
+        }
+        look(v) {
+            this.lookv = Object.assign({}, this.lookv, v || {});
+            if (!this.g && this.canvas.style) this.canvas.style.filter = filter(this.lookv, this.S / this.dpr);
+            return this.lookv;
+        }
+        _upload(content) {
+            const gl = this.g, W = this.W, H = this.H;
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.tFrame);
+            if (content.pixels) {
+                let p = content.pixels.data || content.pixels;                             // ImageData or a view
+                if (isShared(p)) { if (!this.copy || this.copy.length !== p.length) this.copy = new Uint8Array(p.length); this.copy.set(p); p = this.copy; }
+                if (!(p instanceof Uint8Array)) p = new Uint8Array(p.buffer, p.byteOffset, p.byteLength);
+                gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, p);
+            } else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, content.source);
+        }
+        _pass(pr, fb, w, h, tex) {
+            const gl = this.g;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, w, h); gl.disable(gl.BLEND); gl.disable(gl.SCISSOR_TEST);
+            gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.colorMask(true, true, true, true);
+            gl.useProgram(pr); gl.bindVertexArray(this.vao); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+        }
+        present(content) {
+            content = content || {};
+            const W = this.W, H = this.H, S = this.S;
+            if (!W || !H) return false;
+            if (!this.g) {
+                if (content.draw && !content.pixels && !content.source) return false;
+                const g = this.ctx, [bw, bh] = this.backing;
+                let src = content.source;
+                if (content.pixels) {
+                    if (!this.frame) this.frame = document.createElement('canvas');
+                    if (this.frame.width !== W || this.frame.height !== H) { this.frame.width = W; this.frame.height = H; }
+                    const p = content.pixels.data || content.pixels;
+                    const img = content.pixels.data ? content.pixels : new ImageData(new Uint8ClampedArray(p.buffer, p.byteOffset, W * H * 4), W, H);
+                    this.frame.getContext('2d').putImageData(img, 0, 0); src = this.frame;
+                }
+                g.fillStyle = '#000'; g.fillRect(0, 0, bw, bh);
+                if (src) blit(this.canvas, src, W, H, S, this.par);
+                return !content.draw;
+            }
+            const gl = this.g, [fw, fh] = this.fboSize, [cw, ch] = this.content, [bw, bh] = this.backing;
+            if (content.pixels || content.source) {
+                this._upload(content);
+                this._pass(this.pScale, this.fbo, fw, fh, this.tFrame);
+                gl.uniform1i(this.u.scale.tex, 0); gl.uniform3i(this.u.scale.geo, W, H, S);
+                gl.drawArrays(gl.TRIANGLES, 0, 3);
+            } else { gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo); gl.viewport(0, 0, fw, fh); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT); }
+            if (content.draw) { gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo); gl.viewport(0, 0, fw, fh); content.draw(gl, this.fbo, { w: fw, h: fh }); }
+            const l = this.lookv, k = (v) => (typeof v === 'number' ? v : 100) / 100, sigma = l.blur > .05 ? l.blur / 100 * 0.8 * S : 0;
+            let tex = this.tFbo;
+            if (sigma > 0) {                                                             // the horizontal half of the blur
+                this._pass(this.pBlur, this.fboBlur, fw, fh, this.tFbo);
+                gl.uniform1i(this.u.blur.tex, 0); gl.uniform1f(this.u.blur.sigma, sigma); gl.uniform2f(this.u.blur.size, fw, fh);
+                gl.drawArrays(gl.TRIANGLES, 0, 3); tex = this.tBlur;
+            }
+            this._pass(this.pFinal, null, bw, bh, tex);
+            gl.uniform1i(this.u.final.tex, 0); gl.uniform2f(this.u.final.size, fw, fh); gl.uniform2f(this.u.final.content, cw, ch);
+            gl.uniform1f(this.u.final.pad, bh - ch); gl.uniform1f(this.u.final.par, this.par); gl.uniform1f(this.u.final.sigma, sigma);
+            gl.uniform4f(this.u.final.look, k(l.brightness), k(l.contrast), k(l.saturation), 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            return true;
+        }
+        fill(kind) {
+            if (!this.g) { testPattern(this.canvas, kind, this.W, this.H, this.S, this.par); return true; }
+            return this.present({ pixels: patternPixels(kind, this.W, this.H) });
+        }
+        info() { return { gl: this.gl, content: this.content, backing: this.backing }; }
+    }
+
     /** The game box .game: the CRT layer (redrawn only when its key changes), --crt-on, data-crt / data-mode,
      *  and the content on a whole device pixel by layout (1.3: position relative + left/top, no transform). */
     class Screen {
@@ -199,7 +395,7 @@ const WBOBRAZ = (() => {
     }
     return { VERSION, CRT_DETAILS, CRT_SHAPES, CRT_ROW, CRT_SCREEN, CRT_LINE, CRT_RGB, MODE_MS, VIEW_DEFAULTS, WORDS,
              deviceScale, contentSize, blit, crtParams, drawCrt, filter, crtOn, smoothstep, zoomLabel, quantum, padded, snap,
-             testPattern, Screen };
+             testPattern, patternPixels, GLSL, Presenter, Screen };
 })();
 if (typeof globalThis !== 'undefined') globalThis.WBOBRAZ = WBOBRAZ;
 if (typeof module !== 'undefined') module.exports = WBOBRAZ;

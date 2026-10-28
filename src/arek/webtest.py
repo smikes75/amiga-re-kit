@@ -16,6 +16,9 @@ contract (identity at 100 %, mono at 0 %, the mix rule, volume, the filters agai
 §5.4b (1.3) a different grey per game row, CRT off - every game row exactly S device rows,
 and every game column exactly S device columns; 1.4: the same layouts with a pixel aspect
 (``par``, PAL lores) - content round(W*S*par) wide, rows still exact, columns not checked.
+1.5: §5.4 and §5.4b run on both presenter paths when the page has ``wbObrazTest.gl()`` and honours
+``?gl=0`` / ``?gl=1`` (the 2D and the WebGL2 path), and §5.7 holds the two paths against each other:
+the rows and cols patterns at par 1 must be identical pixel by pixel in the content.
 Tolerances: Chromium keeps layout in 1/64 CSS px, so positions within 0.05 and sizes within
 0.025 device pixels.
 """
@@ -127,11 +130,17 @@ def check_layout(info, mode, detail, dpr, fails, tag):
         ok(P == SCREEN[detail] and D == 1, 'P %d D %d' % (P, D))
 
 
+def with_gl(url, gl):
+    """The page URL with ``gl=0`` / ``gl=1`` (1.5: the presenter path a page honours)."""
+    return url + ('&' if '?' in url else '?') + 'gl=%d' % gl
+
+
 def run(url, quick=False, log=print):
     """Run the checks; returns {'checks': n, 'fails': [...]} (raises ImportError without playwright)."""
     from playwright.sync_api import sync_playwright
     fails, checks = [], 0
     zooms = (2, 0) if quick else ZOOMS
+    shots = {}                                # 1.5: (path, dpr, viewport, case, pattern) -> the content crop, for §5.7
     with sync_playwright() as pw:
         br = pw.chromium.launch()
         for dpr in DPRS:
@@ -149,10 +158,25 @@ def run(url, quick=False, log=print):
                     checks += 1
                 ctx.close()
         log('§5.1-5.3: %d layouts, %d failures' % (checks, len(fails)))
-        for dpr, (vw, vh) in itertools.product(DPRS, ((1280, 1000), (1001, 999)) if not quick else ((1001, 999),)):
+        paths = []                            # 1.5: the presenter paths the page offers
+        probe = br.new_page()
+        probe.goto(url)
+        probe.wait_for_function('window.wbObrazTest')
+        if probe.evaluate('typeof wbObrazTest.gl === "function"'):
+            for gl in (0, 1):
+                probe.goto(with_gl(url, gl))
+                probe.wait_for_function('window.wbObrazTest')
+                if probe.evaluate('wbObrazTest.gl()') == bool(gl):
+                    paths.append(gl)
+                else:
+                    log('path gl=%d: the page does not run it here (skipped)' % gl)
+        else:
+            paths.append(None)
+        probe.close()
+        for gl, dpr, (vw, vh) in itertools.product(paths, DPRS, ((1280, 1000), (1001, 999)) if not quick else ((1001, 999),)):
             ctx = br.new_context(device_scale_factor=dpr, viewport={'width': vw, 'height': vh})
             page = ctx.new_page()
-            page.goto(url)
+            page.goto(url if gl is None else with_gl(url, gl))
             page.wait_for_function('window.wbObrazTest')
             cases = [(m, d, z, 1) for m, d, z in itertools.product(MODES, DETAILS, (2, 3, 0) if not quick else (2,))]
             cases += [('enhanced', 'fine', 2, PAR), ('original', 'strong', 0, PAR)]          # 1.4: with an aspect
@@ -162,7 +186,8 @@ def run(url, quick=False, log=print):
                 page.evaluate("wbObrazTest.fill('grey')")
                 page.wait_for_timeout(450)
                 sw, sh, rows = png_rgb(page.screenshot())
-                P, tag = info['P'], 'dpr %s %dx%d %s/%s zoom %s par %s S %d' % (dpr, vw, vh, mode, detail, zoom, par, info['scale'])
+                P, tag = info['P'], '%sdpr %s %dx%d %s/%s zoom %s par %s S %d' % ('' if gl is None else 'gl=%d ' % gl, dpr, vw, vh, mode, detail, zoom, par, info['scale'])
+                case = (dpr, vw, vh, mode, detail, zoom, par)
                 checks += 1
                 if not _inside(info, sw, sh, '§5.4 ' + tag, fails):
                     continue
@@ -198,6 +223,7 @@ def run(url, quick=False, log=print):
                 # and every game column exactly S device columns (a resampled width shows here); not with an aspect (1.4)
                 if par != 1:
                     continue
+                shots[(gl, case, 'rows')] = _crop(rows, x0, y0, bw, bh)
                 page.evaluate("wbObrazTest.fill('cols')")
                 page.wait_for_timeout(100)
                 sw, sh, rows = png_rgb(page.screenshot())
@@ -206,7 +232,20 @@ def run(url, quick=False, log=print):
                 if any(r != S for r in runs) or len(runs) != info['W']:
                     odd = [(i, r) for i, r in enumerate(runs) if r != S][:4]
                     fails.append('§5.4b %s: %d game columns seen, columns of other width %s' % (tag, len(runs), odd))
+                shots[(gl, case, 'cols')] = _crop(rows, x0, y0, bw, bh)
             ctx.close()
+        if 0 in paths and 1 in paths:                 # §5.7 (1.5): the two paths show the same pixels
+            n7 = 0
+            for (gl, case, kind), crop in shots.items():
+                if gl != 0 or (1, case, kind) not in shots:
+                    continue
+                n7 += 1
+                other = shots[(1, case, kind)]
+                diff = sum(1 for a, b in zip(crop, other) for p, q in zip(a, b) if p != q)
+                if diff or len(crop) != len(other):
+                    fails.append('§5.7 %s %s: the WebGL path differs from the 2D path in %d pixels' % (case, kind, diff))
+            checks += n7
+            log('§5.7 WebGL against 2D: %d pictures compared, %d failures so far' % (n7, len(fails)))
         # §6 (1.0): the shared menu and the sound contract, when the page has the hooks
         ctx = br.new_context(viewport={'width': 1280, 'height': 900})
         page = ctx.new_page()
