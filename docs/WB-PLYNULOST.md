@@ -22,10 +22,11 @@ The limits (checked by F in Chromium and WebKit, 60 Hz, no frame cap):
 | what | limit | Alien Breed II measured |
 |---|---|---|
 | dropped display frames in 30 s of play | 0 | |
-| the camera's step between display frames, deviation | < 0.05 game px | 0.03 (Chromium) |
+| the camera's and the objects' jitter (a step against the median of the 3 around it, within a moving stretch) | < 0.05 game px | 0.0001 (thread), 0.0002 (coroutine) |
 | the next game frame / drawing pass missing for the interpolation | 0 % | |
-| key -> camera moves, median | <= 70 ms | 66 ms (thread), 82 ms (coroutine) |
+| key -> camera moves, median | <= 70 ms | 62-63 ms (thread), 96-97 ms (coroutine) |
 | sound dropouts over 10 stalls of the main thread of 150 ms | 0 | 0 (thread), 10 (coroutine) |
+| dropped display frames, missing passes (Alien Breed II) | | 0, 0 % in all four runs |
 | sound reserve | about 30 ms; the browser's output latency is measured and reported | |
 
 ## B. The presenter (`wb-obraz.js` 1.5, kit 0.8.0) - done
@@ -43,7 +44,10 @@ Phases: scroll (the right key held, every display frame sampled: its timestamp, 
 passes, the game's lead), latency (five key presses dispatched inside the page, the time until the camera moves),
 stalls (busy loops in the main thread, the sound's counters before and after). Every limit of A passed or failed, per
 browser. A step is judged per nominal display interval (step / dt * nominal), so the display's own timing jitter does
-not count and an uneven motion does.
+not count; 1.1 (G43, Alien Breed II): the limit is on the jitter - the mean deviation of a step from the median of the
+3 steps around it within a stretch of motion - not on the spread of the speeds: a camera that runs 1.66 px per
+display frame and then 0.83 (catching up with the player) has a speed deviation of 0.415 px and no jitter; a single
+uneven step or an alternating pattern (1.4 0.6 1.4 ...) is jitter. The speed deviation is still reported.
 
 The page's hooks (`globalThis.WBLONGRUN` 1.1; `arek web longrun` reads the same object):
 
@@ -57,6 +61,17 @@ The page's hooks (`globalThis.WBLONGRUN` 1.1; `arek web longrun` reads the same 
 | `audio()` (optional) | `{reserve: ms, dropouts: n (so far), latency: ms, simulated?: bool}` |
 | `status()` (optional) | a line of text for the report |
 | `keys` (optional) | `{left, right}`: the key codes that move the camera (default the arrows) |
+| `focus` (optional, 1.1) | a selector or `[x, y]` to click into the game (default the largest canvas; G41: a page's menu at the corner pauses the game) |
+| `prepare()` (optional, 1.1) | brings the page into the game (past an intro and a menu); may return a promise; `ready()` is then awaited (G42) |
+| `route` (optional, 1.1) | `[[key, ms], ...]` held in turn and cycled while sampling (a maze: short free stretches; G42); the latency probes alternate left and right |
+
+Alien Breed II's baseline (kit 0.8.1, level 1, enhanced 522 x 357, headless 60 Hz, engine in a thread / coroutine,
+Chromium / WebKit): 0 dropped frames and 0 % missing passes in all four; jitter 0.0001-0.0002 px (max 0.25);
+key -> camera 62 / 63 ms (thread), 96 / 97 ms (coroutine - over the limit); sound dropouts under 10 x 150 ms 0 / 0
+(thread), 10 / 10 (coroutine - over the limit); reserve 24 ms (thread), 31-40 ms (coroutine); output latency 29 ms
+(Chromium), 16 ms (WebKit); game lead -0.4 to -0.8 frames; WebGL in Chromium, not in WebKit headless. The thread
+meets every limit; the coroutine is the fallback for a page without COOP / COEP and misses two, as the canon
+expects.
 
 The kit's synthetic page `smooth-demo.html` (`arek web demo`, then `/smooth-demo.html`) runs a 50 Hz game by the
 display's clock with the picture 30 ms behind and the camera and objects interpolated: Chromium headless 59.9 Hz,
@@ -80,7 +95,10 @@ gives `allow(n)`, the module gives the permits, the times and the pairs:
 - `takt.pair(list, t)`: the two frames around t and the fraction; without the next one the previous pair
   extrapolates (`f` up to 2) when allowed, else the last frame alone and `missing` counts it;
 - `WBTAKT.keyboard(target, {code: bit}, onchange)`: the keys as bits changed at the event;
-- `takt.reset(done)` for a restart or a jump, `takt.stats()` for the hooks (`hz`, `k`, `fm`, `ahead`, `missing`).
+- `takt.reset(done)` for a restart, a jump or the end of frames allowed outside the clock (1.1, Alien Breed II: a
+  jump to a level allows `done + 24`): it takes the permit back (`allow(done)`) and the page skips the frames it has
+  not shown, otherwise they get times now + n frames and the timeline stays ahead for good (140-172 ms, the keys that
+  much later); `takt.stats()` for the hooks (`hz`, `k`, `fm`, `ahead`, `missing`).
 
 ## D. The sound (`wb-zvuk-worklet.js` + `wb-zvuk-out.js` 1.0, kit 0.8.1) - done
 

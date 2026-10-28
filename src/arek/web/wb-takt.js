@@ -1,4 +1,4 @@
-// wb-takt.js 1.0 - the clock of a rebuild's page (amiga-re-kit, docs/WB-PLYNULOST.md, module C). Extracted from
+// wb-takt.js 1.1 - the clock of a rebuild's page (amiga-re-kit, docs/WB-PLYNULOST.md, module C). Extracted from
 // the Alien Breed II page (tools/web/main.js: PACE, pump, loopIn) and Superfrog's (web/main.js, web/worker.js):
 //   - the game's clock comes from requestAnimationFrame: frames of the game are allowed up to "now + one frame", at
 //     most `ahead` beyond what the engine has done; on a display of k x 50 Hz (within 0.6 Hz) exactly one game frame
@@ -18,7 +18,7 @@
 //   takt.stats() -> { hz, k, fm, granted, ahead, missing, latC, latO } for the page's WBLONGRUN hooks.
 'use strict';
 const WBTAKT = (() => {
-    const VERSION = '1.0';
+    const VERSION = '1.1';
     const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
     /** The display's rate from the last intervals: the median (Hz), 0 before 60 samples. */
     function medianHz(dts) {
@@ -107,8 +107,15 @@ const WBTAKT = (() => {
             this.missing++;
             return { a, b: null, f: 0, missing: true };
         }
-        /** Pause (the clock restarts from now when it goes on) or a restart / jump: the timeline from zero. */
-        reset(done) { this.clock = 0; this.granted = done || 0; this.lastT = 0; this.tgN.fill(-1); this.lens = []; this.lastPass = -1; this.latO = this.LATO; this.missing = 0; }
+        /** A restart, a jump or the end of frames the page allowed outside the clock (a jump to a level: allow(done + 24)):
+         *  the timeline from zero and the permit taken back to `done` (allow(done)), so frames computed beyond it do not
+         *  get times now + n frames and keep the timeline ahead for good (Alien Breed II: 140-172 ms of lead, the keys
+         *  that much later). The page skips the frames it has not shown (its read position = done). */
+        reset(done) {
+            done = done || 0;
+            this.clock = 0; this.granted = done; this.lastT = 0; this.tgN.fill(-1); this.lens = []; this.lastPass = -1; this.latO = this.LATO; this.missing = 0;
+            this.allow(done);
+        }
         stats() {
             return { version: VERSION, hz: this.hz ? +this.hz.toFixed(2) : 0, k: this.k, fm: +this.fm().toFixed(3), granted: this.granted,
                      ahead: this.lastT ? this.lastT - nowMs() : 0, missing: this.missing, latC: this.k ? this.fm() - 2 : this.LATC, latO: this.latO };

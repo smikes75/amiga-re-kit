@@ -21,7 +21,7 @@ def js(expr):
 
 
 def test_lock_and_rate():
-    assert js('T.VERSION') == '1.0' and 'wb-takt.js' in web.FILES
+    assert js('T.VERSION') == '1.1' and 'wb-takt.js' in web.FILES
     assert js('[60, 100.3, 49.9, 150, 144, 200.5, 0].map((h) => T.lockOf(h, 50))') == [0, 2, 1, 3, 0, 4, 0]
     assert js('T.medianHz(Array(59).fill(16.7))') == 0 and abs(js('T.medianHz(Array(60).fill(16.667))') - 60) < 0.01
 
@@ -52,6 +52,13 @@ def test_view_lag_adapts_and_lock_changes_it():
     assert r['locked'] == [18, 88]                                                  # under the lock: a frame (20 ms) less 2, objects >= 2 frames - 2
     s = js("(() => { const t = T.create({}); t.hz = 59.94; t.reset(7); return [t.granted, t.lastT, t.stats().k, t.stats().fm]; })()")
     assert s == [7, 0, 0, 20]
+    # 1.1: frames allowed outside the clock (a jump: allow(done + 24)) - reset takes the permit back to done and the next
+    # frames get times from the clock again, not now + n frames (Alien Breed II)
+    r = js("""(() => { const allowed = []; const t = T.create({ allow: (n) => allowed.push(n) });
+        t.allow(30 + 24); t.reset(30); const back = allowed[allowed.length - 1];
+        const g = t.tick(5000, 30, false).granted; const t31 = t.stamp(31);
+        return [back, g, t31]; })()""")
+    assert r[0] == 30 and r[1] == 32 and r[2] == 5000
 
 
 def test_keyboard_changes_bits_at_the_event():

@@ -23,12 +23,12 @@ def _samples(n=120, dt=16.7, step=1.0, jitter=0.0, drop_at=(), obj_step=0.5, mis
 
 def test_analysis_and_verdict():
     r = websmooth.analyse(_samples())
-    assert r['frames'] == 120 and r['dropped'] == 0 and r['cam_dev'] == 0 and r['obj_dev'] == 0 and r['missing_pct'] == 0 and r['ahead'] == 1
+    assert r['frames'] == 120 and r['dropped'] == 0 and r['cam_jitter'] == 0 and r['obj_jitter'] == 0 and r['missing_pct'] == 0 and r['ahead'] == 1
     assert abs(r['refresh_hz'] - 59.9) < 0.2
     r['latency_ms'], r['audio'] = 40, {'dropouts': 0}
     assert websmooth.verdict(r) == (True, [])
     r = websmooth.analyse(_samples(drop_at=(30, 70), jitter=0.4, missing=1))
-    assert r['dropped'] == 2 and r['cam_dev'] > 0.3 and r['missing_pct'] > 0
+    assert r['dropped'] == 2 and r['cam_jitter'] > 0.3 and r['missing_pct'] > 0
     r['latency_ms'], r['audio'] = 90, {'dropouts': 3}
     ok, fails = websmooth.verdict(r)
     assert not ok and len(fails) == 5 and any('90 ms' in f for f in fails) and any('dropouts 3' in f for f in fails)
@@ -72,3 +72,22 @@ def test_messages_mode_runs_dry_under_stalls():
 
 def test_cli_smooth_needs_a_url():
     assert cli.main(['web', 'smooth']) != 0
+
+
+def test_a_change_of_speed_is_no_jitter():
+    """G43 (Alien Breed II): a camera at 1.66 px per display frame, then 0.83 (catching up with the player) has a speed
+    deviation of 0.415 px but no jitter; a single uneven step is jitter."""
+    steps = [1.66] * 60 + [0.83] * 60
+    assert abs(websmooth._dev(steps) - 0.415) < 1e-9 and websmooth.jitter(steps) == (0.0, 0.0)
+    bumpy = [1.0] * 30
+    bumpy[15] = 1.5
+    m, x = websmooth.jitter(bumpy)
+    assert x == 0.5 and 0 < m < 0.05
+    assert websmooth.jitter([1.4, 0.6] * 20)[0] > 0.7                            # alternating steps are jitter
+    t, x0, samples = 0.0, 0.0, []
+    for st in [0.0] * 5 + [1.66] * 60 + [0.0] * 3 + [0.83] * 60:                     # a stop between the stretches
+        t += 16.7
+        x0 += st
+        samples.append([t, [x0, 0], None, None, None])
+    r = websmooth.analyse(samples)
+    assert r['cam_dev'] > 0.4 and r['cam_jitter'] == 0 and r['cam_moving'] == 120
