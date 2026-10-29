@@ -1,4 +1,4 @@
-// wb-takt.js 1.1 - the clock of a rebuild's page (amiga-re-kit, docs/WB-PLYNULOST.md, module C). Extracted from
+// wb-takt.js 1.2 - the clock of a rebuild's page (amiga-re-kit, docs/WB-PLYNULOST.md, module C). Extracted from
 // the Alien Breed II page (tools/web/main.js: PACE, pump, loopIn) and Superfrog's (web/main.js, web/worker.js):
 //   - the game's clock comes from requestAnimationFrame: frames of the game are allowed up to "now + one frame", at
 //     most `ahead` beyond what the engine has done; on a display of k x 50 Hz (within 0.6 Hz) exactly one game frame
@@ -18,7 +18,7 @@
 //   takt.stats() -> { hz, k, fm, granted, ahead, missing, latC, latO } for the page's WBLONGRUN hooks.
 'use strict';
 const WBTAKT = (() => {
-    const VERSION = '1.1';
+    const VERSION = '1.2';
     const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
     /** The display's rate from the last intervals: the median (Hz), 0 before 60 samples. */
     function medianHz(dts) {
@@ -74,10 +74,17 @@ const WBTAKT = (() => {
             this.lastT = t;
             return t;
         }
-        /** A drawing pass of the objects completed at time t (ms, the frame's time): its length feeds latO. */
+        /** A drawing pass of the objects completed at time t (ms, the frame's time): its length feeds latO. 1.2 (Alien Breed
+         *  II): a record of an older pass after a newer one (once in ~1500 frames in a browser) is not taken - a small
+         *  step back is ignored (returns false), a big one (over 1 s: a new level, a restart) starts the axis anew. */
         pass(t) {
+            if (this.lastPass >= 0 && t <= this.lastPass) {
+                if (this.lastPass - t < 1000) return false;
+                this.lens = []; this.lastPass = -1;
+            }
             if (this.lastPass >= 0) { this.lens.push(t - this.lastPass); if (this.lens.length > 16) this.lens.shift(); }
             this.lastPass = t;
+            return true;
         }
         /** The display times of this frame: the camera / sprites tv = ts - latC, the objects tvO = ts - latO (adaptive:
          *  the longest of the last 16 passes - the game's lead + 8 ms, within latO..latOMax, up 1 ms / down 0.1 ms per

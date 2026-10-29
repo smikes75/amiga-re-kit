@@ -140,7 +140,7 @@ def test_presenter_2d_path_and_patterns():
         const p = new O.Presenter(c, { gl: 'auto' }); const sz = p.size(8, 2, 2, 1, 1.25);
         const noDraw = p.present({ draw: () => {} }); p.fill('rows');
         return { gl: p.gl, sz, noDraw, css: c.style, w: c.width, h: c.height, calls: calls.length, rows: calls.filter((k) => k[0] === 'fill' && k[1].startsWith('rgb(')).map((k) => k.slice(2)), info: p.info() }; })()""")
-    assert r['gl'] is False and r['noDraw'] is False and r['sz'] == {'backing': [20, 5], 'content': [16, 4]}
+    assert r['gl'] is False and r['noDraw'] is False and r['sz'] == {'backing': [20, 5], 'content': [16, 4], 'redrawn': False}
     assert r['w'] == 20 and r['h'] == 5 and r['css']['width'] == '16px' and r['css']['height'] == '4px'   # padded to the quantum 5 at dpr 1.25
     assert r['rows'] == [[0, 0, 16, 2], [0, 2, 16, 2]] and r['info'] == {'gl': False, 'content': [16, 4], 'backing': [20, 5]}
     assert js("(() => { try { new O.Presenter({ getContext: () => null }, { gl: 'on' }); return 'no'; } catch (e) { return e.message; } })()") == 'wb-obraz: no WebGL2'
@@ -149,3 +149,42 @@ def test_presenter_2d_path_and_patterns():
 def test_webtest_gl_url():
     assert webtest.with_gl('http://x/demo.html', 1) == 'http://x/demo.html?gl=1'
     assert webtest.with_gl('http://x/demo.html?test=1', 0) == 'http://x/demo.html?test=1&gl=0'
+
+
+RESIZE_PAGE = """<!doctype html><meta charset="utf-8"><body style="margin:0;background:#000">
+<canvas id="c" style="display:block;image-rendering:pixelated"></canvas><script src="wb-obraz.js"></script><script>
+const GL = new URLSearchParams(location.search).get('gl'), W = 40, H = 20;
+const pr = new WBOBRAZ.Presenter(document.getElementById('c'), { gl: GL === '1' ? 'on' : 'off' });
+const px = new Uint8ClampedArray(W * H * 4); for (let i = 0; i < W * H; i++) { px[4 * i] = 200; px[4 * i + 1] = 100; px[4 * i + 2] = 50; px[4 * i + 3] = 255; }
+window.step = (s, draw) => pr.size(W, H, s, 1, 1).redrawn || (draw ? pr.present({ pixels: px }) : false);
+pr.size(W, H, 2, 1, 1); pr.present({ pixels: px }); window.ready = true;
+</script>"""
+
+
+def test_presenter_redraws_after_a_resize(tmp_path):
+    """1.5.1 (Alien Breed II in Safari): a resize without a present shows the last picture, not a blank canvas -
+    on both paths, for a change of S (a new framebuffer, redrawn from the last frame) and of the backing only."""
+    pytest.importorskip('playwright')
+    import threading
+    from playwright.sync_api import sync_playwright
+    from arek import web
+    shutil.copy(WEB / 'wb-obraz.js', tmp_path / 'wb-obraz.js')
+    (tmp_path / 'r.html').write_text(RESIZE_PAGE)
+    srv = web.serve(tmp_path, 0)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with sync_playwright() as pw:
+            br = pw.chromium.launch()
+            for gl in (0, 1):
+                page = br.new_page(viewport={'width': 400, 'height': 200})
+                page.goto('http://127.0.0.1:%d/r.html?gl=%d' % (port, gl))
+                page.wait_for_function('window.ready')
+                assert page.evaluate('step(3, false)') is True                     # S 2 -> 3: redrawn without a present
+                page.wait_for_timeout(100)
+                w, h, rows = webtest.png_rgb(page.screenshot())
+                assert rows[30][100] == (200, 100, 50) and rows[59][119] == (200, 100, 50), (gl, rows[30][100])
+                page.close()
+            br.close()
+    finally:
+        srv.shutdown()

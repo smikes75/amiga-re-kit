@@ -38,7 +38,11 @@ memory, the copy waits for the GPU).
 
 ## F. The measurement (`arek web smooth`, kit 0.8.1) - done
 
-    arek web smooth URL [--seconds 30] [--browser chromium|webkit|all] [--stalls 10] [--stall-ms 150] [--json]
+    arek web smooth URL [--seconds 30] [--browser chromium|webkit|all] [--stalls 10] [--stall-ms 150] [--gpu] [--json]
+
+Every result names the WebGL renderer and the machine's load average before and after (1.3, G45: headless
+Chromium draws WebGL in software - SwiftShader - so the presenter runs on the CPU there, and a loaded machine
+dropped 500 of 1034 frames in one run); `--gpu` launches Chromium on the GPU (macOS: ANGLE on Metal).
 
 Phases: scroll (the right key held, every display frame sampled: its timestamp, the camera, the objects, the missing
 passes, the game's lead), latency (five key presses dispatched inside the page, the time until the camera moves),
@@ -53,10 +57,11 @@ The page's hooks (`globalThis.WBLONGRUN` 1.1; `arek web longrun` reads the same 
 
 | hook | returns |
 |---|---|
-| `ready()` | the game runs |
+| `ready()` | the game runs; 1.2: false outside the game (a map fly-over after a death, a menu) - nothing is sampled or judged then, and a latency probe waits for it (up to 10 s) or is void and repeated |
 | `cam()` | `[x, y]` the camera in game pixels as drawn in this display frame (fractional when interpolated) |
-| `objs()` (optional) | `[[id, x, y], ...]` the objects on screen with an identity, game pixels as drawn |
-| `missing()` (optional) | display frames drawn without the next game frame / pass for the interpolation, so far |
+| `objs()` (optional) | `[[id, x, y], ...]` the objects on screen with an identity, in the world in game pixels so that `x - cam()[0]` is where the object is drawn on the screen (1.2, G44: objects are judged on the screen, a step over 1 game px - an animation frame's offset - is a jump, not jitter) |
+| `scale()` (optional, 1.2) | S, device pixels per game pixel, when the page draws its objects on whole device pixels: their steps on the screen are then judged within 1/S |
+| `missing()` (optional) | display frames drawn without the next game frame / pass for the interpolation, so far - counted only where the page interpolates (not on a screen outside the game: a map fly-over after a death, a menu; Alien Breed II) |
 | `ahead()` (optional) | game frames computed ahead of the display |
 | `audio()` (optional) | `{reserve: ms, dropouts: n (so far), latency: ms, simulated?: bool}` |
 | `status()` (optional) | a line of text for the report |
@@ -72,6 +77,13 @@ key -> camera 62 / 63 ms (thread), 96 / 97 ms (coroutine - over the limit); soun
 (Chromium), 16 ms (WebKit); game lead -0.4 to -0.8 frames; WebGL in Chromium, not in WebKit headless. The thread
 meets every limit; the coroutine is the fallback for a page without COOP / COEP and misses two, as the canon
 expects.
+
+Alien Breed II on kit 0.8.2 (`arek web smooth` 1.1, `prepare()` = level 1 enhanced, `route` left / right 2.8 s, engine
+in a thread, 522 x 357, 60 Hz, 25 s): Chromium 1 dropped frame of 1516, camera jitter 0.004 px, missing 0 %, key ->
+camera 61 ms, 0 sound dropouts; WebKit 0 dropped, camera jitter 0.012 px, missing 0.13 % (2 frames), 62 ms, 0
+dropouts. The object jitter (0.27-0.60 px) was the measurement's own: objects drawn on whole device pixels against a
+fractional camera, and the animation frames' offsets - judged on the screen within 1/S with jumps left out since 1.2
+(G44).
 
 The kit's synthetic page `smooth-demo.html` (`arek web demo`, then `/smooth-demo.html`) runs a 50 Hz game by the
 display's clock with the picture 30 ms behind and the camera and objects interpolated: Chromium headless 59.9 Hz,
@@ -92,6 +104,8 @@ gives `allow(n)`, the module gives the permits, the times and the pairs:
 - `takt.view(ts)`: the display times `tv` (camera, sprites: `latC` 30 ms behind the game, 20 with an engine in a
   thread, one frame less 2 ms under the lock) and `tvO` (objects: `latO` 60 ms, adaptive to the longest of the last
   16 drawing passes - the game's lead + 8 ms, up to 120; fed by `takt.pass(t)`);
+- `takt.pass(t)` (1.2): a record of an older drawing pass after a newer one (once in ~1500 frames in a browser,
+  Alien Breed II) is not taken - a small step back is ignored, a big one (over 1 s: a new level) starts the axis anew;
 - `takt.pair(list, t)`: the two frames around t and the fraction; without the next one the previous pair
   extrapolates (`f` up to 2) when allowed, else the last frame alone and `missing` counts it;
 - `WBTAKT.keyboard(target, {code: bit}, onchange)`: the keys as bits changed at the event;

@@ -620,7 +620,7 @@ def cmd_web(a):
         if not a.target:
             raise ValueError('web smooth URL [--seconds S] [--browser chromium|webkit|all] [--stalls N] [--stall-ms M] [--json]')
         browsers = websmooth.BROWSERS if a.browser == 'all' else (a.browser,)
-        res = websmooth.run(a.target, a.seconds, browsers, a.stalls, a.stall_ms, log=(lambda *x: None) if a.json else print)
+        res = websmooth.run(a.target, a.seconds, browsers, a.stalls, a.stall_ms, log=(lambda *x: None) if a.json else print, gpu=a.gpu)
         if a.json:
             print(json.dumps(res, indent=1))
         return 0 if all(r.get('passed') for r in res.values() if 'error' not in r) and any('error' not in r for r in res.values()) else 1
@@ -1186,6 +1186,7 @@ def build_parser():
     s.add_argument('--browser', choices=['chromium', 'webkit', 'all'], default='all', help='smooth: which browsers (default all installed)')
     s.add_argument('--stalls', type=int, default=10, help='smooth: artificial stalls of the main thread (default 10)')
     s.add_argument('--stall-ms', type=int, default=150, help='smooth: length of a stall (default 150 ms)')
+    s.add_argument('--gpu', action='store_true', help='smooth: Chromium on the GPU (macOS: ANGLE on Metal) instead of headless SwiftShader')
     s.add_argument('--json', action='store_true', help='smooth: the metrics as JSON')
     s.add_argument('--set', action='append', metavar='DISK.adf[,DISK2.adf]',
                    help='seal: a disk set that opens the files (repeat for other versions)')

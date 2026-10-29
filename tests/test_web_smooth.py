@@ -31,7 +31,7 @@ def test_analysis_and_verdict():
     assert r['dropped'] == 2 and r['cam_jitter'] > 0.3 and r['missing_pct'] > 0
     r['latency_ms'], r['audio'] = 90, {'dropouts': 3}
     ok, fails = websmooth.verdict(r)
-    assert not ok and len(fails) == 5 and any('90 ms' in f for f in fails) and any('dropouts 3' in f for f in fails)
+    assert not ok and len(fails) == 6 and any('90 ms' in f for f in fails) and any('dropouts 3' in f for f in fails)   # objects on a jittery camera jitter too
     r = websmooth.analyse(_samples(step=0.0))
     r['latency_ms'], r['audio'], r['latency_all'] = None, None, []
     ok, fails = websmooth.verdict(r)
@@ -91,3 +91,45 @@ def test_a_change_of_speed_is_no_jitter():
         samples.append([t, [x0, 0], None, None, None])
     r = websmooth.analyse(samples)
     assert r['cam_dev'] > 0.4 and r['cam_jitter'] == 0 and r['cam_moving'] == 120
+
+
+def test_objects_judged_on_the_screen():
+    """G44 (Alien Breed II): the camera scrolls 1.66 px per frame (fractional), the objects are drawn on whole device
+    pixels (S = 2): one standing on the terrain and one walking 0.5 px per frame have steps on the screen within 1/S of
+    each other - no jitter; an animation frame's 3 px offset is a jump, not jitter; without the scale they jitter."""
+    t, cam, samples = 0.0, 0.0, []
+    for i in range(120):
+        t += 16.7
+        cam -= 1.66
+        drawn = lambda wx: round((wx - cam) * 2) / 2 + cam                            # where it is drawn, as world x
+        oy = 50.0 + (3.0 if (i // 30) % 2 else 0.0)                                   # animation: 3 px every 30 frames
+        samples.append([t, [cam, 0.0], [[7, drawn(100.0), oy], [8, drawn(140.0 + 0.5 * i), 60.0]], 0, 0])
+    r = websmooth.analyse(samples, scale=2)
+    assert r['obj_jitter'] == 0 and r['cam_jitter'] < 1e-6
+    assert websmooth.analyse(samples)['obj_jitter'] > 0.05
+
+
+def test_gaps_outside_the_game_are_not_judged():
+    """1.2 (Alien Breed II): a map fly-over after a death (ready() false) is a gap: no dropped frame, no step across it."""
+    t, x, samples = 0.0, 0.0, []
+    for i in range(100):
+        t += 16.7
+        if 40 <= i < 70:
+            if samples[-1] is not None:
+                samples.append(None)
+            x += 50.0                                                                 # the camera jumps meanwhile
+            continue
+        x += 1.0
+        samples.append([t, [x, 0.0], None, 3, 1])
+    r = websmooth.analyse(samples)
+    assert r['gaps'] == 1 and r['frames'] == 70 and r['dropped'] == 0 and r['cam_jitter'] == 0 and r['missing_pct'] == 0
+
+
+def test_renderer_load_and_gpu_flags():
+    assert websmooth.load_average() is None or websmooth.load_average() >= 0
+    assert '--use-angle=metal' in websmooth.GPU_ARGS['chromium'] and 'UNMASKED_RENDERER_WEBGL' in websmooth.RENDERER_JS
+    r = {'passed': True, 'fails': [], 'frames': 10, 'refresh_hz': 60, 'dropped': 0, 'cam_jitter': 0, 'cam_jitter_max': 0, 'cam_moving': 9,
+         'cam_dev': 0, 'obj_jitter': 0, 'missing_pct': 0, 'latency_ms': 40, 'latency_all': [40], 'audio': None,
+         'renderer': 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device))', 'load': [1.0, 1.5], 'notes': ['WebGL drawn in software']}
+    line = websmooth.format_result('chromium', r)
+    assert 'SwiftShader' in line and 'load 1.0 -> 1.5' in line and 'software' in line

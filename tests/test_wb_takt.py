@@ -21,7 +21,7 @@ def js(expr):
 
 
 def test_lock_and_rate():
-    assert js('T.VERSION') == '1.1' and 'wb-takt.js' in web.FILES
+    assert js('T.VERSION') == '1.2' and 'wb-takt.js' in web.FILES
     assert js('[60, 100.3, 49.9, 150, 144, 200.5, 0].map((h) => T.lockOf(h, 50))') == [0, 2, 1, 3, 0, 4, 0]
     assert js('T.medianHz(Array(59).fill(16.7))') == 0 and abs(js('T.medianHz(Array(60).fill(16.667))') - 60) < 0.01
 
@@ -68,3 +68,10 @@ def test_keyboard_changes_bits_at_the_event():
         H.keydown(ev('ArrowRight')); H.keydown(ev('ArrowRight')); H.keydown(ev('ArrowLeft')); H.keyup(ev('ArrowRight')); H.keydown(ev('KeyX')); H.blur();
         return [seen, kb.bits()]; })()""")
     assert r == [[1, 3, 2, 0], 0]
+
+
+def test_pass_ignores_an_older_record():
+    """1.2 (Alien Breed II): an older pass after a newer one is not taken; a big step back restarts the axis."""
+    r = js("""(() => { const t = T.create({}); const a = [t.pass(1000), t.pass(1080), t.pass(1060), t.pass(1160)];
+        const lens = t.lens.slice(); const b = t.pass(100); return [a, lens, b, t.lens.length, t.lastPass]; })()""")
+    assert r == [[True, True, False, True], [80, 80], True, 0, 100]
