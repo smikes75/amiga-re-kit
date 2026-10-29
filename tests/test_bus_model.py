@@ -427,3 +427,45 @@ def test_paula_check_program(tmp_path):
     # the interrupt requests, one CCK after: the slot of the first (discarded) word after DMA on; the block's last word
     # arrives at line 15 (4 words from line 12) and its request is raised at the next high byte (bytes every 100 CCK from 2737)
     assert r['irqs'][:2] == [(0, 11 * 227 + 13 + 1), (0, 3537 + 1)] and 'interrupt requests:' in r['text']
+
+
+COPW_HARNESS = r'''
+#include <stdio.h>
+#include <string.h>
+#include "arek_bus.h"
+static uint8_t RAM[0x10000];
+static uint16_t rd16(void *c, uint32_t a) { (void)c; a &= 0xfffe; return (uint16_t)((RAM[a] << 8) | RAM[a + 1]); }
+static void cop(uint32_t *at, uint16_t a, uint16_t b) { RAM[*at] = a >> 8; RAM[*at + 1] = a; RAM[*at + 2] = b >> 8; RAM[*at + 3] = b; *at += 4; }
+static long planes(const uint8_t *own) { long n = 0; for (long k = 0; k < 312L * 227; k++) n += own[k] >= 8 && own[k] < 16; return n; }
+int main(int argc, char **argv) {
+    static uint8_t own[313 * 227]; static uint16_t regs[0x100];
+    ArekBus B; arek_bus_init(&B, 227, 312, 313, own, regs, rd16, 0);
+    uint32_t at = 0x1000;                                   /* list A: 4 hires planes, COP1LC to itself (an intro screen) */
+    cop(&at, 0x0100, 0xc204); cop(&at, 0x0080, 0x0000); cop(&at, 0x0082, 0x1000); cop(&at, 0xffff, 0xfffe);
+    at = 0x2000;                                            /* list B: no bitplanes (the level's own list) */
+    cop(&at, 0x0100, 0x0200); cop(&at, 0xffff, 0xfffe);
+    regs[0x096 >> 1] = 0x83c0; regs[0x092 >> 1] = 0x3c; regs[0x094 >> 1] = 0xd4; regs[0x08e >> 1] = 0x2c81; regs[0x090 >> 1] = 0xf4c1;
+    regs[0x080 >> 1] = 0; regs[0x082 >> 1] = 0x1000;
+    arek_bus_frame(&B, 312); long a = planes(own);
+    regs[0x082 >> 1] = 0x2000; regs[0x100 >> 1] = 0x0200;  /* the CPU sets COP1LC to list B */
+    if (argc > 1) { arek_bus_cpu_write(&B, 0x082); arek_bus_cpu_write(&B, 0x100); }
+    arek_bus_frame(&B, 312); long b = planes(own);
+    printf("%ld %ld\n", a, b);
+    return 0;
+}
+'''
+
+
+def test_cpu_write_beats_the_coppers_earlier_write(tmp_path):
+    """G50 (Alien Breed II): a list that writes COP1LC to itself, then the CPU sets COP1LC to another list: the next frame's
+    map follows the CPU's list once the write is reported (arek_bus_cpu_write); without it the old list's planes stay."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    (tmp_path / 'h.c').write_text(COPW_HARNESS)
+    subprocess.run([cc, '-O1', '-I', HERE, '-o', str(tmp_path / 'h'), str(tmp_path / 'h.c'), os.path.join(HERE, 'arek_bus.c'),
+                    os.path.join(HERE, 'arek_bus_vamiga.c')], check=True)
+    old = [int(x) for x in subprocess.run([str(tmp_path / 'h')], capture_output=True, text=True, check=True).stdout.split()]
+    new = [int(x) for x in subprocess.run([str(tmp_path / 'h'), 'cpu'], capture_output=True, text=True, check=True).stdout.split()]
+    assert old[0] > 20000 and old[1] == old[0]                   # without the report the map keeps list A
+    assert new[0] == old[0] and new[1] == 0                      # with it: list B, no bitplane slots

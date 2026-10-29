@@ -140,3 +140,50 @@ def test_threaded_engine_native_and_wasm(tmp_path):
                         str(tmp_path / 'disk.adf')], capture_output=True, text=True, timeout=180)
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip().splitlines()[-1] == want
+
+
+CIA_PROG = {
+    MAIN: '4df900dff000'          # lea $dff000,a6
+          '3d7cc020009a'          # move.w #$c020,$9a(a6)    INTENA: master + VERTB
+          '13fc003200bfd400'      # loop: move.b #50,$bfd400  CIA-B TALO
+          '13fc000000bfd500'      #       move.b #0,$bfd500   TAHI
+          '13fc001900bfde00'      #       move.b #$19,$bfde00 CRA: START, ONESHOT, FORCE LOAD
+          '0839000000bfdd00'      # w:    btst #0,$bfdd00     ICR: underflow?
+          '67f6'                  #       beq.s w
+          '52784000'              #       addq.w #1,$4000     counts the timer's rounds
+          '60d8',                 #       bra.s loop
+    L3: PROG[L3],
+}
+
+
+def test_cia_timers_past_2_31_e_ticks_in_wasm(tmp_path):
+    """G47 (Alien Breed II): the E-tick count of the CIA timers passes 2^31 after ~151 000 frames; in wasm32 a `long`
+    stopped the timers there. A state at frame 151 100 runs a game that waits on CIA-B timer A in a loop: the wasm build
+    must give the native line (the hash covers the round counter)."""
+    if not (shutil.which('emcc') and shutil.which('node') and bus.compiler()):
+        pytest.skip('no emcc + node')
+    img = bytearray(0x2000)
+    for at, hx in CIA_PROG.items():
+        img[at:at + len(hx) // 2] = bytes.fromhex(hx)
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN, L3], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', 0x0200)
+    (st / 'creg.bin').write_bytes(creg)
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n151100\n')
+    host.pack(str(st), str(tmp_path / 'state.bin'))
+    host.engine_build(str(tmp_path / 'n'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', native=True)
+    host.engine_build(str(tmp_path / 'w'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000')
+    want = subprocess.run([str(tmp_path / 'n' / 'arek_host_engine'), str(tmp_path / 'state.bin'), '60', '--dump', str(tmp_path / 'chip.bin')],
+                          capture_output=True, text=True, check=True, timeout=60).stdout.strip()
+    rounds = struct.unpack('>H', (tmp_path / 'chip.bin').read_bytes()[0x4000:0x4002])[0]
+    assert want.startswith('frames 60 frame 151159') and rounds > 60 * 50                 # the timer runs: many rounds per frame
+    r = subprocess.run(['node', os.path.join(HOST, 'arek_host_engine_check.js'), str(tmp_path / 'w'), str(tmp_path / 'state.bin'), '60'],
+                       capture_output=True, text=True, timeout=180)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().splitlines()[-1] == want

@@ -198,16 +198,30 @@ void cia_write_hook(uint32_t a, uint8_t v);   /* (A13 low, even bytes), register
 #ifndef OOB_ZERO
 #define OOB_ZERO 0                      /* generate(oob='zero'): reads outside the modelled RAM give 0, writes are dropped */
 #endif
+/* The 68000's address decoding (G48, Alien Breed II): the bus has 24 address lines, so the top byte of an address is
+   ignored; chip RAM repeats every MEMSZ bytes up to CHIP_MIRROR ($200000 on an A500: 512K chip RAM appears at $000000,
+   $080000, $100000 and $180000). Anything else that is no custom register, CIA or slow RAM is unmapped: a read gives
+   OOB_READ (0 until the floating bus is measured), a write is dropped. A browser build never exits on it - an exit
+   ends the game's thread while the page goes on (a frozen game). */
+#ifndef CHIP_MIRROR
+#define CHIP_MIRROR 0x200000u
+#endif
+#ifndef OOB_READ
+#define OOB_READ 0u
+#endif
+#define ADDR24(a) ((a) & 0xffffffu)
+static inline uint32_t chip_at(uint32_t a) { return a < CHIP_MIRROR ? a % MEMSZ : 0xffffffffu; }   /* chip RAM offset, or none */
 static long OOB_COUNT = 0;
 static void oob(uint32_t a) {
-#if OOB_ZERO
+#if OOB_ZERO || defined(__EMSCRIPTEN__)
     static uint32_t seen[64];
     static int n = 0;
     OOB_COUNT++;
     for (int i = 0; i < n; i++) if (seen[i] == (a & ~0x3ffu)) return;      /* one line per KB */
-    if (n < 64) seen[n++] = a & ~0x3ffu;
-    fprintf(stderr, "access outside the modelled RAM (MEMSZ %x, SLOWBASE %x SLOWSZ %x): %08x - reads 0, writes dropped\n",
-            MEMSZ, SLOWBASE, SLOWSZ, a);
+    if (n >= 64) return;                                                   /* at most 64 lines */
+    seen[n++] = a & ~0x3ffu;
+    fprintf(stderr, "access outside the modelled RAM (MEMSZ %x, SLOWBASE %x SLOWSZ %x): %08x - reads %x, writes dropped\n",
+            MEMSZ, SLOWBASE, SLOWSZ, a, OOB_READ);
 #else
     fprintf(stderr, "access outside the modelled RAM (MEMSZ %x, SLOWBASE %x SLOWSZ %x): %08x\n",
             MEMSZ, SLOWBASE, SLOWSZ, a);
@@ -276,17 +290,21 @@ static void hw_write(uint32_t off, uint32_t v) {
 }
 /* every access of the CPU to the chip bus is one BUS_ACCESS (a word or a byte); the _raw halves of a word do not count twice */
 static uint32_t rd8_raw(uint32_t a) {
+    a = ADDR24(a);
     if (CUSTOM(a)) { uint32_t w = hw_read(a & 0x1fe); return (a & 1) ? (w & 0xff) : (w >> 8); }
 #ifdef CIA_HOOK
     if (CIA(a)) return cia_read_hook(a);
 #endif
     if (a < MEMSZ) return MEM[a];
+    uint32_t c = chip_at(a);
+    if (c != 0xffffffffu) return MEM[c];
     uint8_t *p = slow_at(a);
-    if (!p) { oob(a); return 0; }
+    if (!p) { oob(a); return OOB_READ & 0xff; }
     return *p;
 }
 static uint32_t rd8(uint32_t a) { BUS_ACCESS(a); return rd8_raw(a); }
 static uint32_t rd16_raw(uint32_t a) {   /* the blitter's own reads (run_blit) go through here: they are not CPU accesses */
+    a = ADDR24(a);
     if (CUSTOM(a)) return hw_read(a & 0x1fe);
     if (a + 1 < MEMSZ) return (MEM[a] << 8) | MEM[a + 1];
     return (rd8_raw(a) << 8) | rd8_raw(a + 1);
@@ -294,11 +312,14 @@ static uint32_t rd16_raw(uint32_t a) {   /* the blitter's own reads (run_blit) g
 static uint32_t rd16(uint32_t a) { BUS_ACCESS(a); return rd16_raw(a); }
 static uint32_t rd32(uint32_t a) { return (rd16(a) << 16) | rd16(a + 2); }
 static void wr8_raw(uint32_t a, uint32_t v) {
+    a = ADDR24(a);
     if (CUSTOM(a)) { v &= 0xff; hw_write(a & 0x1fe, (v << 8) | v); return; }   /* 68000: the byte on both halves of the bus */
 #ifdef CIA_HOOK
     if (CIA(a)) { cia_write_hook(a, (uint8_t)v); return; }
 #endif
     if (a < MEMSZ) { MEM[a] = v; WRLOG[a] = 1; PROF_WRITE(a); return; }
+    uint32_t c = chip_at(a);
+    if (c != 0xffffffffu) { MEM[c] = v; WRLOG[c] = 1; PROF_WRITE(c); return; }
     uint8_t *p = slow_at(a);
     if (!p) { oob(a); return; }
     *p = v;
@@ -309,6 +330,7 @@ static void wr8_raw(uint32_t a, uint32_t v) {
 }
 static void wr8(uint32_t a, uint32_t v) { BUS_ACCESS(a); wr8_raw(a, v); }
 static void wr16_raw(uint32_t a, uint32_t v) {
+    a = ADDR24(a);
     if (CUSTOM(a)) { hw_write(a & 0x1fe, v); return; }
     wr8_raw(a, v >> 8); wr8_raw(a + 1, v);
 }

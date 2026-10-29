@@ -108,3 +108,25 @@ def test_cover_union_of_runs_cli(tmp_path, capsys):
     (tmp_path / 'p.c.cover.json').write_text(__import__('json').dumps(side))
     assert cli.main(['cover', str(tmp_path / 'a.cov'), str(tmp_path / 'b.cov'), str(tmp_path / 'p.c.cover.json')]) == 0
     assert '3 of 5 translated instructions ran' in capsys.readouterr().out
+
+
+# G48 (Alien Breed II): movea.l #$32000400,a0 ; move.w #$1234,(a0) ; move.w $80400,d0 ; swap d0 ; move.w $180400,d0 ; rts
+MIRROR = bytes.fromhex('207c32000400 30bc1234 303900080400 4840 303900180400 4e75'.replace(' ', ''))
+# move.w $2800a8,d0 ; rts  - unmapped on an A500 (24-bit $2800A8)
+UNMAPPED = bytes.fromhex('3039002800a8 4e75'.replace(' ', ''))
+
+
+def test_24_bit_addresses_and_chip_mirrors(tmp_path):
+    """The 68000 ignores the top address byte, and 512K chip RAM repeats up to $1FFFFF: a write through $32000400 lands at
+    $400 and reads back at $80400 and $180400 (the debris of Alien Breed II's level 15 read such addresses)."""
+    log, _, r = build_run(tmp_path, MIRROR, (BASE,))
+    assert log.splitlines()[0] == '12341234' and 'outside' not in r.stderr
+
+
+def test_unmapped_reads_the_oob_value_and_never_exits_in_a_browser(tmp_path):
+    log, _, r = build_run(tmp_path, UNMAPPED, (BASE,), oob='zero')
+    assert log.splitlines()[0] == '00000000' and '002800a8' in r.stderr
+    _, _, r = build_run(tmp_path, UNMAPPED, (BASE,), expect_rc=3)                # natively the default still stops
+    src, _, _ = recomp.generate(UNMAPPED, BASE, auto=[BASE])
+    assert '#if OOB_ZERO || defined(__EMSCRIPTEN__)' in src and '#define CHIP_MIRROR 0x200000u' in src
+    assert 'if (n >= 64) return;' in src                                          # the log stops after 64 lines

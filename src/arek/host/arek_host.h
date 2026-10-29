@@ -46,7 +46,7 @@ static int    H_COP_DONE = 0;            /* the copper's interrupt of this frame
 static int    H_IRQ_DEPTH = 0;
 static uint8_t H_CIAA_PRA = 0xfe;        /* $BFE001: bits 6/7 = fire port 0/1 (0 = pressed), bit 1 = LED output */
 static uint8_t H_CIAA_SDR = 0, H_CIAA_ICR = 0, H_CIAA_DDRA = 0x03, H_CIAB_ICR = 0;
-typedef struct { uint16_t latch, cnt; uint8_t cr; long e0; } HCiaTimer;   /* e0: the E tick of the last update */
+typedef struct { uint16_t latch, cnt; uint8_t cr; int64_t e0; } HCiaTimer;   /* e0 in E ticks: 64 bits (G47: a long is 32 bits in wasm32) */   /* e0: the E tick of the last update */
 typedef struct { HCiaTimer t[2]; uint8_t mask; } HCia;
 static HCia H_CIA[2] = { { { { 0xffff, 0xffff, 0, 0 }, { 0xffff, 0xffff, 0, 0 } }, 0 }, { { { 0xffff, 0xffff, 0, 0 }, { 0xffff, 0xffff, 0, 0 } }, 0 } };   /* 0 = CIA-A, 1 = CIA-B */
 static int    H_LED_OFF = -1;            /* CIA-A PRA bit 1 as the game wrote it: 1 = LED off = filter off; -1 = not yet */
@@ -73,20 +73,20 @@ static uint16_t h_rd16cb(void *ctx, uint32_t a) { (void)ctx; return (uint16_t)rd
 static inline double h_now(void) { return arek_glue_time(); }
 static inline double h_abs(void) { return H_PAULA.frame_base + h_now(); }
 static double h_ephase(void) { double t2 = 2.0 * h_abs(); return fmod(floor(t2), 10.0); }
-static long h_eticks(void) { return (long)floor(h_abs() / 5.0); }     /* E clock cycles: 10 CPU clocks = 5 CCK */
+static int64_t h_eticks(void) { return (int64_t)floor(h_abs() / 5.0); }   /* E clock cycles: 10 CPU clocks = 5 CCK; 64 bits - in wasm32 a long passed 2^31 after ~151 000 frames (G47) */
 /* the CIAs' timers: counted lazily in E ticks; an underflow reloads the latch, sets the ICR bit and, with the mask bit,
  * raises PORTS (CIA-A) or EXTER (CIA-B); one-shot mode stops the timer */
 static uint8_t *h_cia_icr(int i) { return i ? &H_CIAB_ICR : &H_CIAA_ICR; }
 static void h_cia_raise(int i) { if (*h_cia_icr(i) & H_CIA[i].mask) H_INTREQ |= i ? 0x2000 : 0x0008; }
 static void h_cia_run(int i, int k) {
-    HCiaTimer *t = &H_CIA[i].t[k]; long now = h_eticks();
+    HCiaTimer *t = &H_CIA[i].t[k]; int64_t now = h_eticks();
     if (!(t->cr & 1)) { t->e0 = now; return; }
-    long n = now - t->e0; t->e0 = now;
+    int64_t n = now - t->e0; t->e0 = now;
     if (n <= 0) return;
     if (n <= t->cnt) { t->cnt = (uint16_t)(t->cnt - n); return; }
     *h_cia_icr(i) |= (uint8_t)(1 << k); h_cia_raise(i);
     if (t->cr & 8) { t->cr &= ~1; t->cnt = t->latch; return; }   /* one-shot: stops */
-    long per = (long)t->latch + 1, m = (n - t->cnt - 1) % per;
+    int64_t per = (int64_t)t->latch + 1, m = (n - t->cnt - 1) % per;
     t->cnt = (uint16_t)(t->latch - m);
 }
 static int h_cia_reg(uint32_t a, int *i) {           /* the CIA and register of an address, or -1 */
@@ -138,6 +138,7 @@ int hw_read_hook(uint32_t off, uint32_t *v) {
     return 0;
 }
 void hw_write_hook(uint32_t off, uint32_t v) {
+    arek_bus_cpu_write(arek_glue_bus(), off);                     /* the CPU's write is the later one (G50) */
     if ((off >= 0x080 && off <= 0x086) || (off >= 0x08e && off <= 0x094) || (off >= 0x0e0 && off <= 0x10a) ||
         (off >= 0x120 && off <= 0x1be)) { ard_until((int)(h_now() / HOST_HPOS)); ard_write(off, (uint16_t)v); }
     if (off == 0x096) ard_until((int)(h_now() / HOST_HPOS));   /* the lines before a DMACON write see the old value (the runtime applies it) */

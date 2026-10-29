@@ -78,6 +78,10 @@ double arek_bus_blit(ArekBus *b, double t, uint16_t con0, uint16_t con1, uint16_
 int arek_bus_bbusy(ArekBus *b, double t);
 
 /* Slot DMA jineho modelu (zvuk): obsadi takt k, je-li volny. */
+/* a CPU write to a custom register (G50, Alien Breed II): it is later than the Copper's write of the same register, so the
+ * next frame's map starts from the CPU's value (regs), not the Copper's (copr) - e.g. COP1LC set by the CPU after a list
+ * that wrote COP1LC to itself */
+static inline void arek_bus_cpu_write(ArekBus *b, uint32_t off) { b->copw[(off & 0x1fe) >> 1] = 0; }
 static inline void arek_bus_mark(ArekBus *b, uint32_t k, uint8_t who) { if (k < (uint32_t)(b->maxlines * b->hpos) && !b->own[k]) b->own[k] = who; }
 
 /* vnitrni (arek_bus_vamiga.c) */
