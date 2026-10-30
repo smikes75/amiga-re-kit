@@ -41,12 +41,12 @@ def test_analysis_and_verdict():
     assert 'not available' not in websmooth.format_result('x', {'error': 'gone'}) and 'gone' in websmooth.format_result('x', {'error': 'gone'})
 
 
-def _run(isolated, **kw):
+def _run(isolated, page='smooth-demo.html', **kw):
     srv = web.serve(WEB, 0, isolated=isolated)
     port = srv.server_address[1]
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
-        return websmooth.run('http://127.0.0.1:%d/smooth-demo.html' % port, browsers=('chromium',), log=lambda *a: None, **kw)['chromium']
+        return websmooth.run('http://127.0.0.1:%d/%s' % (port, page), browsers=('chromium',), log=lambda *a: None, **kw)['chromium']
     finally:
         srv.shutdown()
 
@@ -133,3 +133,49 @@ def test_renderer_load_and_gpu_flags():
          'renderer': 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device))', 'load': [1.0, 1.5], 'notes': ['WebGL drawn in software']}
     line = websmooth.format_result('chromium', r)
     assert 'SwiftShader' in line and 'load 1.0 -> 1.5' in line and 'software' in line
+
+
+def test_without_interpolation_jitter_is_reported_not_judged():
+    """1.4 (Superfrog KIT-GAPS 38): an original mode draws a 50 Hz game's frames as they are - on a 60 Hz display every
+    sixth display frame repeats the last game frame. The camera's 0 step ends a stretch of motion (its stretches are
+    even), but an object moving on the screen steps 1 1 1 1 1 0 - jitter. With interp false the jitter and the missing
+    passes are reported only; dropped frames, the latency and the sound still fail."""
+    steps = [0.0 if i % 6 == 5 else 2.0 for i in range(120)]
+    t, x, smp = 0.0, 0.0, []
+    for i, st in enumerate(steps):
+        t += 16.7
+        x += st
+        smp.append([t, [x, 0], [[1, 1.5 * x + 10, 5.0]], i // 4, 1])      # the object runs 1 px per game frame on the screen
+    r = websmooth.analyse(smp)
+    assert r['cam_jitter'] == 0 and r['obj_jitter'] > 0.1 and r['missing_pct'] > 0
+    snd = {'reserve_ms': 30, 'latency_ms': 20, 'dropouts': 0, 'stalls': '10 x 150 ms', 'simulated': False}
+    r.update(latency_ms=40, latency_all=[40], audio=snd)
+    ok, fails = websmooth.verdict(r)
+    assert not ok and any('object jitter' in f for f in fails) and any('missing' in f for f in fails)
+    r['interp'] = False
+    assert websmooth.verdict(r) == (True, [])
+    r['passed'], r['fails'] = True, []
+    assert 'not judged: no interpolation' in websmooth.format_result('chromium', r)
+    r.update(dropped=3, latency_ms=95, audio=dict(snd, dropouts=2))
+    ok, fails = websmooth.verdict(r)
+    assert not ok and len(fails) == 3 and not any('jitter' in f or 'missing' in f for f in fails)
+
+
+def test_cli_smooth_has_no_interp():
+    assert cli.build_parser().parse_args(['web', 'smooth', 'http://x/', '--no-interp']).no_interp
+    assert not cli.build_parser().parse_args(['web', 'smooth', 'http://x/']).no_interp
+
+
+def test_measure_the_synthetic_page_without_interpolation():
+    """The synthetic page with ?interp=0 says so by the hook: its objects' 50-on-60 steps on the screen are jitter,
+    reported and not judged; the same page interpolating meets the limit."""
+    pytest.importorskip('playwright')
+    r = _run(True, page='smooth-demo.html?interp=0', seconds=3, stalls=2, stall_ms=100)
+    assert 'error' not in r, r
+    assert r['interp'] is False and r['obj_jitter'] > LIM, (r['obj_jitter'], r['fails'])
+    assert not any('jitter' in f or 'missing' in f for f in r['fails']), r['fails']
+    r2 = _run(True, seconds=3, stalls=2, stall_ms=100)
+    assert r2['interp'] is True and r2['obj_jitter'] < LIM and r2['cam_jitter'] < LIM, (r2['obj_jitter'], r2['cam_jitter'])
+
+
+LIM = websmooth.LIMITS['cam_jitter']

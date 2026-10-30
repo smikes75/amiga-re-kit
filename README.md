@@ -107,7 +107,8 @@ arek web serve build/present --port 8930               # the bundle with the dis
 arek web serve build/present --isolated                 # ... with the COOP / COEP headers (an engine with shared memory)
 arek web strip web/page.js build/present/page.js --drop FULL   # the presentation's variant: lines //@FULL and blocks //@FULL{ ... //@}FULL cut out
 arek web longrun http://127.0.0.1:8930/ --minutes 3     # smoothness over a longer play (playwright; the page's globalThis.WBLONGRUN hook)
-arek web smooth http://127.0.0.1:8920/smooth-demo.html  # the canon's limits in Chromium and WebKit: dropped frames, camera and object steps, missing passes, key latency, sound under stalls (docs/WB-PLYNULOST.md)
+arek web smooth http://127.0.0.1:8920/smooth-demo.html  # the canon's limits in Chromium and WebKit: dropped frames, camera and object steps, missing passes, key latency, sound under stalls (docs/WB-PLYNULOST.md; --no-interp for an original mode)
+arek docs WB-PLYNULOST                                   # the kit's documents ship with it (arek docs: the list; --path: the file)
 arek shots cap/shots/o build/shots/h --align 8          # the pictures of two runs paired by frame, each pair aligned for a screen shake
 arek web test http://localhost:8911/?test=1            # ... and §6: the menu and the sound contract, when the page has the hooks
 

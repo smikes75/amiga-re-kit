@@ -35,8 +35,10 @@ arek-mcp = "arek.mcp_server:main"
 Homepage = "https://github.com/smikes75/amiga-re-kit"
 "SWIV (reference project)" = "https://github.com/smikes75/swiv-amiga-re"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+# the packages are listed (not found) so that the kit's documents ship with it as arek/docs (docs/*.md; `arek docs`)
+package-dir = {"" = "src", "arek.docs" = "docs"}
+packages = ["arek", "arek.bus", "arek.headless", "arek.host", "arek.m68k", "arek.packers", "arek.web", "arek.docs"]
 
 [tool.setuptools.dynamic]
 version = {attr = "arek.__version__"}
@@ -46,6 +48,7 @@ version = {attr = "arek.__version__"}
 "arek.web" = ["wb-obraz.js", "wb-seal.js", "wb-nastaveni.js", "wb-zvuk.js", "wb-atn.js", "wb-content.js", "wb-touch.js", "wb-takt.js", "wb-zvuk-out.js", "wb-zvuk-worklet.js", "demo.html", "smooth-demo.html"]
 "arek.bus" = ["*.c", "*.h"]
 "arek.host" = ["*.c", "*.h", "*.js"]
+"arek.docs" = ["*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -620,7 +620,8 @@ def cmd_web(a):
         if not a.target:
             raise ValueError('web smooth URL [--seconds S] [--browser chromium|webkit|all] [--stalls N] [--stall-ms M] [--json]')
         browsers = websmooth.BROWSERS if a.browser == 'all' else (a.browser,)
-        res = websmooth.run(a.target, a.seconds, browsers, a.stalls, a.stall_ms, log=(lambda *x: None) if a.json else print, gpu=a.gpu)
+        res = websmooth.run(a.target, a.seconds, browsers, a.stalls, a.stall_ms, log=(lambda *x: None) if a.json else print, gpu=a.gpu,
+                            interp=False if a.no_interp else None)
         if a.json:
             print(json.dumps(res, indent=1))
         return 0 if all(r.get('passed') for r in res.values() if 'error' not in r) and any('error' not in r for r in res.values()) else 1
@@ -833,6 +834,11 @@ def build_parser():
     p.add_argument('--version', action='version', version='arek %s (decoder %s, recomp %s)' % (
         ident['version'], ident['decoder_sha256'][:12], ident['recomp_sha256'][:12]))
     sp = p.add_subparsers(dest='cmd', required=True)
+
+    s = sp.add_parser('docs', help="the kit's documents (the canon, the method, the bus, the host): list, print one or its path")
+    s.add_argument('name', nargs='?', help='a document (WB-PLYNULOST, METHOD, BUS, ...; case and .md optional); none: the list')
+    s.add_argument('--path', action='store_true', help='print the file path instead of the text')
+    s.set_defaults(fn=cmd_docs)
 
     s = sp.add_parser('adf', help='disk image: info, entropy map, regions, slicing')
     s.add_argument('what', choices=['info', 'map', 'regions', 'track', 'sector', 'ls', 'cat', 'extract'])
@@ -1187,6 +1193,8 @@ def build_parser():
     s.add_argument('--stalls', type=int, default=10, help='smooth: artificial stalls of the main thread (default 10)')
     s.add_argument('--stall-ms', type=int, default=150, help='smooth: length of a stall (default 150 ms)')
     s.add_argument('--gpu', action='store_true', help='smooth: Chromium on the GPU (macOS: ANGLE on Metal) instead of headless SwiftShader')
+    s.add_argument('--no-interp', action='store_true', help="smooth: the page draws the game's frames without interpolation (an original "
+                   "mode): the camera's and the objects' jitter and the missing passes are reported, not judged (else WBLONGRUN.interp())")
     s.add_argument('--json', action='store_true', help='smooth: the metrics as JSON')
     s.add_argument('--set', action='append', metavar='DISK.adf[,DISK2.adf]',
                    help='seal: a disk set that opens the files (repeat for other versions)')
@@ -1219,6 +1227,40 @@ def build_parser():
     s.add_argument('dir', nargs='?', default='.')
     s.set_defaults(fn=cmd_init)
     return p
+
+
+def docs_dir():
+    """The kit's documents: arek/docs in an installed kit (the wheel carries docs/*.md), docs/ of a source checkout."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for d in (os.path.join(here, 'docs'), os.path.join(here, os.pardir, os.pardir, 'docs')):
+        if os.path.isdir(d) and any(f.endswith('.md') for f in os.listdir(d)):
+            return os.path.normpath(d)
+    return None
+
+
+def cmd_docs(a):
+    d = docs_dir()
+    if not d:
+        raise ValueError("the kit's documents are not installed (kit < 0.8.5): https://github.com/smikes75/amiga-re-kit/tree/main/docs")
+    names = sorted(f[:-3] for f in os.listdir(d) if f.endswith('.md'))
+    if not a.name:
+        for n in names:
+            with open(os.path.join(d, n + '.md'), encoding='utf-8') as f:
+                title = next((l.strip('# \n') for l in f if l.startswith('#')), '')
+            print('%-16s %s' % (n, title))
+        print('(%s)' % d)
+        return 0
+    want = a.name[:-3] if a.name.lower().endswith('.md') else a.name
+    hit = [n for n in names if n.lower() == want.lower()]
+    if not hit:
+        raise ValueError('no document %s; there are: %s' % (a.name, ', '.join(names)))
+    p = os.path.join(d, hit[0] + '.md')
+    if a.path:
+        print(p)
+    else:
+        with open(p, encoding='utf-8') as f:
+            sys.stdout.write(f.read())
+    return 0
 
 
 def main(argv=None):

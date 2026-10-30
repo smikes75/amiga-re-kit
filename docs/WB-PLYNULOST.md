@@ -69,6 +69,13 @@ The page's hooks (`globalThis.WBLONGRUN` 1.1; `arek web longrun` reads the same 
 | `focus` (optional, 1.1) | a selector or `[x, y]` to click into the game (default the largest canvas; G41: a page's menu at the corner pauses the game) |
 | `prepare()` (optional, 1.1) | brings the page into the game (past an intro and a menu); may return a promise; `ready()` is then awaited (G42) |
 | `route` (optional, 1.1) | `[[key, ms], ...]` held in turn and cycled while sampling (a maze: short free stretches; G42); the latency probes alternate left and right |
+| `interp()` (optional, 1.4) | false when the page draws the game's frames as they are, without interpolation (an original mode); `--no-interp` says the same for a page without the hook |
+
+1.4 (kit 0.8.5, Superfrog KIT-GAPS 38): without interpolation a 50 Hz game on a 60 Hz display repeats every sixth
+game frame. The camera's 0 step ends a stretch of motion, so its jitter stays low, but an object moving on the screen
+steps 1 1 1 1 1 0, which is jitter by the definition above. Such a mode cannot meet the jitter limit and is not meant
+to: the jitter and the missing passes are reported and not judged; dropped frames, the key latency and the sound
+are. The canon's limits are for the interpolated mode.
 
 Alien Breed II's baseline (kit 0.8.1, level 1, enhanced 522 x 357, headless 60 Hz, engine in a thread / coroutine,
 Chromium / WebKit): 0 dropped frames and 0 % missing passes in all four; jitter 0.0001-0.0002 px (max 0.25);

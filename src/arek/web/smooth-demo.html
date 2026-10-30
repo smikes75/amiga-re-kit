@@ -32,6 +32,7 @@
 const W = 320, H = 256, O = WBOBRAZ;
 const screen = document.getElementById('screen'), stage = document.getElementById('stage');
 const GL = new URLSearchParams(location.search).get('gl');
+const INTERP = new URLSearchParams(location.search).get('interp') !== '0';      // ?interp=0: the game's frames as they are (an original mode)
 const pr = new O.Presenter(screen, { gl: GL === '0' ? 'off' : GL === '1' ? 'on' : 'auto' });
 const pixels = new Uint8ClampedArray(W * H * 4);
 let S = 2, keys = 0, frames = [], done = 0, drawn = 0, shown = { cam: [0, 0], objs: [] };
@@ -101,7 +102,7 @@ function frame(ts) {
   if (frames.length) {
     const { tv, tvO } = takt.view(ts);                                         // the picture behind the game
     const p = takt.pair(frames, tv), q = takt.pair(frames, tvO);
-    const lerp = (x, y, f) => x + (y - x) * f;
+    const lerp = INTERP ? (x, y, f) => x + (y - x) * f : (x) => x;
     const cb = p.b || p.a, ob = q.b || q.a;
     shown = { cam: [lerp(p.a.cam[0], cb.cam[0], p.f), 0], objs: q.a.objs.map((o, i) => [o[0], lerp(o[1], ob.objs[i][1], q.f), lerp(o[2], ob.objs[i][2], q.f)]) };
     draw(shown.cam, shown.objs);
@@ -113,8 +114,9 @@ addEventListener('resize', layout);
 layout();
 requestAnimationFrame(frame);
 globalThis.WBLONGRUN = {
-  version: '1.1',
+  version: '1.4',
   ready: () => drawn > 2,
+  interp: () => INTERP,                                                          // 1.4: false - jitter and missing passes are not judged
   cam: () => shown.cam.slice(),
   objs: () => shown.objs.map((o) => o.slice()),
   missing: () => takt.missing,
