@@ -87,28 +87,35 @@ def serve(site, port=8930, conf=None, host='127.0.0.1', isolated=False):
     return srv
 
 
+STRIP_OPEN = re.compile(r'(?://@(\w+)\{|<!--@(\w+)\{-->)$')
+STRIP_CLOSE = re.compile(r'(?://@\}(\w+)|<!--@\}(\w+)-->)$')
+STRIP_LINE = re.compile(r'\s*(?://@(\w+)|<!--@(\w+)-->)$')
+
+
 def strip(text, drop=('FULL',)):
     """One variant of a page's source: a line ending in ``//@TAG`` and a block between ``//@TAG{`` and ``//@}TAG``
-    lines belong to variant TAG; the variants in ``drop`` are cut out, the markers of the others vanish
-    (``arek web strip IN OUT --drop FULL``: the presentation without the full game's lines)."""
+    lines belong to variant TAG; the variants in ``drop`` are cut out at once, the markers of the others vanish
+    (``arek web strip IN OUT --drop FULL --drop DEV``: the presentation without the full game's and the debug lines;
+    the markers are gone after one pass, so every variant to drop goes into that one pass - Alien Breed II G51).
+    0.8.6: HTML too - ``<!--@TAG-->`` at a line's end, ``<!--@TAG{-->`` ... ``<!--@}TAG-->`` blocks."""
     out, skip = [], None
     for line in text.split('\n'):
         t = line.strip()
-        m = re.match(r'//@(\w+)\{$', t)
+        m = STRIP_OPEN.match(t)
         if m and skip is None:
-            if m.group(1) in drop:
-                skip = m.group(1)
+            if (m.group(1) or m.group(2)) in drop:
+                skip = m.group(1) or m.group(2)
             continue
-        m = re.match(r'//@\}(\w+)$', t)
+        m = STRIP_CLOSE.match(t)
         if m:
-            if skip == m.group(1):
+            if skip == (m.group(1) or m.group(2)):
                 skip = None
             continue
         if skip is not None:
             continue
-        m = re.search(r'\s*//@(\w+)$', line.rstrip())
+        m = STRIP_LINE.search(line.rstrip())
         if m:
-            if m.group(1) in drop:
+            if (m.group(1) or m.group(2)) in drop:
                 continue
             line = line.rstrip()[:m.start()]
         out.append(line)

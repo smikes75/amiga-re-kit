@@ -15,7 +15,7 @@ measured against the original per instruction, with the kit's models behind it:
 | `arek_host_disk.h` | the game's disk reads from images given at run time (`AHD_EXTERN`, below) |
 | `arek_host_engine.c` | the engine of a web page: Emscripten ASYNCIFY, frames on demand, picture / sound / inputs / disks through its API; natively the check line (below) |
 | `arek_host_engine_check.js` | the wasm engine in Node, printing the check line of the native build |
-| `arek_audio.h` | the four channels' bytes as 48 kHz stereo int16 (left 0 + 3, right 1 + 2) |
+| `arek_audio.h` | the four channels' bytes as 48 kHz stereo int16 (left 0 + 3, right 1 + 2); 0.8.6: `ARA_GAIN[ch][side]`, `ara_gain(ch, l, r)` at once or `ara_gain_to(ch, l, r)` ramped across the next `ara_until()` - an effect fading a channel or moving it across the stereo picture (Alien Breed II G52); the default matrix keeps the old integer mix bit for bit |
 | `arek_host_trace.c` | the driver: the game from a state of the original with inputs per frame, records in the trace format, `--pclog`, `--own`, `--reglog`, `--audlog`, `--shots` |
 | `arek_display_render.c` | one frame from a RAM image with the C renderer (the tests and the self-test) |
 

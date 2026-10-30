@@ -1183,7 +1183,8 @@ def build_parser():
                    '(the file itself is arek/web/demo.html in the installed package); test: URL of a page with window.wbObrazTest; '
                    'seal: the first file; check: a presentation bundle folder; strip: the source file; longrun / smooth: the URL of a page with globalThis.WBLONGRUN')
     s.add_argument('rest', nargs='*', help='seal: more files; strip: the output file')
-    s.add_argument('--drop', action='append', metavar='TAG', help='strip: the variant to cut out (lines //@TAG, blocks //@TAG{ ... //@}TAG); default FULL')
+    s.add_argument('--drop', action='append', metavar='TAG', help='strip: a variant to cut out (lines //@TAG or <!--@TAG-->, blocks //@TAG{ ... //@}TAG or '
+                   '<!--@TAG{--> ... <!--@}TAG-->); repeat for every variant to drop, in one pass (the markers vanish); default FULL')
     s.add_argument('--isolated', action='store_true', help='serve: send the COOP / COEP headers (cross-origin isolation)')
     s.add_argument('--minutes', type=float, default=3.0, help='longrun: how long to play (default 3)')
     s.add_argument('--interval', type=float, default=30.0, help='longrun: seconds between samples (default 30)')

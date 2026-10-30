@@ -37,6 +37,46 @@ def test_strip_keeps_one_variant(tmp_path):
     assert cli.main(['web', 'strip', str(src), str(out), '--drop', 'LEVEL1']) == 0 and out.read_text() == full
 
 
+SRC2 = """a //@A
+b //@B
+c
+//@A{
+aa
+//@}A
+//@B{
+bb
+//@}B
+"""
+HTML = """<p>always</p>
+<p>dev only</p> <!--@DEV-->
+<!--@DEV{-->
+<div id="debug">x</div>
+<!--@}DEV-->
+<!--@FULL{-->
+<p>full</p>
+<!--@}FULL-->
+<p>end</p> <!--@FULL-->
+"""
+
+
+def test_strip_drops_several_variants_in_one_pass(tmp_path):
+    """Alien Breed II G51: after one pass the markers are gone, so two passes cannot drop A and then B; one pass
+    with both does, and the CLI's --drop repeats."""
+    assert web.strip(SRC2, ('A',)) == "b\nc\nbb\n"
+    assert web.strip(web.strip(SRC2, ('A',)), ('B',)) == "b\nc\nbb\n"        # the second pass finds no markers
+    assert web.strip(SRC2, ('A', 'B')) == "c\n"
+    src, out = tmp_path / 'p.js', tmp_path / 'o.js'
+    src.write_text(SRC2)
+    assert cli.main(['web', 'strip', str(src), str(out), '--drop', 'A', '--drop', 'B']) == 0 and out.read_text() == "c\n"
+
+
+def test_strip_html_markers():
+    """0.8.6: the same markers as HTML comments, for a page's index.html."""
+    assert web.strip(HTML, ('DEV',)) == "<p>always</p>\n<p>full</p>\n<p>end</p>\n"
+    assert web.strip(HTML, ('DEV', 'FULL')) == "<p>always</p>\n"
+    assert web.strip(HTML, ()) == "<p>always</p>\n<p>dev only</p>\n<div id=\"debug\">x</div>\n<p>full</p>\n<p>end</p>\n"
+
+
 def _get(port, path):
     c = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
     c.request('GET', path)
