@@ -138,7 +138,8 @@
 
   <div class="hero">
     <h1>About AREK</h1>
-    <p class="lede"><strong>AREK</strong> (Amiga Reverse Engineering Kit) is a free, open-source toolkit I build so that an AI coding agent can take a 1990s Amiga game apart and rebuild it as a modern program for the browser. No emulator runs on the page: the game's own code is translated ahead of time and runs natively, so it plays exactly like the original, moves smoothly on today's screens and can show more of the level than the old window did.</p>
+    <p class="lede">I grew up with the Amiga and still have the real machines on the desk: an A500, an A600 and an A1200. Emulators on a modern monitor never gave me the feeling of the original; the motion was never quite smooth. So I built my own way back to the games.</p>
+    <p><strong>AREK</strong> (Amiga Reverse Engineering Kit) is a free, open-source toolkit I build so that an AI coding agent can take a 1990s Amiga game apart and rebuild it as a modern program for the browser. No emulator runs on the page: the game's own code is translated ahead of time and runs natively, so it plays exactly like the original, moves smoothly on today's screens and can show more of the level than the old window did.</p>
     <p>Why not just use an emulator? An emulator pretends to be an Amiga and runs the old program as it is. That works, but the game moves its world 50 times a second while your screen refreshes 60, 120 or more times, so the picture jumps unevenly. A rebuilt game knows where everything is between two steps and draws a fresh picture for every refresh of your screen.</p>
   </div>
 
@@ -157,6 +158,7 @@
     <h2>An experiment in what AI can do</h2>
     <p>AREK started as a test I set up: how far can an AI coding agent get with an old game, given only the disk, an emulator and the rule that every claim must be measured? Further than I expected. The tools the agents built along the way, the ones that worked on more than one game, became AREK.</p>
     <p>Alien Breed II is the first game rebuilt with the finished kit from day one. Its first level ran in the browser about five hours after the agent first saw the disks; the rest of the work went into checking it against the original and into the wider, smoother view.</p>
+    <p>The AI generates nothing here. It does reverse engineering under one rule: every step is checked byte for byte against the game running in an emulator, and whatever does not match is not done.</p>
   </section>
 
   <section id="dev">
