@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AREK: Amiga reverse engineering kit</title>
-<meta name="description" content="AREK is a Python toolkit for reverse engineering Amiga games: disk images, packers, a strict 68000 decoder and recompiler, a headless emulator for measurements and an MCP server for AI agents. It came out of rebuilding games with AI; three first levels are playable with your own disk.">
+<title>AREK: old Amiga games, rebuilt for the browser</title>
+<meta name="description" content="AREK is a free toolkit that lets an AI take an old Amiga game apart and rebuild it to run natively in the browser: faithful to the original, smooth on today's screens, with a wider view. First game: Alien Breed II, two levels playable with your own disks.">
 <link rel="alternate" hreflang="en" href="index.html">
 <link rel="alternate" hreflang="cs" href="index.cs.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -58,16 +58,6 @@
   .hero .lede { font-size: 1.15rem; margin-top: 1em; }
   .hero .btn { margin: 0 8px 8px 0; }
 
-  /* the demo: the one loud thing on the page */
-  .wide { padding: 8px 0 40px; }
-  .demo { padding: 16px 0 56px; }
-  .lane { margin-top: 22px; }
-  .lane .bar { display: flex; justify-content: space-between; align-items: baseline; gap: 6px 16px; flex-wrap: wrap; margin-bottom: 8px; }
-  .lane .bar strong { font-weight: 600; }
-  .lane .bar span { color: var(--muted); font-size: .95rem; }
-  .screen { background: var(--black); line-height: 0; border: 2px solid var(--black); display: inline-block; max-width: 100%; }
-  .screen canvas { display: block; image-rendering: pixelated; max-width: 100%; height: auto; }
-  .controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-top: 22px; }
   .btn {
     background: var(--orange); color: var(--black); border: 0; padding: 9px 16px; font: inherit;
     font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block;
@@ -76,11 +66,8 @@
   .btn.quiet { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px var(--muted); }
   .btn.quiet:hover { box-shadow: inset 0 0 0 2px var(--orange); color: var(--ink); }
   .btn.quiet[aria-pressed=true], .btn.quiet[aria-pressed=true]:hover { background: var(--ink); color: var(--blue); box-shadow: none; }
-  .hz { color: var(--muted); font-size: .95rem; }
-  .hz b { color: var(--ink); font-weight: 600; }
 
   section { padding: 48px 0; border-top: 2px solid var(--line); }
-  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; align-items: start; }
 
   .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; max-width: 72ch; }
   .steps li { counter-increment: s; display: grid; grid-template-columns: 2.4em 1fr; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
@@ -88,57 +75,32 @@
   .steps li strong { display: block; font-weight: 600; }
   .steps li p { margin: .2em 0 0; color: var(--muted); }
 
-  /* the games: screenshots of the rebuilds, shown pixel for pixel where the column is wide enough */
-  .games { list-style: none; padding: 0; margin: 8px 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 40px; }
-  .games li { padding: 22px 0 26px; border-top: 1px solid var(--line); }
-  .games .meta { color: var(--muted); font-size: .95rem; margin: 0 0 .7em; }
-  .games .state { font-size: .95rem; margin: 0 0 .8em; max-width: none; }
-  .games .state::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 8px; background: var(--sand); vertical-align: 0; }
-  .games .state.soon::before { background: transparent; box-shadow: inset 0 0 0 2px var(--sand); }
-  .games .disk { color: var(--muted); font-size: .9rem; margin: .8em 0 0; max-width: none; }
   .shot { margin: 0 0 14px; line-height: 0; }
   .shot img { display: block; max-width: 100%; height: auto; background: var(--black); border: 2px solid var(--black); image-rendering: pixelated; }
   .shot figcaption { line-height: 1.4; color: var(--muted); font-size: .85rem; margin-top: 6px; }
 
-  /* the gallery: the original window opens into the wider view, one game at a time */
-  .gallery { margin-top: 18px; }
-  .gallery .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-  .gallery .tabs button { background: transparent; color: var(--ink); border: 0; box-shadow: inset 0 0 0 2px var(--line); padding: 7px 14px; font: inherit; font-weight: 600; cursor: pointer; }
-  .gallery .tabs button[aria-selected=true] { background: var(--ink); color: var(--blue); box-shadow: none; }
-  .stage { position: relative; background: var(--black); border: 2px solid var(--black); overflow: hidden; max-width: 100%; }
-  .stage img { position: absolute; display: block; image-rendering: pixelated; }
-  .stage .enh { left: 0; top: 0; width: 100%; height: 100%; opacity: 0; transition: clip-path .9s ease-in-out, opacity .9s ease-in-out; }
-  .stage .orig { transition: opacity .9s ease-in-out .2s; }
-  .stage.wide .enh { opacity: 1; clip-path: inset(0) !important; }
-  .stage.wide .orig { opacity: 0; transition-delay: 0s; }
-  .stage.snap img { transition: none; }
-  .gallery .tag { font-family: var(--mono); font-weight: 600; color: var(--sand); margin-right: .4em; }
-  .gallery .bar { display: flex; justify-content: space-between; gap: 10px 16px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
-  .gallery .cap { margin: 0; color: var(--muted); font-size: .95rem; max-width: 60ch; }
-  .gallery .modes { display: flex; gap: 8px; flex-wrap: wrap; }
-  .gallery .modes .btn { padding: 7px 12px; font-size: .95rem; }
-  @media (prefers-reduced-motion: reduce) { .stage img { transition: none; } }
-  @media (max-width: 500px) { .stage img { image-rendering: auto; } }
-
-  .ways { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 40px; margin-top: 30px; }
-  .ways > div { border-top: 1px solid var(--line); padding-top: 16px; }
-  .ways h3 span { color: var(--orange); font-family: var(--mono); font-weight: 600; margin-right: .5em; }
-  .ways p { color: var(--muted); }
-  .ways p b { color: var(--ink); font-weight: 600; }
 
   .facts { list-style: none; padding: 0; margin: 0 0 1.2em; display: flex; flex-wrap: wrap; gap: 6px 22px; color: var(--muted); font-size: .95rem; }
   .facts b { color: var(--ink); font-weight: 600; font-family: var(--mono); }
 
-  .support { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px 48px; align-items: center; }
-  .support .qr { display: block; line-height: 0; background: var(--ink); padding: 8px; }
-  .support .qr img { display: block; width: 164px; height: 164px; }
-  @media (max-width: 600px) { .support { grid-template-columns: 1fr; } }
+  /* the videos: the rebuild running, recorded from a browser */
+  .videos { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 28px 32px; margin-top: 18px; align-items: start; }   /* the wider view gets the larger frame */
+  .video { margin: 0; }
+  .video video { display: block; width: 100%; height: auto; background: var(--black); border: 2px solid var(--black); }
+  .video figcaption { color: var(--muted); font-size: .95rem; margin-top: 8px; max-width: 60ch; }
+  .game { display: grid; grid-template-columns: minmax(0, 448px) minmax(0, 1fr); gap: 24px 40px; align-items: start; margin-top: 12px; }
+  .game .meta { color: var(--muted); margin: 0 0 .8em; }
+  .pair { display: grid; grid-template-columns: minmax(0, 840fr) minmax(0, 1080fr); gap: 24px; align-items: end; margin-top: 18px; }
+  .pair .shot img { image-rendering: auto; width: 100%; }
+  .game ul { margin: 0 0 1.2em; padding-left: 1.2em; max-width: 60ch; }
+  .game li { margin-bottom: .4em; }
   .note { color: var(--muted); font-size: .95rem; }
   footer { padding: 40px 0 60px; border-top: 2px solid var(--line); color: var(--muted); font-size: .92rem; }
   footer p { max-width: 80ch; }
 
   @media (max-width: 860px) {
-    .two, .games, .ways { grid-template-columns: 1fr; gap: 0 28px; }
+    .videos, .game, .pair { grid-template-columns: 1fr; gap: 0 28px; }
+    .videos { gap: 28px; }
     header.top nav a { margin: 0 14px 0 0; }
     body { font-size: 16px; }
   }
@@ -164,8 +126,9 @@
   <header class="top">
     <a class="name" href="./" aria-label="AREK"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 37 8" width="148" height="32" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><path fill="#ff8a1f" d="M0 0h7v1h-7zM0 1h2v1h-2zM3 1h5v1h-5zM0 2h2v1h-2zM3 2h5v1h-5zM0 3h8v1h-8zM0 4h8v1h-8zM0 5h1v1h-1zM7 5h1v1h-1zM0 6h1v1h-1zM7 6h1v1h-1zM0 7h8v1h-8z"/><path fill="#ffd27a" d="M1 5h6v1h-6zM1 6h6v1h-6z"/><path fill="#ffffff" d="M11 1h4v1h-4zM10 2h1v1h-1zM15 2h1v1h-1zM10 3h1v1h-1zM15 3h1v1h-1zM10 4h6v1h-6zM10 5h1v1h-1zM15 5h1v1h-1zM10 6h1v1h-1zM15 6h1v1h-1zM10 7h1v1h-1zM15 7h1v1h-1zM17 1h5v1h-5zM17 2h1v1h-1zM22 2h1v1h-1zM17 3h1v1h-1zM22 3h1v1h-1zM17 4h5v1h-5zM17 5h1v1h-1zM20 5h1v1h-1zM17 6h1v1h-1zM21 6h1v1h-1zM17 7h1v1h-1zM22 7h1v1h-1zM24 1h6v1h-6zM24 2h1v1h-1zM24 3h1v1h-1zM24 4h5v1h-5zM24 5h1v1h-1zM24 6h1v1h-1zM24 7h6v1h-6zM31 1h1v1h-1zM36 1h1v1h-1zM31 2h1v1h-1zM35 2h1v1h-1zM31 3h1v1h-1zM34 3h1v1h-1zM31 4h3v1h-3zM31 5h1v1h-1zM34 5h1v1h-1zM31 6h1v1h-1zM35 6h1v1h-1zM31 7h1v1h-1zM36 7h1v1h-1z"/></svg></a>
     <nav>
+      <a href="#watch">Watch</a>
       <a href="#play">Play</a>
-      <a href="#how">How it works</a>
+      <a href="about.html">About</a>
       <a href="kit.html">The kit</a>
       <a href="https://github.com/smikes75/amiga-re-kit">GitHub</a>
       <a href="index.cs.html" lang="cs" hreflang="cs">Česky</a>
@@ -173,326 +136,58 @@
   </header>
 
   <div class="hero">
-    <div>
-      <h1>Thirty years ago I hacked lives into Amiga games. Now AI and I rebuild whole games.</h1>
-      <p class="lede"><strong>AREK</strong>, the Amiga Reverse Engineering Kit, is a Python toolkit for taking Amiga games apart: disk image readers, unpackers for the packers of the time, a strict 68000 decoder and a recompiler to C, a headless emulator as the measuring instrument (screenshots, memory captures, traces) and an <a href="kit.html#mcp">MCP server</a> through which Claude Code or any other agent uses all of it.</p>
-      <p>It grew out of rebuilding games with AI: take a game apart from the floppy to the last routine and build it again for the browser, faithful to the original, smooth on today's screens, with a wider view. Three first levels are <a href="#play">playable</a> with your own disk.</p>
-      <ul class="facts">
-        <li>version <b>0.7.0</b></li>
-        <li><b>32</b> modules</li>
-        <li><b>27</b> commands</li>
-        <li><b>26</b> MCP tools</li>
-        <li><b>2376</b> tests</li>
-      </ul>
-      <p><a class="btn" href="kit.html">The kit and the MCP server</a> <a class="btn quiet" href="https://github.com/smikes75/amiga-re-kit">Source on GitHub</a></p>
-    </div>
+    <h1>Old Amiga games, rebuilt to run in your browser.</h1>
+    <p class="lede"><strong>AREK</strong> (Amiga Reverse Engineering Kit) is a free toolkit that lets an AI take a 1990s Amiga game apart, piece by piece, and build it again as a modern program. The rebuilt game plays exactly like the original, moves smoothly on today's screens and can show more of the level than the old window did.</p>
+    <p>The first game is <strong>Alien Breed II</strong>. Its first two levels are playable here with your own copy of the game. <strong>Superfrog</strong> is next.</p>
+    <p><a class="btn" href="#watch">Watch it run</a> <a class="btn quiet" href="#play">Play Alien Breed II</a></p>
   </div>
 
-  <div class="wide" aria-labelledby="wide-title">
-    <h2 id="wide-title">What the wider view means</h2>
-    <p>The same moment in a rebuild, twice. First the original window, exactly as the game drew it; then the window widens and the game draws more of its own map around it. Nothing is invented, the level was always that wide.</p>
-    <div class="gallery" id="gallery">
-      <div class="tabs" role="tablist" aria-label="Game">
-        <button type="button" role="tab" aria-selected="true">Turrican II</button>
-        <button type="button" role="tab" aria-selected="false">Alien Breed</button>
-        <button type="button" role="tab" aria-selected="false">Superfrog</button>
-      </div>
-      <div class="stage"><img class="enh" alt=""><img class="orig" alt=""></div>
-      <div class="bar">
-        <p class="cap"><span class="tag"></span> <span class="text"></span></p>
-        <div class="modes" role="group" aria-label="View">
-          <button type="button" class="btn quiet" data-mode="orig" aria-pressed="false">Original</button>
-          <button type="button" class="btn quiet" data-mode="enh" aria-pressed="false">Enhanced</button>
-          <button type="button" class="btn quiet" data-mode="auto" aria-pressed="true">Auto</button>
-        </div>
-      </div>
+  <section id="watch">
+    <h2>See it run</h2>
+    <p>Recorded in an ordinary web browser. No emulator, no Amiga: the game's own code, translated and running as part of the page.</p>
+    <div class="videos">
+      <figure class="video">
+        <video controls preload="metadata" playsinline poster="video/arek-1.jpg"><source src="video/arek-1.mp4" type="video/mp4"></video>
+        <figcaption>Alien Breed II, level 1, in the original window: the picture exactly as the game drew it in 1993, here with the old-monitor look switched on.</figcaption>
+      </figure>
+      <figure class="video">
+        <video controls preload="metadata" playsinline poster="video/arek-2.jpg"><source src="video/arek-2.mp4" type="video/mp4"></video>
+        <figcaption>The same level in the wider view: more of the map around the player, and motion that stays smooth on a modern screen.</figcaption>
+      </figure>
     </div>
-    <script id="gallery-items" type="application/json">[{"caption": "Turrican II, world 1-1: the spread gun against the flyers. Original 304 × 216, enhanced 448 × 280, the same game tick.", "orig": {"src": "img/turrican2-original.png", "w": 304, "h": 216, "alt": "Turrican II in the rebuild, original mode: the 304-pixel window with its status bar"}, "enh": {"src": "img/turrican2-enhanced.png", "w": 448, "h": 280, "alt": "Turrican II in the rebuild, enhanced mode: the same tick 448 pixels wide"}}, {"caption": "Alien Breed Special Edition 92, level 1. Original 293 × 256, enhanced 448 × 274, the same moment: aliens show up left of where the original window ended.", "orig": {"src": "img/alienbreed-original.png", "w": 293, "h": 256, "alt": "Alien Breed in the rebuild, original mode: the game's own window and HUD"}, "enh": {"src": "img/alienbreed-enhanced.png", "w": 448, "h": 274, "alt": "Alien Breed in the rebuild, enhanced mode: the same moment 448 pixels wide"}}, {"caption": "Superfrog, Magic Woods: the frog, coins, cherries and a blue enemy. Original 336 × 262, enhanced 448 × 294, the same game frame.", "orig": {"src": "img/superfrog-original.png", "w": 336, "h": 262, "alt": "Superfrog in the rebuild, original mode: the 336-pixel window with its status bar"}, "enh": {"src": "img/superfrog-enhanced.png", "w": 448, "h": 294, "alt": "Superfrog in the rebuild, enhanced mode: the same frame 448 pixels wide"}}]</script>
-  </div>
-
-  <div class="demo" aria-labelledby="demo-title">
-    <h2 id="demo-title">Why not just emulate?</h2>
-    <p>An Amiga game moves its world 50 times a second. Your monitor refreshes 60, 120 or 144 times. An emulator can only repeat the last picture until the next one arrives, so motion stutters. A rebuilt game knows where everything is between two steps and draws every frame your screen shows. The scene below is drawn by this page, not taken from a game.</p>
-
-    <div class="lane">
-      <div class="bar"><strong>Emulated</strong><span>the picture changes 50 times a second</span></div>
-      <div class="screen"><canvas id="lane-emu" aria-label="Scrolling scene updated 50 times a second"></canvas></div>
-    </div>
-    <div class="lane">
-      <div class="bar"><strong>Rebuilt</strong><span id="rebuilt-note">a new position for every frame of your screen</span></div>
-      <div class="screen"><canvas id="lane-native" aria-label="The same scene positioned for every display frame"></canvas></div>
-    </div>
-    <div class="controls">
-      <button class="btn" id="play-toggle" type="button">Pause</button>
-      <button class="btn quiet" id="wide-toggle" type="button" aria-pressed="false">Show the wider view</button>
-      <span class="hz" id="hz">Measuring your display…</span>
-    </div>
-  </div>
+  </section>
 
   <section id="play">
-    <h2>Play the first level</h2>
-    <p>Three games have a playable first level on <a href="https://smikes75.github.io/arek-play/">arek-play</a>, each ending with a page about how it was made. The pages hold no game data: you load your own disk image (.adf), it is checked against a known release and never leaves your browser. The code derived from a game is sealed on the page and opens only with that disk. The pictures below are taken from the rebuilds, not from an emulator.</p>
-    <ul class="games">
-      <li>
-        <h3>Turrican II: The Final Fight</h3>
-        <p class="meta">1991, Factor 5 / Rainbow Arts</p>
-        <figure class="shot"><img src="img/turrican2-islands.png" width="448" height="280" alt="Turrican II, world 1-1 in the rebuild: the floating islands under the sky gradient, the wider 448-pixel view"><figcaption>World 1-1, the floating islands in the wider view: 448 pixels across instead of 304.</figcaption></figure>
-        <p class="state">Rebuilt from start to finish: five worlds, the bosses, the intro and the ending</p>
-        <p><a class="btn" href="https://smikes75.github.io/arek-play/turrican2/">Play level 1</a></p>
-        <p class="disk">Needs disk 1. Verified so far with one re-release of the disk; an original retail disk has not been checked yet.</p>
-      </li>
-      <li>
-        <h3>Superfrog</h3>
-        <p class="meta">1993, Team17</p>
-        <figure class="shot"><img src="img/superfrog-enhanced.png" width="448" height="294" alt="Superfrog, Magic Woods in the rebuild: the frog on a grassy ledge with coins above, the wider 448-pixel view"><figcaption>Magic Woods, the wider view: 448 pixels across instead of 336.</figcaption></figure>
-        <p class="state">Title, intro and the first level, built in two days</p>
-        <p><a class="btn" href="https://smikes75.github.io/arek-play/superfrog/">Play level 1</a></p>
-        <p class="disk">Needs disk 1.</p>
-      </li>
-      <li>
-        <h3>Alien Breed Special Edition 92</h3>
-        <p class="meta">1992, Team17</p>
-        <figure class="shot"><img src="img/alienbreed-enhanced.png" width="448" height="274" alt="Alien Breed, level 1 in the rebuild: steel corridors seen from above, aliens beyond the original window on the left"><figcaption>Level 1, the wider view: aliens show up left of where the original window ended.</figcaption></figure>
-        <p class="state">First level; the 68000 code translated ahead of time, not rewritten by hand</p>
-        <p><a class="btn" href="https://smikes75.github.io/arek-play/alienbreed/">Play level 1</a></p>
-        <p class="disk">Needs disks 1 and 2.</p>
-      </li>
-    </ul>
-
-  </section>
-
-  <section id="how">
-    <h2>How a game gets rebuilt</h2>
-    <p>The rule is simple: the original is the only source of truth. Nothing is drawn from memory or guessed from a video; every step is measured against the real game running in an emulator.</p>
-    <ol class="steps">
-      <li><div><strong>Read the disk</strong><p>Map where the code, graphics and music sit on the floppy, and how the game loads them.</p></div></li>
-      <li><div><strong>Unpack it</strong><p>Games of the time compressed everything with their own packers. Each unpacker is rebuilt and checked byte for byte against the emulator's memory.</p></div></li>
-      <li><div><strong>Understand the code</strong><p>Translate the 68000 machine code into something readable, routine by routine, and separate game logic from the parts that drive the Amiga's custom chips.</p></div></li>
-      <li><div><strong>Prove each routine</strong><p>Run the rebuilt routine on a memory snapshot of the original and compare the result with the original's. Equal, or not done.</p></div></li>
-      <li><div><strong>Rebuild for today</strong><p>Make the game run in the browser, then compare screenshots with the original at known moments. Only then add what the original could not do: smooth motion and a wider view.</p></div></li>
-    </ol>
-
-    <h3 style="margin-top:34px">Two ways to the browser</h3>
-    <p>Neither is emulation. No Amiga is simulated, no Kickstart ROM is needed, and nothing runs an interpreter over the game's machine code: the rebuilt game runs as native browser code and asks the display for every frame.</p>
-    <div class="ways">
+    <h2>Play Alien Breed II</h2>
+    <div class="game">
+      <figure class="shot"><img src="img/alienbreed2-enhanced.png" width="448" height="293" alt="Alien Breed II in the rebuild: the landing zone of level 1 in the wider view"></figure>
       <div>
-        <h3><span>A</span>Rewrite</h3>
-        <p>The game is written again by hand, routine by routine, each one checked against the original's memory. <b>Turrican II</b> went this way. It gives the most freedom for enhancements and costs the most time.</p>
-      </div>
-      <div>
-        <h3><span>B</span>Translate</h3>
-        <p>The kit's recompiler translates the 68000 code to C ahead of time, compiled to WebAssembly, with the Amiga's custom chips modelled only as far as the game uses them. <b>Alien Breed</b> and <b>Superfrog</b> went this way: the first level ran within days, and only the routines the wider view and smooth motion touch are rewritten by hand.</p>
+        <p class="meta">Alien Breed II: The Horror Continues. Team17, 1993.</p>
+        <ul>
+          <li>The intro, the title and the first two levels: fight through the alien-infested base, collect keys and credits, buy weapons at the terminals and reach the exit.</li>
+          <li>Keyboard (arrows, Ctrl or Z to fire, M for the map, Space at a terminal) or a gamepad; one or two players.</li>
+          <li>E switches between the original picture and the wider, smoother view at any time.</li>
+        </ul>
+        <p>You need your own disk images of the Amiga 500 version (disks 1 and 2, as <code>.adf</code> files; the AGA version for the A1200 is not supported). The page checks them and they never leave your computer. The page itself holds no part of the game: its rebuilt code is locked and opens only with your disks.</p>
+        <p><a class="btn" href="https://smikes75.github.io/arek-play/alienbreed2/">Play the first two levels</a></p>
       </div>
     </div>
-    <p class="note" style="margin-top:20px">For a new game the second way comes first: translate everything, measure, then rewrite only what the enhancements need. Either way the result is lighter than an emulator; the Turrican II rewrite keeps 60 frames a second on a processor throttled six times.</p>
   </section>
 
-  <section id="lives">
-    <div class="two">
-      <div>
-        <h2>The byte that holds your lives</h2>
-        <p>The old trick still works, it just has better tools. Take a snapshot of the game's memory, lose a life, take another, and compare. The byte that went down by one is the one I used to poke thirty years ago. From there the tools follow every instruction that reads or writes it.</p>
-      </div>
-      <pre><code># stop in the frame routine, early and late
-$ arek bpstate --address 0x2a40 \
-    --pass 50 --end 30 --out before
-$ arek bpstate --address 0x2a40 \
-    --pass 400 --end 30 --out after
-$ arek diff before after
-1 differing run(s):
-  01f3a2-01f3a3 (1 B)  expected 03  got 02</code></pre>
-    </div>
-    <p class="note">The commands are real; the address and the result are made up. The second stop is placed after the moment the game loses a life.</p>
-  </section>
-
-  <section id="ai">
-    <h2>An experiment in what AI can do</h2>
-    <p>This started as a test. I gave different AI coding agents, Claude Code and OpenAI Codex, the same kind of task on different games: take it apart from the floppy up and rebuild it, with nothing but the disk, an emulator and the rule that every claim must be measured.</p>
-    <p>They got surprisingly far, and they also made mistakes worth learning from: decoders that misread an instruction, displays that looked fine on one monitor and shimmered on another. Each project built its own tools along the way. The ones that proved themselves on more than one game became <strong>AREK</strong>.</p>
-    <p>Then came the second test: does the kit make the next game easier? A fresh session on a smaller, faster model (Claude Sonnet) got Superfrog from the floppy, which it had never seen, to a first level playable on this site in two days, with the kit doing the reading, unpacking, translating and measuring. The gaps it ran into went back into the kit the same day.</p>
-  </section>
-
-
-  <section id="support">
-    <div class="support">
-      <div>
-        <h2>Like AREK? Support the project's next steps</h2>
-        <p>AREK is free and stays free. Every five euros goes into the next piece of it: more packers, a better recompiler, more tests, more games. The QR code opens Revolut.me with 5 € filled in; you can pay with Revolut, a card or Apple Pay.</p>
-        <p><a class="btn" href="https://revolut.me/stepan2vpo?amount=500&currency=EUR">Send 5 €</a></p>
-      </div>
-      <a class="qr" href="https://revolut.me/stepan2vpo?amount=500&currency=EUR" aria-label="Send 5 € through Revolut.me"><img src="img/support-qr.svg" width="164" height="164" alt="QR code: Revolut.me payment link, 5 €"></a>
+  <section id="next">
+    <h2>Working on next: Superfrog</h2>
+    <p>Superfrog (Team17, 1993). I am tuning its rebuild now; it is not playable here yet. Two pictures from it, with the old-monitor look switched on:</p>
+    <div class="pair">
+      <figure class="shot"><img src="img/superfrog-original.jpg" width="840" height="658" alt="Superfrog in the rebuild, original window: the frog on a grassy ledge with coins above" loading="lazy"><figcaption>The original window, as the game drew it.</figcaption></figure>
+      <figure class="shot"><img src="img/superfrog-wider.jpg" width="1080" height="719" alt="Superfrog in the rebuild, wider view: floating islands, coins, a hedgehog and a snail" loading="lazy"><figcaption>The wider view: more of the level in both directions.</figcaption></figure>
     </div>
   </section>
 
   <footer>
-    <p>AREK is MIT licensed and ships no disk images, no Kickstart ROM and no game data. It measures games through the <a href="https://github.com/dirkwhoffmann/vAmiga">vAmiga</a> emulator by Dirk W. Hoffmann; the kit carries its small patches to it (MPL-2.0), not the emulator itself.</p>
-    <p>The games belong to their publishers: Turrican II to Factor 5 and Rainbow Arts, Superfrog and Alien Breed to Team17. The playable pages hold none of their data; to play a level you supply a disk image of a game you own, and the code derived from a game is sealed and opens only with it.</p>
-    <p>Made with Claude Code and OpenAI Codex. <a href="https://github.com/smikes75/amiga-re-kit">Kit on GitHub</a>, <a href="https://pypi.org/project/amiga-re-kit/">package on PyPI</a>, <a href="https://github.com/smikes75/arek-play">the playable pages</a>.</p>
+    <p>AREK is free and open source (MIT) and ships no disk images, no Kickstart ROM and no game data. It measures games through the <a href="https://github.com/dirkwhoffmann/vAmiga">vAmiga</a> emulator by Dirk W. Hoffmann; the kit carries small patches to it (MPL-2.0), not the emulator itself.</p>
+    <p>Alien Breed II and Superfrog belong to Team17. The playable page holds none of the game's data: you supply disk images of a game you own, and the code derived from the game opens only with them.</p>
+    <p>Made with Claude Code and OpenAI Codex. <a href="about.html">About AREK</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit on GitHub</a>, <a href="https://pypi.org/project/amiga-re-kit/">package on PyPI</a>.</p>
   </footer>
 </div>
-
-<script>
-(function () {
-  'use strict';
-  // the gallery: the original window opens into the wider view of the same moment
-  var items = JSON.parse(document.getElementById('gallery-items').textContent);
-  var g = document.getElementById('gallery'), stage = g.querySelector('.stage'), enh = stage.querySelector('.enh'), orig = stage.querySelector('.orig'), tag = g.querySelector('.tag');
-  var cap = g.querySelector('.cap .text'), tabs = g.querySelectorAll('[role=tab]'), modes = g.querySelectorAll('[data-mode]');
-  var names = { orig: g.querySelector('[data-mode=orig]').textContent, enh: g.querySelector('[data-mode=enh]').textContent };
-  var cur = 0, mode = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'enh' : 'auto', timer = 0, wide = false, visible = true;
-
-  function layout() {
-    var it = items[cur], avail = g.clientWidth, S = avail >= it.enh.w * 2 ? 2 : (avail >= it.enh.w ? 1 : avail / it.enh.w);
-    var W = Math.round(it.enh.w * S), H = Math.round(it.enh.h * S), ow = Math.round(it.orig.w * S), oh = Math.round(it.orig.h * S);
-    var ox = Math.round((W - ow) / 2), oy = Math.round((H - oh) / 2);
-    stage.style.width = W + 'px'; stage.style.height = H + 'px';
-    orig.style.width = ow + 'px'; orig.style.height = oh + 'px'; orig.style.left = ox + 'px'; orig.style.top = oy + 'px';
-    enh.style.clipPath = 'inset(' + oy + 'px ' + (W - ox - ow) + 'px ' + (H - oy - oh) + 'px ' + ox + 'px)';
-  }
-  function setWide(w) { wide = w; stage.classList.toggle('wide', w); tag.textContent = w ? names.enh : names.orig; }
-  function tick() { if (visible) setWide(!wide); }
-  function apply() {
-    if (timer) { clearInterval(timer); timer = 0; }
-    if (mode === 'auto') { setWide(false); timer = setInterval(tick, 2800); } else setWide(mode === 'enh');
-    modes.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-mode') === mode)); });
-  }
-  function show(i) {
-    cur = i; var it = items[i];
-    enh.src = it.enh.src; enh.alt = it.enh.alt; orig.src = it.orig.src; orig.alt = it.orig.alt; cap.textContent = it.caption;
-    tabs.forEach(function (t, k) { t.setAttribute('aria-selected', String(k === i)); });
-    stage.classList.add('snap'); layout(); apply();
-    requestAnimationFrame(function () { requestAnimationFrame(function () { stage.classList.remove('snap'); }); });
-  }
-  tabs.forEach(function (t, k) { t.addEventListener('click', function () { show(k); }); });
-  modes.forEach(function (b) { b.addEventListener('click', function () { mode = b.getAttribute('data-mode'); apply(); }); });
-  window.addEventListener('resize', layout);
-  if ('IntersectionObserver' in window) new IntersectionObserver(function (e) { visible = e[0].isIntersecting; }).observe(g);
-  show(0);
-})();
-</script>
-
-<script>
-(function () {
-  'use strict';
-  // A small procedural scene in Amiga style, drawn at "game" resolution and
-  // shown at a whole number of device pixels per game pixel.
-  var VH = 80, VIEW = { narrow: 192, wide: 288 }, LOOP = 512, SPEED = 50; // game px per second = 1 px per 50 Hz tick
-  var SKY = ['#000044', '#001166', '#002288', '#1133aa', '#3344bb', '#6644bb', '#9944aa', '#cc5588', '#ee7766', '#ff9955', '#ffbb55', '#ffdd88'];
-
-  function strip(w, h, paint) { var c = document.createElement('canvas'); c.width = w; c.height = h; paint(c.getContext('2d')); return c; }
-  var sky = strip(1, VH, function (g) {
-    var band = Math.ceil(52 / SKY.length);
-    for (var i = 0; i < SKY.length; i++) { g.fillStyle = SKY[i]; g.fillRect(0, i * band, 1, band); }
-  });
-  var far = strip(LOOP, VH, function (g) {
-    g.fillStyle = '#2a1f5c';
-    for (var x = 0; x < LOOP; x++) {
-      var h = 30 + 9 * Math.sin(x * 2 * Math.PI / 256) + 5 * Math.sin(x * 2 * Math.PI / 64 + 1) + 2 * Math.sin(x * 2 * Math.PI / 32);
-      g.fillRect(x, Math.round(h), 1, VH);
-    }
-  });
-  var near = strip(LOOP, VH, function (g) {
-    var x, y;
-    for (x = 0; x < LOOP; x += 8) for (y = 64; y < VH; y += 4) {
-      g.fillStyle = ((x / 8 + y / 4) & 1) ? '#6b3b1f' : '#8a5229'; g.fillRect(x, y, 8, 4);
-    }
-    g.fillStyle = '#3ca23c'; g.fillRect(0, 62, LOOP, 2);
-    for (x = 24; x < LOOP; x += 64) {               // trees
-      g.fillStyle = '#5a3a1a'; g.fillRect(x + 6, 50, 3, 12);
-      g.fillStyle = '#1f7a2f'; g.fillRect(x, 38, 15, 13); g.fillStyle = '#2fa24a'; g.fillRect(x + 2, 40, 9, 6);
-    }
-    for (x = 56; x < LOOP; x += 128) {              // blocks
-      g.fillStyle = '#cccccc'; g.fillRect(x, 46, 16, 16); g.fillStyle = '#888888'; g.fillRect(x + 2, 48, 12, 12);
-      g.fillStyle = '#ffffff'; g.fillRect(x, 46, 16, 1);
-    }
-  });
-  var ship = strip(14, 7, function (g) {
-    var rows = ['......ww......', '...wwwwwww....', '.oowwbbwwwww..', 'ooowwwwwwwwwww', '.oowwbbwwwww..', '...wwwwwww....', '......ww......'];
-    var col = { w: '#ffffff', b: '#4d8ff0', o: '#ff8a1f' };
-    rows.forEach(function (r, y) { for (var x = 0; x < r.length; x++) if (col[r[x]]) { g.fillStyle = col[r[x]]; g.fillRect(x, y, 1, 1); } });
-  });
-
-  var lanes = [
-    { canvas: document.getElementById('lane-emu'), ticks: true },
-    { canvas: document.getElementById('lane-native'), ticks: false }
-  ];
-  var wide = false, playing = !matchMedia('(prefers-reduced-motion: reduce)').matches, t0 = performance.now(), paused = 0;
-
-  function layout() {
-    var dpr = window.devicePixelRatio || 1;
-    var avail = Math.min(lanes[0].canvas.parentNode.parentNode.clientWidth - 4, 720);
-    // the same window for both lanes: the wider view shows more world, not a bigger window
-    var Sn = Math.max(1, Math.floor(avail * dpr / VIEW.narrow));
-    lanes.forEach(function (l) {
-      // the wider view never gets a bigger window: fewer device pixels per game pixel instead
-      var w = wide && !l.ticks, vw = w ? VIEW.wide : VIEW.narrow, S = w ? Math.max(1, Math.floor(Sn * VIEW.narrow / VIEW.wide)) : Sn;
-      l.vw = vw; l.S = S;
-      l.canvas.width = vw * S; l.canvas.height = VH * S;
-      // a very small low-density screen cannot fit whole pixels: let the browser scale both lanes to one width
-      l.canvas.style.width = (Sn < 2 ? Math.min(avail, VIEW.narrow * 2) : vw * S / dpr) + 'px';
-      l.ctx = l.canvas.getContext('2d'); l.ctx.imageSmoothingEnabled = false;
-    });
-  }
-
-  function layer(g, img, pos, vw, S) {          // pos in game px, already snapped by the caller
-    var x = -(((pos % LOOP) + LOOP) % LOOP) * S;
-    for (; x < vw * S; x += LOOP * S) g.drawImage(img, 0, 0, LOOP, VH, x, 0, LOOP * S, VH * S);
-  }
-  function draw(now) {
-    var t = (playing ? now - t0 : paused) / 1000;
-    lanes.forEach(function (l) {
-      var g = l.ctx, S = l.S, pos;
-      if (l.ticks) pos = Math.floor(t * 50) * SPEED / 50;          // whole game pixels, 50 times a second
-      else pos = Math.round(t * SPEED * S) / S;                      // every frame, to the nearest device pixel
-      g.drawImage(sky, 0, 0, 1, VH, 0, 0, l.vw * S, VH * S);
-      layer(g, far, l.ticks ? Math.floor(pos / 2) : Math.round(pos / 2 * S) / S, l.vw, S);
-      layer(g, near, pos, l.vw, S);
-      var tb = l.ticks ? Math.floor(t * 50) / 50 : t, bob = Math.sin(tb * 2) * 3;
-      bob = l.ticks ? Math.round(bob) : Math.round(bob * S) / S;
-      g.drawImage(ship, 0, 0, 14, 7, 40 * S, (24 + bob) * S, 14 * S, 7 * S);
-    });
-  }
-
-  // measure the display: median time between animation frames
-  var deltas = [], last = 0, hzEl = document.getElementById('hz');
-  function measure(now) {
-    if (last) deltas.push(now - last);
-    last = now;
-    if (deltas.length === 90) {
-      var d = deltas.slice().sort(function (a, b) { return a - b; })[45], hz = Math.round(1000 / d);
-      hzEl.innerHTML = 'Your display: <b>' + hz + ' Hz</b>. The emulated lane shows each picture for ' +
-        (hz % 50 === 0 ? hz / 50 + ' frames' : 'an uneven ' + Math.floor(hz / 50) + ' or ' + Math.ceil(hz / 50) + ' frames') + '.';
-    }
-  }
-
-  var visible = true;
-  function frame(now) {
-    if (deltas.length < 90) measure(now);
-    if (visible) draw(now);
-    requestAnimationFrame(frame);
-  }
-
-  var playBtn = document.getElementById('play-toggle');
-  function setPlaying(p) {
-    var now = performance.now();
-    if (p && !playing) t0 = now - paused;
-    if (!p && playing) paused = now - t0;
-    playing = p; playBtn.textContent = p ? 'Pause' : 'Play';
-  }
-  playBtn.addEventListener('click', function () { setPlaying(!playing); });
-  if (!playing) { playing = true; setPlaying(false); }
-  var wideBtn = document.getElementById('wide-toggle');
-  wideBtn.addEventListener('click', function () {
-    wide = !wide; wideBtn.setAttribute('aria-pressed', String(wide));
-    document.getElementById('rebuilt-note').textContent = wide ? 'every frame of your screen, and half as much world again' : 'a new position for every frame of your screen';
-    layout();
-  });
-  if ('IntersectionObserver' in window) new IntersectionObserver(function (e) { visible = e[0].isIntersecting; }).observe(document.querySelector('.demo'));
-  window.addEventListener('resize', layout);
-  matchMedia('(resolution: ' + (window.devicePixelRatio || 1) + 'dppx)').addEventListener('change', layout);
-  layout();
-  requestAnimationFrame(frame);
-})();
-</script>
 </body>
 </html>

@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>O AREKu</title>
+<meta name="description" content="Co je AREK, jak se hra přestavuje, pokus, který za tím stojí, a kam napsat.">
+<link rel="alternate" hreflang="cs" href="about.cs.html">
+<link rel="alternate" hreflang="en" href="about.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --blue: #0a3a8c;        /* Workbench 1.3 blue, a shade deeper */
+    --blue-2: #10479f;
+    --line: #2d63c4;
+    --ink: #ffffff;
+    --muted: #b9c8ea;
+    --orange: #ff8a1f;      /* Workbench orange */
+    --sand: #ffd27a;
+    --black: #000000;
+    --sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--blue); }
+  body {
+    margin: 0; color: var(--ink); background: var(--blue);
+    font-family: var(--sans); font-size: 17px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); text-decoration-color: var(--orange); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+  a:hover { color: var(--sand); }
+  a:focus-visible, button:focus-visible { outline: 3px solid var(--orange); outline-offset: 3px; }
+  code, pre { font-family: var(--mono); }
+  code { font-size: .9em; background: rgba(0,0,0,.35); padding: .05em .35em; border-radius: 3px; }
+  pre {
+    background: var(--black); color: var(--ink); padding: 18px 20px; margin: 0;
+    font-size: 14px; line-height: 1.5; overflow-x: auto; border-left: 6px solid var(--orange);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.01em; line-height: 1.15; margin: 0; }
+  h1 { font-size: clamp(2rem, 4.6vw, 3.4rem); max-width: 20ch; }
+  h2 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin-bottom: .6em; }
+  h3 { font-size: 1.15rem; margin: 0 0 .3em; }
+  p { margin: 0 0 1em; max-width: 64ch; }
+  .wrap { width: min(1120px, 100% - 32px); margin: 0 auto; }
+
+  header.top {
+    position: sticky; top: 0; z-index: 10; background: var(--blue);
+    display: flex; justify-content: space-between; align-items: baseline; gap: 24px; flex-wrap: wrap;
+    padding: 22px 0; border-bottom: 2px solid var(--line);
+  }
+  header.top .name { font-weight: 600; font-size: 1.05rem; text-decoration: none; }
+  header.top nav a { margin-left: 22px; font-size: .95rem; }
+
+  .hero { padding: 48px 0 20px; }
+  .hero .lede { font-size: 1.15rem; margin-top: 1em; }
+  .hero .btn { margin: 0 8px 8px 0; }
+
+  .btn {
+    background: var(--orange); color: var(--black); border: 0; padding: 9px 16px; font: inherit;
+    font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block;
+  }
+  .btn:hover { background: var(--sand); color: var(--black); }
+  .btn.quiet { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px var(--muted); }
+  .btn.quiet:hover { box-shadow: inset 0 0 0 2px var(--orange); color: var(--ink); }
+  .btn.quiet[aria-pressed=true], .btn.quiet[aria-pressed=true]:hover { background: var(--ink); color: var(--blue); box-shadow: none; }
+
+  section { padding: 48px 0; border-top: 2px solid var(--line); }
+
+  .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; max-width: 72ch; }
+  .steps li { counter-increment: s; display: grid; grid-template-columns: 2.4em 1fr; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
+  .steps li::before { content: counter(s); font-family: var(--mono); color: var(--orange); font-size: 1.3rem; line-height: 1.2; }
+  .steps li strong { display: block; font-weight: 600; }
+  .steps li p { margin: .2em 0 0; color: var(--muted); }
+
+  .shot { margin: 0 0 14px; line-height: 0; }
+  .shot img { display: block; max-width: 100%; height: auto; background: var(--black); border: 2px solid var(--black); image-rendering: pixelated; }
+  .shot figcaption { line-height: 1.4; color: var(--muted); font-size: .85rem; margin-top: 6px; }
+
+
+  .facts { list-style: none; padding: 0; margin: 0 0 1.2em; display: flex; flex-wrap: wrap; gap: 6px 22px; color: var(--muted); font-size: .95rem; }
+  .facts b { color: var(--ink); font-weight: 600; font-family: var(--mono); }
+
+  /* the videos: the rebuild running, recorded from a browser */
+  .videos { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 28px 32px; margin-top: 18px; align-items: start; }   /* the wider view gets the larger frame */
+  .video { margin: 0; }
+  .video video { display: block; width: 100%; height: auto; background: var(--black); border: 2px solid var(--black); }
+  .video figcaption { color: var(--muted); font-size: .95rem; margin-top: 8px; max-width: 60ch; }
+  .game { display: grid; grid-template-columns: minmax(0, 448px) minmax(0, 1fr); gap: 24px 40px; align-items: start; margin-top: 12px; }
+  .game .meta { color: var(--muted); margin: 0 0 .8em; }
+  .pair { display: grid; grid-template-columns: minmax(0, 840fr) minmax(0, 1080fr); gap: 24px; align-items: end; margin-top: 18px; }
+  .pair .shot img { image-rendering: auto; width: 100%; }
+  .game ul { margin: 0 0 1.2em; padding-left: 1.2em; max-width: 60ch; }
+  .game li { margin-bottom: .4em; }
+  .note { color: var(--muted); font-size: .95rem; }
+  footer { padding: 40px 0 60px; border-top: 2px solid var(--line); color: var(--muted); font-size: .92rem; }
+  footer p { max-width: 80ch; }
+
+  @media (max-width: 860px) {
+    .videos, .game, .pair { grid-template-columns: 1fr; gap: 0 28px; }
+    .videos { gap: 28px; }
+    header.top nav a { margin: 0 14px 0 0; }
+    body { font-size: 16px; }
+  }
+  @media (max-width: 500px) {
+    .shot img { image-rendering: auto; }   /* a scaled-down screenshot looks better smooth than pixelated */
+  }
+  /* the logo: a 3.5" floppy and a bitmap wordmark, 4 CSS px per cell, so every cell is whole device pixels */
+  header.top { align-items: center; }
+  header.top .name { display: block; line-height: 0; }
+  header.top .name svg { display: block; }
+  /* the header stays on screen; the page scrolls under it, anchors land below it */
+  html { scroll-padding-top: 84px; }
+  @media (max-width: 860px) {
+    html { scroll-padding-top: 96px; }
+    header.top { padding: 12px 0; gap: 6px 16px; }
+    header.top .name svg { width: 99px; height: 24px; }
+    header.top nav a { font-size: .9rem; white-space: nowrap; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="name" href="./" aria-label="AREK"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 37 8" width="148" height="32" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><path fill="#ff8a1f" d="M0 0h7v1h-7zM0 1h2v1h-2zM3 1h5v1h-5zM0 2h2v1h-2zM3 2h5v1h-5zM0 3h8v1h-8zM0 4h8v1h-8zM0 5h1v1h-1zM7 5h1v1h-1zM0 6h1v1h-1zM7 6h1v1h-1zM0 7h8v1h-8z"/><path fill="#ffd27a" d="M1 5h6v1h-6zM1 6h6v1h-6z"/><path fill="#ffffff" d="M11 1h4v1h-4zM10 2h1v1h-1zM15 2h1v1h-1zM10 3h1v1h-1zM15 3h1v1h-1zM10 4h6v1h-6zM10 5h1v1h-1zM15 5h1v1h-1zM10 6h1v1h-1zM15 6h1v1h-1zM10 7h1v1h-1zM15 7h1v1h-1zM17 1h5v1h-5zM17 2h1v1h-1zM22 2h1v1h-1zM17 3h1v1h-1zM22 3h1v1h-1zM17 4h5v1h-5zM17 5h1v1h-1zM20 5h1v1h-1zM17 6h1v1h-1zM21 6h1v1h-1zM17 7h1v1h-1zM22 7h1v1h-1zM24 1h6v1h-6zM24 2h1v1h-1zM24 3h1v1h-1zM24 4h5v1h-5zM24 5h1v1h-1zM24 6h1v1h-1zM24 7h6v1h-6zM31 1h1v1h-1zM36 1h1v1h-1zM31 2h1v1h-1zM35 2h1v1h-1zM31 3h1v1h-1zM34 3h1v1h-1zM31 4h3v1h-3zM31 5h1v1h-1zM34 5h1v1h-1zM31 6h1v1h-1zM35 6h1v1h-1zM31 7h1v1h-1zM36 7h1v1h-1z"/></svg></a>
+    <nav>
+      <a href="index.cs.html">Úvod</a>
+      <a href="#how">Jak</a>
+      <a href="#ai">AI</a>
+      <a href="#dev">Vývojáři</a>
+      <a href="#feedback">Napište mi</a>
+      <a href="https://github.com/smikes75/amiga-re-kit">GitHub</a>
+      <a href="about.html" lang="en" hreflang="en">English</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <h1>O AREKu</h1>
+    <p class="lede"><strong>AREK</strong> (Amiga Reverse Engineering Kit) je volně dostupná sada nástrojů s otevřeným kódem, kterou stavím proto, aby AI agent pro programování rozebral hru z Amigy z devadesátých let a postavil ji znovu jako moderní program pro prohlížeč. Na stránce neběží žádný emulátor: vlastní kód hry je přeložený předem a běží nativně, takže se hra hraje přesně jako originál, na dnešních monitorech se hýbe plynule a umí ukázat víc z levelu, než se vešlo do starého okna.</p>
+    <p>Proč ne prostě emulátor? Emulátor předstírá, že je Amiga, a spouští starý program tak, jak je. To funguje, jenže hra posouvá svůj svět 50krát za sekundu, zatímco váš monitor se obnovuje 60krát, 120krát i častěji, takže obraz poskakuje nerovnoměrně. Přestavěná hra ví, kde co je i mezi dvěma kroky, a nakreslí nový obraz pro každé obnovení monitoru.</p>
+  </div>
+
+  <section id="how">
+    <h2>Jak se hra přestavuje</h2>
+    <p>Jedno pravidlo: jedinou pravdou je původní hra. Nic se nedomýšlí z paměti ani neopisuje z videa, každý krok se ověřuje proti skutečné hře spuštěné v emulátoru.</p>
+    <ol class="steps">
+      <li><div><strong>Přečíst disketu</strong><p>Zjistit, kde na disketě leží kód, grafika a hudba a jak je hra načítá.</p></div></li>
+      <li><div><strong>Přeložit kód</strong><p>Strojový kód hry, napsaný pro procesor 68000 v Amize, se automaticky přeloží do kódu, který prohlížeč spouští rychle. Žádná Amiga se nesimuluje.</p></div></li>
+      <li><div><strong>Dokázat to</strong><p>Pustit přestavěnou hru a originál vedle sebe a krok po kroku porovnat paměť, obraz a zvuk. Shodné, jinak to není hotové.</p></div></li>
+      <li><div><strong>Vylepšit</strong><p>Až potom přijdou vylepšení, která starý hardware neuměl: plynulý pohyb na každém monitoru a širší výhled na level.</p></div></li>
+    </ol>
+  </section>
+
+  <section id="ai">
+    <h2>Pokus o to, co umí umělá inteligence</h2>
+    <p>AREK začal jako můj test: jak daleko se dostane AI agent pro programování se starou hrou, když má jen disketu, emulátor a pravidlo, že každé tvrzení musí být změřené? Dál, než jsem čekal. Nástroje, které si agenti cestou postavili a které fungovaly na víc než jedné hře, se staly AREKem.</p>
+    <p>Alien Breed II je první hra přestavěná s hotovým kitem od prvního dne. Jeho první level běžel v prohlížeči asi pět hodin poté, co agent poprvé uviděl diskety. Zbytek práce šel do ověřování proti originálu a do širšího a plynulejšího obrazu.</p>
+  </section>
+
+  <section id="dev">
+    <h2>Pro vývojáře</h2>
+    <p>AREK je balíček pro Python s nástrojem pro příkazovou řádku a se serverem MCP, takže ho AI agent jako Claude Code používá přímo: obrazy disket, packery té doby, přísný dekodér 68000, překladač do C a WebAssembly, emulátor jako měřicí přístroj a části, které potřebuje hratelná webová stránka.</p>
+    <ul class="facts">
+      <li>verze <b>0.8.5</b></li>
+      <li><b>2461</b> testů</li>
+      <li>licence MIT</li>
+    </ul>
+    <pre><code>pip install amiga-re-kit
+arek --help</code></pre>
+    <p style="margin-top:20px"><a class="btn" href="kit.cs.html">Kit podrobně</a> <a class="btn quiet" href="https://github.com/smikes75/amiga-re-kit">Zdrojový kód na GitHubu</a></p>
+  </section>
+
+  <section id="feedback">
+    <h2>Napište mi</h2>
+    <p>Našli jste chybu, máte nápad nebo byste rádi viděli nějakou konkrétní hru? Napište mi do diskusí na GitHubu. Potřebujete k tomu bezplatný účet na GitHubu. U chyby uveďte prohlížeč a počítač a co jste viděli, to mi pomůže nejvíc.</p>
+    <p><a class="btn" href="https://github.com/smikes75/amiga-re-kit/discussions">Otevřít diskuse</a></p>
+  </section>
+
+  <footer>
+    <p>AREK je zdarma a s otevřeným kódem (MIT) a neobsahuje žádné obrazy disket, žádný Kickstart ROM ani data her. Hry měří přes emulátor <a href="https://github.com/dirkwhoffmann/vAmiga">vAmiga</a> od Dirka W. Hoffmanna; kit nese jen jeho malé úpravy (MPL-2.0), ne emulátor samotný.</p>
+    <p>Alien Breed II a Superfrog patří společnosti Team17. Hratelná stránka žádná data hry neobsahuje: obrazy disket hry, kterou vlastníte, dodáte sami a kód odvozený ze hry se otevře jen s nimi.</p>
+    <p>Vytvořeno s Claude Code a OpenAI Codex. <a href="about.cs.html">O AREKu</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit na GitHubu</a>, <a href="https://pypi.org/project/amiga-re-kit/">balíček na PyPI</a>.</p>
+  </footer>
+</div>
+</body>
+</html>

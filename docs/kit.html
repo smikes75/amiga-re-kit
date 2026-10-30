@@ -55,15 +55,6 @@
   header.top .name { font-weight: 600; font-size: 1.05rem; text-decoration: none; }
   header.top nav a { margin-left: 22px; font-size: .95rem; }
 
-  /* hero: the tool is the hero */
-  .hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; padding: 56px 0 40px; align-items: start; }
-  .hero p.lede { font-size: 1.2rem; margin-top: 1em; }
-  .drop {
-    margin-top: 22px; border: 2px dashed var(--muted); padding: 22px; cursor: pointer;
-    display: flex; flex-wrap: wrap; align-items: center; gap: 14px 18px;
-  }
-  .drop.over { border-color: var(--orange); background: var(--blue-2); }
-  .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
   .btn {
     background: var(--orange); color: var(--black); border: 0; padding: 10px 16px; font: inherit;
     font-weight: 600; cursor: pointer;
@@ -72,27 +63,12 @@
   .btn.quiet { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px var(--muted); }
   .btn.quiet:hover { box-shadow: inset 0 0 0 2px var(--orange); color: var(--ink); }
   .btn:hover { background: var(--sand); }
-  .drop small { color: var(--muted); flex: 1 1 220px; }
 
-  .disk { position: relative; }
-  .disk canvas { width: 100%; height: auto; image-rendering: pixelated; display: block; background: var(--black); }
-  .disk .cap { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-top: 8px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-family: var(--mono); font-size: 13px; margin-top: 10px; }
-  .legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; border: 1px solid rgba(255,255,255,.35); }
-  .legend .e::before { background: #0a3a8c; } .legend .s::before { background: #2f6fd6; }
-  .legend .c::before { background: #e9eefb; } .legend .d::before { background: #ffd27a; } .legend .p::before { background: #ff8a1f; }
-  .tip { position: absolute; pointer-events: none; background: var(--black); color: var(--ink); font: 12px/1.3 var(--mono); padding: 6px 8px; display: none; white-space: nowrap; }
 
-  /* results */
-  .report { padding: 0 0 56px; }
-  .report pre { min-height: 60px; }
-  .report .empty { color: var(--muted); }
 
   section { padding: 48px 0; border-top: 2px solid var(--line); }
   section.lead { border-top: 0; padding: 56px 0 40px; }
   section.lead h1 { margin-bottom: .5em; }
-  .hero.analyser { border-top: 2px solid var(--line); padding-top: 48px; }
-  .hero.analyser h2 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); }
   .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; max-width: 70ch; }
   .steps li { counter-increment: s; display: grid; grid-template-columns: 2.4em 1fr; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
   .steps li::before { content: counter(s); font-family: var(--mono); color: var(--orange); font-size: 1.3rem; line-height: 1.2; }
@@ -111,14 +87,11 @@
   footer p { max-width: 80ch; }
 
   @media (max-width: 860px) {
-    .hero, .two { grid-template-columns: 1fr; gap: 28px; }
+    .two { grid-template-columns: 1fr; gap: 28px; }
     header.top nav a { margin-left: 14px; }
     body { font-size: 16px; }
     td:first-child, td:last-child { white-space: normal; }
     th:last-child, td:last-child { display: none; }
-  }
-  @media (prefers-reduced-motion: no-preference) {
-    .drop { transition: background .15s, border-color .15s; }
   }
   /* the logo: a 3.5" floppy and a bitmap wordmark, 4 CSS px per cell, so every cell is whole device pixels */
   header.top { align-items: center; }
@@ -139,9 +112,9 @@
   <header class="top">
     <a class="name" href="./" aria-label="AREK"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 37 8" width="148" height="32" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><path fill="#ff8a1f" d="M0 0h7v1h-7zM0 1h2v1h-2zM3 1h5v1h-5zM0 2h2v1h-2zM3 2h5v1h-5zM0 3h8v1h-8zM0 4h8v1h-8zM0 5h1v1h-1zM7 5h1v1h-1zM0 6h1v1h-1zM7 6h1v1h-1zM0 7h8v1h-8z"/><path fill="#ffd27a" d="M1 5h6v1h-6zM1 6h6v1h-6z"/><path fill="#ffffff" d="M11 1h4v1h-4zM10 2h1v1h-1zM15 2h1v1h-1zM10 3h1v1h-1zM15 3h1v1h-1zM10 4h6v1h-6zM10 5h1v1h-1zM15 5h1v1h-1zM10 6h1v1h-1zM15 6h1v1h-1zM10 7h1v1h-1zM15 7h1v1h-1zM17 1h5v1h-5zM17 2h1v1h-1zM22 2h1v1h-1zM17 3h1v1h-1zM22 3h1v1h-1zM17 4h5v1h-5zM17 5h1v1h-1zM20 5h1v1h-1zM17 6h1v1h-1zM21 6h1v1h-1zM17 7h1v1h-1zM22 7h1v1h-1zM24 1h6v1h-6zM24 2h1v1h-1zM24 3h1v1h-1zM24 4h5v1h-5zM24 5h1v1h-1zM24 6h1v1h-1zM24 7h6v1h-6zM31 1h1v1h-1zM36 1h1v1h-1zM31 2h1v1h-1zM35 2h1v1h-1zM31 3h1v1h-1zM34 3h1v1h-1zM31 4h3v1h-3zM31 5h1v1h-1zM34 5h1v1h-1zM31 6h1v1h-1zM35 6h1v1h-1zM31 7h1v1h-1zM36 7h1v1h-1z"/></svg></a>
     <nav>
-      <a href="./">The story</a>
+      <a href="./">Home</a>
+      <a href="about.html">About</a>
       <a href="#claude">For your Claude</a>
-      <a href="#try">Try it</a>
       <a href="#method">Method</a>
       <a href="#mcp">MCP</a>
       <a href="#inside">What's inside</a>
@@ -165,31 +138,6 @@ mkdir mygame && cd mygame && arek init .
 claude      # "Read CLAUDE.md and measure the disk."</code></pre>
     </div>
   </section>
-
-  <div class="hero analyser" id="try">
-    <div>
-      <h2>Measure the original before you touch it.</h2>
-      <p class="lede">Tools for reverse engineering Amiga floppy games, extracted from four game rebuilds. Entropy maps, packers, a strict 68000 decoder and recompiler, headless emulator captures — and an MCP server so an assistant can hold the same instruments.</p>
-      <label class="drop" id="drop" tabindex="0">
-        <input type="file" id="file" accept=".adf,.ADF,application/octet-stream">
-        <span class="btn">Choose an .adf</span>
-        <small>or drop one here. The first measurement runs in your browser; nothing is uploaded and this page ships no game data.</small>
-      </label>
-      <p style="margin-top:22px"><code>pip install amiga-re-kit</code> then <code>arek adf map disk.adf</code> does the same from the terminal.</p>
-    </div>
-    <div class="disk">
-      <canvas id="map" width="440" height="400" aria-label="Entropy map of the disk, one cell per sector"></canvas>
-      <div class="tip" id="tip"></div>
-      <div class="cap"><span id="capl">1760 sectors, 160 tracks, 4 tracks per row</span><span id="capr">no disk loaded</span></div>
-      <div class="legend">
-        <span class="e">empty</span><span class="s">sparse</span><span class="c">code / data</span><span class="d">dense</span><span class="p">packed</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="report">
-    <pre id="out"><code class="empty">Load a disk image to see: size and SHA-256, boot block type and checksum, regions by track, packer signatures (PP20, RNC, ATN!, IMP!, …) and Bytekiller blocks verified by their own checksum — the output of `arek adf info` and `arek scan`.</code></pre>
-  </div>
 
   <section id="method">
     <h2>The method</h2>
@@ -254,219 +202,16 @@ trace_compare  trace_bus</code></pre>
         <tr><td>arek.m68k.cover, fuzz, parity suite</td><td>coverage of a translation run and random input for both sides (where a long run stalls, a bug hides); a suite of scenarios against the original: state, picture, sound per tick</td><td>Superfrog</td></tr>
         <tr><td>arek.m68k.timing.bus</td><td>bus cycles of every instruction, not only its clocks: what a model of the Amiga bus per DMA slot needs</td><td>Alien Breed</td></tr>
         <tr><td>arek.bus</td><td>the Amiga bus per DMA slot for recompiled games: who owns each slot, the blitter cycle by cycle, the CPU by its accesses - on which instruction an interrupt lands, when a blit ends, whether the original overran the frame; checked against the emulator's bus log by <code>arek selftest bus</code></td><td>Alien Breed</td></tr>
-        <tr><td>arek, arek-mcp</td><td>the command line (27 subcommands) and the MCP server (26 tools)</td><td>new</td></tr>
+        <tr><td>arek, arek-mcp</td><td>the command line (32 subcommands) and the MCP server (26 tools)</td><td>new</td></tr>
       </tbody>
     </table>
-    <p style="margin-top:18px">2376 tests: synthetic data (hand-assembled programs, random buffers, generated boot blocks and disk images) and 68000 clock counts measured on Moira.</p>
+    <p style="margin-top:18px">2461 tests: synthetic data (hand-assembled programs, random buffers, generated boot blocks and disk images) and 68000 clock counts measured on Moira.</p>
   </section>
 
   <footer>
-    <p>MIT. The kit ships no disk image, no Kickstart ROM and no game-specific knowledge; you supply the image you own, and the path to it lives in a git-ignored <code>local.conf</code>. The vAmiga patches modify MPL-2.0 sources and are published as that licence requires. The games rebuilt with this method are playable on <a href="https://smikes75.github.io/arek-play/">arek-play</a>.</p>
+    <p>MIT. The kit ships no disk image, no Kickstart ROM and no game-specific knowledge; you supply the image you own, and the path to it lives in a git-ignored <code>local.conf</code>. The vAmiga patches modify MPL-2.0 sources and are published as that licence requires. The first game rebuilt with it, Alien Breed II, is <a href="index.html#play">playable on the front page</a>.</p>
   </footer>
 </div>
 
-<script>
-(function () {
-  'use strict';
-  var SECTOR = 512, SPT = 11, TRACKS = 160, SIZE = SECTOR * SPT * TRACKS;
-  var COLS = 44, CELL = 10;                       // 4 tracks per row, 40 rows
-  var COLOR = { empty: '#0a3a8c', sparse: '#2f6fd6', code: '#e9eefb', dense: '#ffd27a', packed: '#ff8a1f' };
-  var canvas = document.getElementById('map'), ctx = canvas.getContext('2d');
-  var tip = document.getElementById('tip'), out = document.getElementById('out');
-  var capr = document.getElementById('capr');
-  var cells = null;                               // [{e, cls}] per sector
-
-  function drawEmpty() {
-    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = 'rgba(45,99,196,.45)';
-    for (var i = 0; i < TRACKS * SPT; i++) {
-      var x = (i % COLS) * CELL, y = Math.floor(i / COLS) * CELL;
-      ctx.strokeRect(x + .5, y + .5, CELL - 1, CELL - 1);
-    }
-  }
-  drawEmpty();
-
-  function entropy(a, off, n) {
-    var c = new Int32Array(256), i, h = 0, p;
-    for (i = 0; i < n; i++) c[a[off + i]]++;
-    for (i = 0; i < 256; i++) if (c[i]) { p = c[i] / n; h -= p * Math.log2(p); }
-    return h;
-  }
-  function allZero(a, off, n) { for (var i = 0; i < n; i++) if (a[off + i]) return false; return true; }
-  function classify(e, zero) {
-    if (zero || e < 0.5) return 'empty';
-    if (e < 5.0) return 'sparse';
-    if (e < 6.8) return 'code';
-    if (e < 7.4) return 'dense';
-    return 'packed';
-  }
-  function u32(a, i) { return ((a[i] << 24) | (a[i + 1] << 16) | (a[i + 2] << 8) | a[i + 3]) >>> 0; }
-  function hex(n, w) { var s = n.toString(16); while (s.length < (w || 0)) s = '0' + s; return s; }
-
-  function bootChecksum(a) {
-    var s = 0, i;
-    for (i = 0; i < 1024; i += 4) {
-      if (i === 4) continue;
-      s += u32(a, i);
-      if (s > 0xffffffff) s = (s + 1) % 0x100000000;   // ones' complement carry
-    }
-    return (~s) >>> 0;
-  }
-
-  var SIGS = [['PP20', 'PowerPacker 2.0'], ['PX20', 'PowerPacker 2.0, encrypted'], ['RNC\u0001', 'Rob Northen Compression 1'],
-              ['RNC\u0002', 'Rob Northen Compression 2'], ['ATN!', 'Atomik'], ['IMP!', 'Imploder'], ['XPKF', 'XPK container'],
-              ['CrM!', 'Crunch Mania'], ['S404', 'StoneCracker 4.04'], ['TPWM', 'Turbo Packer'],
-              ['\u0000\u0000\u0003ó', 'HUNK executable header'], ['DOS\u0000', 'AmigaDOS OFS boot block / DOS type'], ['DOS\u0001', 'AmigaDOS FFS DOS type']];
-  function signatures(a) {
-    var hits = [], s, k, i, j, m, ok;
-    for (s = 0; s < SIGS.length; s++) {
-      m = SIGS[s][0];
-      for (i = 0; i + m.length <= a.length; i += 2) {
-        ok = true;
-        for (j = 0; j < m.length; j++) if (a[i + j] !== m.charCodeAt(j)) { ok = false; break; }
-        if (ok) hits.push({ off: i, magic: m, what: SIGS[s][1] });
-      }
-    }
-    hits.sort(function (x, y) { return x.off - y.off; });
-    return hits;
-  }
-
-  // Bytekiller format B: 8-byte header, backwards longword stream, XOR checksum 0.
-  function unpackB(a, off) {
-    var size = u32(a, off), packed = u32(a, off + 4);
-    var out = new Uint8Array(size), p = size, pos = off + 8 + packed, chk = 0, buf;
-    function lng() { pos -= 4; if (pos < off + 8) throw new Error('stream exhausted'); var v = u32(a, pos); chk = (chk ^ v) >>> 0; return v; }
-    buf = lng();
-    function bit() { var c = buf & 1; buf >>>= 1; if (buf) return c; var nw = lng(); buf = ((c << 31) | (nw >>> 1)) >>> 0; return nw & 1; }
-    function bits(n) { var v = 0; for (var i = 0; i < n; i++) v = (v << 1) | bit(); return v >>> 0; }
-    function lits(n) { if (p - n < 0) throw new Error('overflow'); for (var i = 0; i < n; i++) out[--p] = bits(8); }
-    function match(l, o) { if (p - l < 0) throw new Error('overflow'); var s = p + o; if (s > size) throw new Error('bad offset'); for (var i = 0; i < l; i++) { out[--p] = out[--s]; } }
-    while (p > 0) {
-      if (bit() === 0) { if (bit() === 0) lits(bits(3) + 1); else match(2, bits(8)); }
-      else { var sel = bits(2); if (sel === 0) match(3, bits(9)); else if (sel === 1) match(4, bits(10)); else if (sel === 2) { var n = bits(8) + 1; match(n, bits(12)); } else lits(bits(8) + 9); }
-    }
-    lng();
-    return { data: out, ok: chk === 0 };
-  }
-  function bytekillerB(a) {
-    var n = a.length, hits = [], off, size, packed, s, x, i, r;
-    // prefix XOR of longs for both 2-byte alignments
-    var P = [new Uint32Array((n >> 2) + 2), new Uint32Array((n >> 2) + 2)];
-    for (var al = 0; al < 2; al++) { x = 0; for (i = al * 2, s = 1; i + 4 <= n; i += 4, s++) { x = (x ^ u32(a, i)) >>> 0; P[al][s] = x; } }
-    for (off = 0; off + 16 <= n; off += 2) {
-      size = u32(a, off); packed = u32(a, off + 4);
-      if (size < 16 || size > 0x100000) continue;
-      if (packed < 8 || (packed & 3) || packed > size + 64 || off + 8 + packed > n) continue;
-      s = off + 8;
-      var al2 = (s & 2) ? 1 : 0, i0 = (s - al2 * 2) >> 2, i1 = i0 + (packed >> 2);
-      if (((P[al2][i1] ^ P[al2][i0]) >>> 0) !== 0) continue;
-      try { r = unpackB(a, off); if (r.ok && r.data.length === size) hits.push({ off: off, size: size, packed: packed }); } catch (e) { }
-    }
-    return hits;
-  }
-
-  function sha256(buf) {
-    if (window.crypto && crypto.subtle) return crypto.subtle.digest('SHA-256', buf).then(function (h) {
-      return Array.prototype.map.call(new Uint8Array(h), function (b) { return hex(b, 2); }).join('');
-    });
-    return Promise.resolve('(not available on this origin)');
-  }
-
-  function analyse(name, buf) {
-    var a = new Uint8Array(buf), lines = [], i, e, z, cls, n = a.length;
-    if (n !== SIZE) {
-      lines.push('arek adf info: not a DD ADF - ' + n + ' bytes (expected ' + SIZE + ').');
-      if (n < SECTOR * 4) { out.textContent = lines.join('\n'); return; }
-      lines.push('Scanning it as a plain file instead.');
-    }
-    cells = [];
-    var counts = { empty: 0, sparse: 0, code: 0, dense: 0, packed: 0 };
-    var nsec = Math.min(Math.floor(n / SECTOR), TRACKS * SPT);
-    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    for (i = 0; i < nsec; i++) {
-      z = allZero(a, i * SECTOR, SECTOR);
-      e = z ? 0 : entropy(a, i * SECTOR, SECTOR);
-      cls = classify(e, z);
-      cells.push({ e: e, cls: cls });
-      counts[cls]++;
-      ctx.fillStyle = COLOR[cls];
-      ctx.fillRect((i % COLS) * CELL + 1, Math.floor(i / COLS) * CELL + 1, CELL - 2, CELL - 2);
-    }
-    capr.textContent = name;
-
-    lines.push('image      ' + name + '  ' + n + ' bytes');
-    var bb = null;
-    if (n >= 1024) {
-      var dos = String.fromCharCode(a[0], a[1], a[2]), typ = a[3], stored = u32(a, 4), calc = bootChecksum(a);
-      var kind = dos === 'DOS' ? 'DOS' + typ : (dos === 'KIC' ? 'KICK' : 'unknown (' + hex(u32(a, 0), 8) + ')');
-      bb = { kind: kind, stored: stored, calc: calc, bootable: dos === 'DOS' && stored === calc };
-      lines.push('boot block ' + kind + ', checksum ' + hex(stored, 8) + (stored === calc ? ' valid' : ' INVALID (computed ' + hex(calc, 8) + ')') + (bb.bootable ? ', bootable' : ''));
-    }
-    lines.push('sectors    ' + nsec + ': empty ' + counts.empty + ', sparse ' + counts.sparse + ', code/data ' + counts.code + ', dense ' + counts.dense + ', packed ' + counts.packed);
-
-    // regions
-    lines.push(''); lines.push('regions (arek adf regions)');
-    var r = null, regs = [];
-    for (i = 0; i < nsec; i++) {
-      if (r && r.cls === cells[i].cls) { r.end = i + 1; r.sum += cells[i].e; }
-      else { r = { start: i, end: i + 1, cls: cells[i].cls, sum: cells[i].e }; regs.push(r); }
-    }
-    for (i = 0; i < regs.length; i++) {
-      r = regs[i];
-      lines.push('  ' + hex(r.start * SECTOR, 7) + '-' + hex(r.end * SECTOR, 7) + '  trk ' + pad(Math.floor(r.start / SPT), 3) + '-' + pad(Math.floor((r.end - 1) / SPT), 3) +
-                 '  ' + pad(r.cls === 'code' ? 'code/data' : r.cls, 9, true) + '  ' + (r.sum / (r.end - r.start)).toFixed(2) + ' bits  (' + (r.end - r.start) + ' sectors)');
-    }
-
-    var sigs = signatures(a);
-    lines.push(''); lines.push('signatures (arek scan): ' + sigs.length);
-    for (i = 0; i < Math.min(sigs.length, 60); i++) {
-      var h = sigs[i], extra = '';
-      if (h.magic === 'PP20') extra = '  eff=[' + a[h.off + 4] + ',' + a[h.off + 5] + ',' + a[h.off + 6] + ',' + a[h.off + 7] + ']';
-      lines.push('  ' + hex(h.off, 8) + '  ' + pad(h.magic.replace(/[\u0000-\u001fó]/g, '.'), 5, true) + ' ' + h.what + extra);
-    }
-    if (sigs.length > 60) lines.push('  ... ' + (sigs.length - 60) + ' more');
-
-    var bks = bytekillerB(a);
-    lines.push(''); lines.push('bytekiller B blocks (checksum ok + full unpack ok): ' + bks.length);
-    for (i = 0; i < bks.length; i++) lines.push('  ' + hex(bks[i].off, 8) + '  packed ' + pad(bks[i].packed, 6) + ' -> unpacked ' + pad(bks[i].size, 6));
-    if (!bks.length && !sigs.some(function (s) { return s.magic !== 'DOS\u0000' && s.magic !== 'DOS\u0001'; })) {
-      lines.push('  no known packer found - the game has its own; read the decrunch routine near the loader (docs/METHOD.md, step 3)');
-    }
-    out.textContent = lines.join('\n');
-    sha256(buf).then(function (d) { out.textContent = out.textContent.replace(/^image .*$/m, function (m) { return m + '\nsha256     ' + d; }); });
-  }
-  function pad(v, w, left) { var s = String(v); while (s.length < w) s = left ? s + ' ' : ' ' + s; return s; }
-
-  function load(file) {
-    if (!file) return;
-    out.textContent = 'reading ' + file.name + ' ...';
-    var rd = new FileReader();
-    rd.onload = function () { try { analyse(file.name, rd.result); } catch (e) { out.textContent = 'failed: ' + e.message; } };
-    rd.onerror = function () { out.textContent = 'could not read ' + file.name; };
-    rd.readAsArrayBuffer(file);
-  }
-  var drop = document.getElementById('drop'), input = document.getElementById('file');
-  input.addEventListener('change', function () { load(input.files[0]); });
-  ['dragenter', 'dragover'].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('over'); }); });
-  ['dragleave', 'drop'].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('over'); }); });
-  drop.addEventListener('drop', function (e) { load(e.dataTransfer.files[0]); });
-  drop.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } });
-  document.body.addEventListener('dragover', function (e) { e.preventDefault(); });
-  document.body.addEventListener('drop', function (e) { e.preventDefault(); if (e.dataTransfer.files[0]) load(e.dataTransfer.files[0]); });
-
-  canvas.addEventListener('mousemove', function (e) {
-    if (!cells) return;
-    var r = canvas.getBoundingClientRect(), sx = canvas.width / r.width, sy = canvas.height / r.height;
-    var x = Math.floor((e.clientX - r.left) * sx / CELL), y = Math.floor((e.clientY - r.top) * sy / CELL), i = y * COLS + x;
-    if (x < 0 || x >= COLS || i >= cells.length) { tip.style.display = 'none'; return; }
-    var t = Math.floor(i / SPT), c = cells[i];
-    tip.textContent = 'sector ' + i + '  trk ' + t + ' (cyl ' + (t >> 1) + ' h' + (t & 1) + ') s' + (i % SPT) + '  @' + hex(i * SECTOR, 6) + '  ' + c.e.toFixed(2) + ' bits  ' + (c.cls === 'code' ? 'code/data' : c.cls);
-    tip.style.display = 'block';
-    tip.style.left = Math.min(e.clientX - r.left + 14, r.width - 300) + 'px';
-    tip.style.top = (e.clientY - r.top + 14) + 'px';
-  });
-  canvas.addEventListener('mouseleave', function () { tip.style.display = 'none'; });
-})();
-</script>
 </body>
 </html>

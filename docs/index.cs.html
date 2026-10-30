@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AREK: sada nástrojů pro reverzní inženýrství her z Amigy</title>
-<meta name="description" content="AREK je sada nástrojů v Pythonu pro reverzní inženýrství her z Amigy: obrazy disket, packery, přísný dekodér a rekompilátor 68000, bezhlavý emulátor pro měření a MCP server pro AI agenty. Vznikl při stavění her s AI; tři první levely se dají hrát s vlastní disketou.">
-<link rel="alternate" hreflang="en" href="index.html">
+<title>AREK: staré hry z Amigy, přestavěné pro prohlížeč</title>
+<meta name="description" content="AREK je volně dostupná sada nástrojů, se kterou umělá inteligence rozebere starou hru z Amigy a postaví ji znovu jako program pro prohlížeč: věrně podle originálu, plynule na dnešních monitorech a se širším výhledem. První hra: Alien Breed II, dva levely hratelné s vlastními disketami.">
 <link rel="alternate" hreflang="cs" href="index.cs.html">
+<link rel="alternate" hreflang="en" href="index.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
@@ -58,16 +58,6 @@
   .hero .lede { font-size: 1.15rem; margin-top: 1em; }
   .hero .btn { margin: 0 8px 8px 0; }
 
-  /* the demo: the one loud thing on the page */
-  .wide { padding: 8px 0 40px; }
-  .demo { padding: 16px 0 56px; }
-  .lane { margin-top: 22px; }
-  .lane .bar { display: flex; justify-content: space-between; align-items: baseline; gap: 6px 16px; flex-wrap: wrap; margin-bottom: 8px; }
-  .lane .bar strong { font-weight: 600; }
-  .lane .bar span { color: var(--muted); font-size: .95rem; }
-  .screen { background: var(--black); line-height: 0; border: 2px solid var(--black); display: inline-block; max-width: 100%; }
-  .screen canvas { display: block; image-rendering: pixelated; max-width: 100%; height: auto; }
-  .controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-top: 22px; }
   .btn {
     background: var(--orange); color: var(--black); border: 0; padding: 9px 16px; font: inherit;
     font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block;
@@ -76,11 +66,8 @@
   .btn.quiet { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px var(--muted); }
   .btn.quiet:hover { box-shadow: inset 0 0 0 2px var(--orange); color: var(--ink); }
   .btn.quiet[aria-pressed=true], .btn.quiet[aria-pressed=true]:hover { background: var(--ink); color: var(--blue); box-shadow: none; }
-  .hz { color: var(--muted); font-size: .95rem; }
-  .hz b { color: var(--ink); font-weight: 600; }
 
   section { padding: 48px 0; border-top: 2px solid var(--line); }
-  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; align-items: start; }
 
   .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; max-width: 72ch; }
   .steps li { counter-increment: s; display: grid; grid-template-columns: 2.4em 1fr; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
@@ -88,57 +75,32 @@
   .steps li strong { display: block; font-weight: 600; }
   .steps li p { margin: .2em 0 0; color: var(--muted); }
 
-  /* the games: screenshots of the rebuilds, shown pixel for pixel where the column is wide enough */
-  .games { list-style: none; padding: 0; margin: 8px 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 40px; }
-  .games li { padding: 22px 0 26px; border-top: 1px solid var(--line); }
-  .games .meta { color: var(--muted); font-size: .95rem; margin: 0 0 .7em; }
-  .games .state { font-size: .95rem; margin: 0 0 .8em; max-width: none; }
-  .games .state::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 8px; background: var(--sand); vertical-align: 0; }
-  .games .state.soon::before { background: transparent; box-shadow: inset 0 0 0 2px var(--sand); }
-  .games .disk { color: var(--muted); font-size: .9rem; margin: .8em 0 0; max-width: none; }
   .shot { margin: 0 0 14px; line-height: 0; }
   .shot img { display: block; max-width: 100%; height: auto; background: var(--black); border: 2px solid var(--black); image-rendering: pixelated; }
   .shot figcaption { line-height: 1.4; color: var(--muted); font-size: .85rem; margin-top: 6px; }
 
-  /* the gallery: the original window opens into the wider view, one game at a time */
-  .gallery { margin-top: 18px; }
-  .gallery .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-  .gallery .tabs button { background: transparent; color: var(--ink); border: 0; box-shadow: inset 0 0 0 2px var(--line); padding: 7px 14px; font: inherit; font-weight: 600; cursor: pointer; }
-  .gallery .tabs button[aria-selected=true] { background: var(--ink); color: var(--blue); box-shadow: none; }
-  .stage { position: relative; background: var(--black); border: 2px solid var(--black); overflow: hidden; max-width: 100%; }
-  .stage img { position: absolute; display: block; image-rendering: pixelated; }
-  .stage .enh { left: 0; top: 0; width: 100%; height: 100%; opacity: 0; transition: clip-path .9s ease-in-out, opacity .9s ease-in-out; }
-  .stage .orig { transition: opacity .9s ease-in-out .2s; }
-  .stage.wide .enh { opacity: 1; clip-path: inset(0) !important; }
-  .stage.wide .orig { opacity: 0; transition-delay: 0s; }
-  .stage.snap img { transition: none; }
-  .gallery .tag { font-family: var(--mono); font-weight: 600; color: var(--sand); margin-right: .4em; }
-  .gallery .bar { display: flex; justify-content: space-between; gap: 10px 16px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
-  .gallery .cap { margin: 0; color: var(--muted); font-size: .95rem; max-width: 60ch; }
-  .gallery .modes { display: flex; gap: 8px; flex-wrap: wrap; }
-  .gallery .modes .btn { padding: 7px 12px; font-size: .95rem; }
-  @media (prefers-reduced-motion: reduce) { .stage img { transition: none; } }
-  @media (max-width: 500px) { .stage img { image-rendering: auto; } }
-
-  .ways { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 40px; margin-top: 30px; }
-  .ways > div { border-top: 1px solid var(--line); padding-top: 16px; }
-  .ways h3 span { color: var(--orange); font-family: var(--mono); font-weight: 600; margin-right: .5em; }
-  .ways p { color: var(--muted); }
-  .ways p b { color: var(--ink); font-weight: 600; }
 
   .facts { list-style: none; padding: 0; margin: 0 0 1.2em; display: flex; flex-wrap: wrap; gap: 6px 22px; color: var(--muted); font-size: .95rem; }
   .facts b { color: var(--ink); font-weight: 600; font-family: var(--mono); }
 
-  .support { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px 48px; align-items: center; }
-  .support .qr { display: block; line-height: 0; background: var(--ink); padding: 8px; }
-  .support .qr img { display: block; width: 164px; height: 164px; }
-  @media (max-width: 600px) { .support { grid-template-columns: 1fr; } }
+  /* the videos: the rebuild running, recorded from a browser */
+  .videos { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 28px 32px; margin-top: 18px; align-items: start; }   /* the wider view gets the larger frame */
+  .video { margin: 0; }
+  .video video { display: block; width: 100%; height: auto; background: var(--black); border: 2px solid var(--black); }
+  .video figcaption { color: var(--muted); font-size: .95rem; margin-top: 8px; max-width: 60ch; }
+  .game { display: grid; grid-template-columns: minmax(0, 448px) minmax(0, 1fr); gap: 24px 40px; align-items: start; margin-top: 12px; }
+  .game .meta { color: var(--muted); margin: 0 0 .8em; }
+  .pair { display: grid; grid-template-columns: minmax(0, 840fr) minmax(0, 1080fr); gap: 24px; align-items: end; margin-top: 18px; }
+  .pair .shot img { image-rendering: auto; width: 100%; }
+  .game ul { margin: 0 0 1.2em; padding-left: 1.2em; max-width: 60ch; }
+  .game li { margin-bottom: .4em; }
   .note { color: var(--muted); font-size: .95rem; }
   footer { padding: 40px 0 60px; border-top: 2px solid var(--line); color: var(--muted); font-size: .92rem; }
   footer p { max-width: 80ch; }
 
   @media (max-width: 860px) {
-    .two, .games, .ways { grid-template-columns: 1fr; gap: 0 28px; }
+    .videos, .game, .pair { grid-template-columns: 1fr; gap: 0 28px; }
+    .videos { gap: 28px; }
     header.top nav a { margin: 0 14px 0 0; }
     body { font-size: 16px; }
   }
@@ -162,10 +124,11 @@
 <body>
 <div class="wrap">
   <header class="top">
-    <a class="name" href="index.cs.html" aria-label="AREK"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 37 8" width="148" height="32" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><path fill="#ff8a1f" d="M0 0h7v1h-7zM0 1h2v1h-2zM3 1h5v1h-5zM0 2h2v1h-2zM3 2h5v1h-5zM0 3h8v1h-8zM0 4h8v1h-8zM0 5h1v1h-1zM7 5h1v1h-1zM0 6h1v1h-1zM7 6h1v1h-1zM0 7h8v1h-8z"/><path fill="#ffd27a" d="M1 5h6v1h-6zM1 6h6v1h-6z"/><path fill="#ffffff" d="M11 1h4v1h-4zM10 2h1v1h-1zM15 2h1v1h-1zM10 3h1v1h-1zM15 3h1v1h-1zM10 4h6v1h-6zM10 5h1v1h-1zM15 5h1v1h-1zM10 6h1v1h-1zM15 6h1v1h-1zM10 7h1v1h-1zM15 7h1v1h-1zM17 1h5v1h-5zM17 2h1v1h-1zM22 2h1v1h-1zM17 3h1v1h-1zM22 3h1v1h-1zM17 4h5v1h-5zM17 5h1v1h-1zM20 5h1v1h-1zM17 6h1v1h-1zM21 6h1v1h-1zM17 7h1v1h-1zM22 7h1v1h-1zM24 1h6v1h-6zM24 2h1v1h-1zM24 3h1v1h-1zM24 4h5v1h-5zM24 5h1v1h-1zM24 6h1v1h-1zM24 7h6v1h-6zM31 1h1v1h-1zM36 1h1v1h-1zM31 2h1v1h-1zM35 2h1v1h-1zM31 3h1v1h-1zM34 3h1v1h-1zM31 4h3v1h-3zM31 5h1v1h-1zM34 5h1v1h-1zM31 6h1v1h-1zM35 6h1v1h-1zM31 7h1v1h-1zM36 7h1v1h-1z"/></svg></a>
+    <a class="name" href="./" aria-label="AREK"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 37 8" width="148" height="32" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><path fill="#ff8a1f" d="M0 0h7v1h-7zM0 1h2v1h-2zM3 1h5v1h-5zM0 2h2v1h-2zM3 2h5v1h-5zM0 3h8v1h-8zM0 4h8v1h-8zM0 5h1v1h-1zM7 5h1v1h-1zM0 6h1v1h-1zM7 6h1v1h-1zM0 7h8v1h-8z"/><path fill="#ffd27a" d="M1 5h6v1h-6zM1 6h6v1h-6z"/><path fill="#ffffff" d="M11 1h4v1h-4zM10 2h1v1h-1zM15 2h1v1h-1zM10 3h1v1h-1zM15 3h1v1h-1zM10 4h6v1h-6zM10 5h1v1h-1zM15 5h1v1h-1zM10 6h1v1h-1zM15 6h1v1h-1zM10 7h1v1h-1zM15 7h1v1h-1zM17 1h5v1h-5zM17 2h1v1h-1zM22 2h1v1h-1zM17 3h1v1h-1zM22 3h1v1h-1zM17 4h5v1h-5zM17 5h1v1h-1zM20 5h1v1h-1zM17 6h1v1h-1zM21 6h1v1h-1zM17 7h1v1h-1zM22 7h1v1h-1zM24 1h6v1h-6zM24 2h1v1h-1zM24 3h1v1h-1zM24 4h5v1h-5zM24 5h1v1h-1zM24 6h1v1h-1zM24 7h6v1h-6zM31 1h1v1h-1zM36 1h1v1h-1zM31 2h1v1h-1zM35 2h1v1h-1zM31 3h1v1h-1zM34 3h1v1h-1zM31 4h3v1h-3zM31 5h1v1h-1zM34 5h1v1h-1zM31 6h1v1h-1zM35 6h1v1h-1zM31 7h1v1h-1zM36 7h1v1h-1z"/></svg></a>
     <nav>
+      <a href="#watch">Video</a>
       <a href="#play">Hrát</a>
-      <a href="#how">Jak to funguje</a>
+      <a href="about.cs.html">O projektu</a>
       <a href="kit.cs.html">Kit</a>
       <a href="https://github.com/smikes75/amiga-re-kit">GitHub</a>
       <a href="index.html" lang="en" hreflang="en">English</a>
@@ -173,327 +136,58 @@
   </header>
 
   <div class="hero">
-    <div>
-      <h1>Před třiceti lety jsem na Amize hackoval životy. Teď s AI stavím celé hry znovu.</h1>
-      <p class="lede"><strong>AREK</strong>, Amiga Reverse Engineering Kit, je sada nástrojů v Pythonu pro reverzní inženýrství her z Amigy: čtení obrazů disket, rozbalovače dobových packerů, přísný dekodér 68000 a rekompilátor do C, bezhlavý emulátor jako měřicí přístroj (snímky, otisky paměti, stopy) a <a href="kit.cs.html#mcp">MCP server</a>, přes který to všechno používá Claude Code nebo jiný agent.</p>
-      <p>Vznikl při stavění her s AI: rozebrat hru z diskety až po poslední rutinu a postavit ji znovu pro prohlížeč, věrně originálu, plynule na dnešních obrazovkách, s širším výhledem. Tři první levely se <a href="#play">dají hrát</a> s vlastní disketou.</p>
-      <ul class="facts">
-        <li>verze <b>0.7.0</b></li>
-        <li><b>32</b> modulů</li>
-        <li><b>27</b> příkazů</li>
-        <li><b>26</b> nástrojů MCP</li>
-        <li><b>2376</b> testů</li>
-      </ul>
-      <p><a class="btn" href="kit.cs.html">Kit a MCP server</a> <a class="btn quiet" href="https://github.com/smikes75/amiga-re-kit">Zdroj na GitHubu</a></p>
-    </div>
+    <h1>Staré hry z Amigy, přestavěné pro váš prohlížeč.</h1>
+    <p class="lede"><strong>AREK</strong> (Amiga Reverse Engineering Kit) je volně dostupná sada nástrojů, se kterou umělá inteligence rozebere hru z Amigy z devadesátých let kousek po kousku a postaví ji znovu jako moderní program. Přestavěná hra se hraje přesně jako originál, na dnešních monitorech se hýbe plynule a umí ukázat víc z levelu, než se vešlo do starého okna.</p>
+    <p>První hrou je <strong>Alien Breed II</strong>. Jeho první dva levely si tu zahrajete s vlastní kopií hry. Další na řadě je <strong>Superfrog</strong>.</p>
+    <p><a class="btn" href="#watch">Podívat se na video</a> <a class="btn quiet" href="#play">Hrát Alien Breed II</a></p>
   </div>
 
-  <div class="wide" aria-labelledby="wide-title">
-    <h2 id="wide-title">Co znamená širší výhled</h2>
-    <p>Stejný okamžik v přestavbě, dvakrát. Nejdřív původní okno přesně tak, jak ho hra kreslila; pak se okno rozšíří a hra kreslí víc ze své vlastní mapy kolem něj. Nic není vymyšlené, level byl vždycky takhle široký.</p>
-    <div class="gallery" id="gallery">
-      <div class="tabs" role="tablist" aria-label="Hra">
-        <button type="button" role="tab" aria-selected="true">Turrican II</button>
-        <button type="button" role="tab" aria-selected="false">Alien Breed</button>
-        <button type="button" role="tab" aria-selected="false">Superfrog</button>
-      </div>
-      <div class="stage"><img class="enh" alt=""><img class="orig" alt=""></div>
-      <div class="bar">
-        <p class="cap"><span class="tag"></span> <span class="text"></span></p>
-        <div class="modes" role="group" aria-label="Zobrazení">
-          <button type="button" class="btn quiet" data-mode="orig" aria-pressed="false">Originál</button>
-          <button type="button" class="btn quiet" data-mode="enh" aria-pressed="false">Širší výhled</button>
-          <button type="button" class="btn quiet" data-mode="auto" aria-pressed="true">Automaticky</button>
-        </div>
-      </div>
+  <section id="watch">
+    <h2>Jak to vypadá</h2>
+    <p>Nahráno v obyčejném webovém prohlížeči. Žádný emulátor, žádná Amiga: vlastní kód hry, přeložený a spuštěný jako součást stránky.</p>
+    <div class="videos">
+      <figure class="video">
+        <video controls preload="metadata" playsinline poster="video/arek-1.jpg"><source src="video/arek-1.mp4" type="video/mp4"></video>
+        <figcaption>Alien Breed II, level 1, v původním okně: obraz přesně tak, jak ho hra kreslila v roce 1993, tady se zapnutým vzhledem starého monitoru.</figcaption>
+      </figure>
+      <figure class="video">
+        <video controls preload="metadata" playsinline poster="video/arek-2.jpg"><source src="video/arek-2.mp4" type="video/mp4"></video>
+        <figcaption>Tentýž level v širším výhledu: víc mapy kolem hráče a pohyb, který zůstává plynulý i na dnešním monitoru.</figcaption>
+      </figure>
     </div>
-    <script id="gallery-items" type="application/json">[{"caption": "Turrican II, svět 1-1: rozptylová zbraň proti letcům. Originál 304 × 216, širší výhled 448 × 280, stejný herní tik.", "orig": {"src": "img/turrican2-original.png", "w": 304, "h": 216, "alt": "Turrican II v přestavbě, původní režim: okno 304 bodů se stavovou lištou"}, "enh": {"src": "img/turrican2-enhanced.png", "w": 448, "h": 280, "alt": "Turrican II v přestavbě, rozšířený režim: stejný tik 448 bodů na šířku"}}, {"caption": "Alien Breed Special Edition 92, level 1. Originál 293 × 256, širší výhled 448 × 274, stejný okamžik: vetřelci jsou vidět vlevo od místa, kde původní okno končilo.", "orig": {"src": "img/alienbreed-original.png", "w": 293, "h": 256, "alt": "Alien Breed v přestavbě, původní režim: vlastní okno hry a HUD"}, "enh": {"src": "img/alienbreed-enhanced.png", "w": 448, "h": 274, "alt": "Alien Breed v přestavbě, rozšířený režim: stejný okamžik 448 bodů na šířku"}}, {"caption": "Superfrog, Magic Woods: žába, mince, třešně a modrý nepřítel. Originál 336 × 262, širší výhled 448 × 294, stejný herní snímek.", "orig": {"src": "img/superfrog-original.png", "w": 336, "h": 262, "alt": "Superfrog v přestavbě, původní režim: okno 336 bodů se stavovou lištou"}, "enh": {"src": "img/superfrog-enhanced.png", "w": 448, "h": 294, "alt": "Superfrog v přestavbě, rozšířený režim: stejný snímek 448 bodů na šířku"}}]</script>
-  </div>
-
-  <div class="demo" aria-labelledby="demo-title">
-    <h2 id="demo-title">Proč prostě neemulovat?</h2>
-    <p>Hra na Amize posouvá svůj svět 50× za sekundu. Váš monitor se obnovuje 60×, 120× nebo 144×. Emulátor může jen opakovat poslední obrázek, dokud nepřijde další, takže pohyb zadrhává. Znovu postavená hra ví, kde všechno je i mezi dvěma kroky, a kreslí každý snímek, který vaše obrazovka zobrazí. Scéna níže je nakreslená touto stránkou, není ze hry.</p>
-
-    <div class="lane">
-      <div class="bar"><strong>Emulováno</strong><span>obrázek se mění 50× za sekundu</span></div>
-      <div class="screen"><canvas id="lane-emu" aria-label="Rolující scéna obnovovaná 50× za sekundu"></canvas></div>
-    </div>
-    <div class="lane">
-      <div class="bar"><strong>Znovu postaveno</strong><span id="rebuilt-note">nová poloha pro každý snímek vaší obrazovky</span></div>
-      <div class="screen"><canvas id="lane-native" aria-label="Stejná scéna umístěná pro každý snímek obrazovky"></canvas></div>
-    </div>
-    <div class="controls">
-      <button class="btn" id="play-toggle" type="button">Pozastavit</button>
-      <button class="btn quiet" id="wide-toggle" type="button" aria-pressed="false">Ukázat širší výhled</button>
-      <span class="hz" id="hz">Měřím vaši obrazovku…</span>
-    </div>
-  </div>
+  </section>
 
   <section id="play">
-    <h2>Zahrajte si první level</h2>
-    <p>Tři hry mají hratelný první level na <a href="https://smikes75.github.io/arek-play/">arek-play</a>; každý končí stránkou o tom, jak vznikl. Stránky nenesou žádná herní data: nahrajete vlastní obraz diskety (.adf), ten se ověří proti známému vydání a nikdy neopustí váš prohlížeč. Kód odvozený ze hry je na stránce zapečetěný a otevře se jen s tou disketou. Obrázky níže jsou z přestaveb, ne z emulátoru.</p>
-    <ul class="games">
-      <li>
-        <h3>Turrican II: The Final Fight</h3>
-        <p class="meta">1991, Factor 5 / Rainbow Arts</p>
-        <figure class="shot"><img src="img/turrican2-islands.png" width="448" height="280" alt="Turrican II, svět 1-1 v přestavbě: létající ostrovy pod barevným přechodem oblohy, širší výhled 448 bodů"><figcaption>Svět 1-1, létající ostrovy v širším výhledu: 448 bodů na šířku místo 304.</figcaption></figure>
-        <p class="state">Postaveno znovu od začátku do konce: pět světů, bossové, intro i závěr</p>
-        <p><a class="btn" href="https://smikes75.github.io/arek-play/turrican2/">Hrát level 1</a></p>
-        <p class="disk">Potřebuje disk 1. Zatím ověřeno s jedním pozdějším vydáním diskety; původní prodejní disketa ještě zkontrolovaná není.</p>
-      </li>
-      <li>
-        <h3>Superfrog</h3>
-        <p class="meta">1993, Team17</p>
-        <figure class="shot"><img src="img/superfrog-enhanced.png" width="448" height="294" alt="Superfrog, Magic Woods v přestavbě: žába na travnaté římse, nad ní mince, širší výhled 448 bodů"><figcaption>Magic Woods v širším výhledu: 448 bodů na šířku místo 336.</figcaption></figure>
-        <p class="state">Titulek, intro a první level, postavené za dva dny</p>
-        <p><a class="btn" href="https://smikes75.github.io/arek-play/superfrog/">Hrát level 1</a></p>
-        <p class="disk">Potřebuje disk 1.</p>
-      </li>
-      <li>
-        <h3>Alien Breed Special Edition 92</h3>
-        <p class="meta">1992, Team17</p>
-        <figure class="shot"><img src="img/alienbreed-enhanced.png" width="448" height="274" alt="Alien Breed, level 1 v přestavbě: ocelové chodby shora, vetřelci za okrajem původního okna vlevo"><figcaption>Level 1 v širším výhledu: vetřelci jsou vidět vlevo od místa, kde původní okno končilo.</figcaption></figure>
-        <p class="state">První level; kód 68000 přeložený předem, ne přepsaný ručně</p>
-        <p><a class="btn" href="https://smikes75.github.io/arek-play/alienbreed/">Hrát level 1</a></p>
-        <p class="disk">Potřebuje disky 1 a 2.</p>
-      </li>
-    </ul>
-
-  </section>
-
-  <section id="how">
-    <h2>Jak se hra staví znovu</h2>
-    <p>Pravidlo je prosté: jediný zdroj pravdy je originál. Nic se nekreslí z paměti ani neodhaduje z videa; každý krok se měří proti skutečné hře běžící v emulátoru.</p>
-    <ol class="steps">
-      <li><div><strong>Přečíst disketu</strong><p>Zmapovat, kde na disketě leží kód, grafika a hudba a jak je hra nahrává.</p></div></li>
-      <li><div><strong>Rozbalit</strong><p>Hry té doby všechno komprimovaly vlastními packery. Každý rozbalovač se postaví znovu a ověří bajt po bajtu proti paměti emulátoru.</p></div></li>
-      <li><div><strong>Porozumět kódu</strong><p>Přeložit strojový kód 68000 do čitelné podoby, rutinu po rutině, a oddělit herní logiku od částí, které řídí speciální čipy Amigy.</p></div></li>
-      <li><div><strong>Dokázat každou rutinu</strong><p>Spustit znovu postavenou rutinu nad otiskem paměti originálu a porovnat výsledek s originálem. Shoda, nebo není hotovo.</p></div></li>
-      <li><div><strong>Postavit pro dnešek</strong><p>Rozběhnout hru v prohlížeči, pak porovnat snímky s originálem ve známých okamžicích. Teprve potom přidat, co originál neuměl: plynulý pohyb a širší výhled.</p></div></li>
-    </ol>
-
-    <h3 style="margin-top:34px">Dvě cesty do prohlížeče</h3>
-    <p>Ani jedna není emulace. Žádná Amiga se nesimuluje, není potřeba Kickstart ROM a nic neinterpretuje strojový kód hry: znovu postavená hra běží jako nativní kód prohlížeče a kreslí každý snímek, o který si obrazovka řekne.</p>
-    <div class="ways">
+    <h2>Zahrajte si Alien Breed II</h2>
+    <div class="game">
+      <figure class="shot"><img src="img/alienbreed2-enhanced.png" width="448" height="293" alt="Alien Breed II v přestavbě: přistávací plocha levelu 1 v širším výhledu"></figure>
       <div>
-        <h3><span>A</span>Přepis</h3>
-        <p>Hra se napíše znovu ručně, rutinu po rutině, každá ověřená proti paměti originálu. Touto cestou šel <b>Turrican II</b>. Dává největší volnost pro vylepšení a stojí nejvíc času.</p>
-      </div>
-      <div>
-        <h3><span>B</span>Překlad</h3>
-        <p>Rekompilátor z kitu přeloží kód 68000 předem do C a to se zkompiluje do WebAssembly; speciální čipy Amigy jsou namodelované jen tak daleko, jak je hra používá. Touto cestou šel <b>Alien Breed</b> a <b>Superfrog</b>: první level běžel během pár dnů a ručně se přepisují jen rutiny, kterých se širší výhled a plynulý pohyb dotýkají.</p>
+        <p class="meta">Alien Breed II: The Horror Continues. Team17, 1993.</p>
+        <ul>
+          <li>Úvod, titulní obrazovka a první dva levely: probojujte se základnou plnou vetřelců, sbírejte klíče a kredity, kupujte zbraně u terminálů a dojděte k východu.</li>
+          <li>Klávesnice (šipky, Ctrl nebo Z střelba, M mapa, mezerník u terminálu) nebo gamepad; jeden nebo dva hráči.</li>
+          <li>Klávesa E kdykoli přepne mezi původním obrazem a širším, plynulejším výhledem.</li>
+        </ul>
+        <p>Potřebujete vlastní obrazy disket verze pro Amigu 500 (diskety 1 a 2 jako soubory <code>.adf</code>; verze AGA pro A1200 podporovaná není). Stránka je zkontroluje a nikam je neposílá. Sama stránka žádnou část hry neobsahuje: přestavěný kód je zamčený a otevře se jen s vašimi disketami.</p>
+        <p><a class="btn" href="https://smikes75.github.io/arek-play/alienbreed2/">Hrát první dva levely</a></p>
       </div>
     </div>
-    <p class="note" style="margin-top:20px">U nové hry přijde nejdřív druhá cesta: přeložit všechno, změřit a teprve pak přepsat jen to, co vylepšení potřebují. V obou případech je výsledek lehčí než emulátor; přepis Turricanu II drží 60 snímků za sekundu i na procesoru šestkrát přiškrceném.</p>
   </section>
 
-  <section id="lives">
-    <div class="two">
-      <div>
-        <h2>Bajt, který drží vaše životy</h2>
-        <p>Starý trik pořád funguje, jen má lepší nástroje. Udělejte otisk paměti hry, přijďte o život, udělejte další otisk a porovnejte je. Bajt, který klesl o jedna, je ten, do kterého jsem před třiceti lety poukoval. Odtud nástroje sledují každou instrukci, která ho čte nebo zapisuje.</p>
-      </div>
-      <pre><code># zastavit v rutině snímku, brzy a později
-$ arek bpstate --address 0x2a40 \
-    --pass 50 --end 30 --out before
-$ arek bpstate --address 0x2a40 \
-    --pass 400 --end 30 --out after
-$ arek diff before after
-1 differing run(s):
-  01f3a2-01f3a3 (1 B)  expected 03  got 02</code></pre>
-    </div>
-    <p class="note">Příkazy jsou skutečné; adresa a výsledek jsou vymyšlené. Druhé zastavení je umístěné za okamžik, kdy hra ztratí život.</p>
-  </section>
-
-  <section id="ai">
-    <h2>Pokus o to, co AI dokáže</h2>
-    <p>Začalo to jako test. Dal jsem různým AI agentům pro programování, Claude Code a OpenAI Codex, stejný druh úkolu na různých hrách: rozebrat hru od diskety nahoru a postavit ji znovu, jen s disketou, emulátorem a pravidlem, že každé tvrzení se musí změřit.</p>
-    <p>Dostali se překvapivě daleko a dělali i chyby, ze kterých stojí za to se poučit: dekodéry, které špatně přečetly instrukci, obraz, který na jednom monitoru vypadal dobře a na jiném se třásl. Každý projekt si cestou postavil vlastní nástroje. Ty, které se osvědčily na víc než jedné hře, se staly <strong>AREKem</strong>.</p>
-    <p>Pak přišel druhý test: usnadní kit další hru? Čerstvá relace na menším a rychlejším modelu (Claude Sonnet) dostala Superfrog, který nikdy neviděla, z diskety k prvnímu levelu hratelnému na tomto webu za dva dny; čtení, rozbalování, překlad a měření dělal kit. Mezery, na které narazila, se tentýž den vrátily do kitu.</p>
-  </section>
-
-
-  <section id="support">
-    <div class="support">
-      <div>
-        <h2>Líbí se vám AREK? Podpořte další rozvoj projektu</h2>
-        <p>AREK je zdarma a zdarma zůstane. Každých pět eur jde do jeho dalšího kusu: víc packerů, lepší rekompilátor, víc testů, další hry. QR kód otevře Revolut.me s předvyplněnými 5 €; platit jde Revolutem, kartou nebo Apple Pay.</p>
-        <p><a class="btn" href="https://revolut.me/stepan2vpo?amount=500&currency=EUR">Poslat 5 €</a></p>
-      </div>
-      <a class="qr" href="https://revolut.me/stepan2vpo?amount=500&currency=EUR" aria-label="Poslat 5 € přes Revolut.me"><img src="img/support-qr.svg" width="164" height="164" alt="QR kód: platební odkaz Revolut.me, 5 €"></a>
+  <section id="next">
+    <h2>Dál pracuju na Superfrogu</h2>
+    <p>Superfrog (Team17, 1993). Jeho přestavbu teď ladím, zatím si ji tu nezahrajete. Dva obrázky z ní, se zapnutým vzhledem starého monitoru:</p>
+    <div class="pair">
+      <figure class="shot"><img src="img/superfrog-original.jpg" width="840" height="658" alt="Superfrog v přestavbě, původní okno: žabák na travnaté římse, nad ním mince" loading="lazy"><figcaption>Původní okno, jak ho kreslila hra.</figcaption></figure>
+      <figure class="shot"><img src="img/superfrog-wider.jpg" width="1080" height="719" alt="Superfrog v přestavbě, širší výhled: létající ostrovy, mince, ježek a šnek" loading="lazy"><figcaption>Širší výhled: víc z levelu na obě strany.</figcaption></figure>
     </div>
   </section>
 
   <footer>
-    <p>AREK má licenci MIT a neobsahuje žádné obrazy disket, žádný Kickstart ROM ani herní data. Hry měří přes emulátor <a href="https://github.com/dirkwhoffmann/vAmiga">vAmiga</a> Dirka W. Hoffmanna; kit nese jen své drobné úpravy jeho zdrojů (MPL-2.0), ne emulátor samotný.</p>
-    <p>Hry patří svým vydavatelům: Turrican II firmám Factor 5 a Rainbow Arts, Superfrog a Alien Breed firmě Team17. Hratelné stránky nenesou žádná jejich data; k hraní levelu dodáte obraz diskety hry, kterou vlastníte, a kód odvozený ze hry je zapečetěný a otevře se jen s ním.</p>
-    <p>Vytvořeno s Claude Code a OpenAI Codex. <a href="https://github.com/smikes75/amiga-re-kit">Kit na GitHubu</a>, <a href="https://pypi.org/project/amiga-re-kit/">balíček na PyPI</a>, <a href="https://github.com/smikes75/arek-play">hratelné stránky</a>.</p>
+    <p>AREK je zdarma a s otevřeným kódem (MIT) a neobsahuje žádné obrazy disket, žádný Kickstart ROM ani data her. Hry měří přes emulátor <a href="https://github.com/dirkwhoffmann/vAmiga">vAmiga</a> od Dirka W. Hoffmanna; kit nese jen jeho malé úpravy (MPL-2.0), ne emulátor samotný.</p>
+    <p>Alien Breed II a Superfrog patří společnosti Team17. Hratelná stránka žádná data hry neobsahuje: obrazy disket hry, kterou vlastníte, dodáte sami a kód odvozený ze hry se otevře jen s nimi.</p>
+    <p>Vytvořeno s Claude Code a OpenAI Codex. <a href="about.cs.html">O AREKu</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit na GitHubu</a>, <a href="https://pypi.org/project/amiga-re-kit/">balíček na PyPI</a>.</p>
   </footer>
 </div>
-
-<script>
-(function () {
-  'use strict';
-  // the gallery: the original window opens into the wider view of the same moment
-  var items = JSON.parse(document.getElementById('gallery-items').textContent);
-  var g = document.getElementById('gallery'), stage = g.querySelector('.stage'), enh = stage.querySelector('.enh'), orig = stage.querySelector('.orig'), tag = g.querySelector('.tag');
-  var cap = g.querySelector('.cap .text'), tabs = g.querySelectorAll('[role=tab]'), modes = g.querySelectorAll('[data-mode]');
-  var names = { orig: g.querySelector('[data-mode=orig]').textContent, enh: g.querySelector('[data-mode=enh]').textContent };
-  var cur = 0, mode = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'enh' : 'auto', timer = 0, wide = false, visible = true;
-
-  function layout() {
-    var it = items[cur], avail = g.clientWidth, S = avail >= it.enh.w * 2 ? 2 : (avail >= it.enh.w ? 1 : avail / it.enh.w);
-    var W = Math.round(it.enh.w * S), H = Math.round(it.enh.h * S), ow = Math.round(it.orig.w * S), oh = Math.round(it.orig.h * S);
-    var ox = Math.round((W - ow) / 2), oy = Math.round((H - oh) / 2);
-    stage.style.width = W + 'px'; stage.style.height = H + 'px';
-    orig.style.width = ow + 'px'; orig.style.height = oh + 'px'; orig.style.left = ox + 'px'; orig.style.top = oy + 'px';
-    enh.style.clipPath = 'inset(' + oy + 'px ' + (W - ox - ow) + 'px ' + (H - oy - oh) + 'px ' + ox + 'px)';
-  }
-  function setWide(w) { wide = w; stage.classList.toggle('wide', w); tag.textContent = w ? names.enh : names.orig; }
-  function tick() { if (visible) setWide(!wide); }
-  function apply() {
-    if (timer) { clearInterval(timer); timer = 0; }
-    if (mode === 'auto') { setWide(false); timer = setInterval(tick, 2800); } else setWide(mode === 'enh');
-    modes.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-mode') === mode)); });
-  }
-  function show(i) {
-    cur = i; var it = items[i];
-    enh.src = it.enh.src; enh.alt = it.enh.alt; orig.src = it.orig.src; orig.alt = it.orig.alt; cap.textContent = it.caption;
-    tabs.forEach(function (t, k) { t.setAttribute('aria-selected', String(k === i)); });
-    stage.classList.add('snap'); layout(); apply();
-    requestAnimationFrame(function () { requestAnimationFrame(function () { stage.classList.remove('snap'); }); });
-  }
-  tabs.forEach(function (t, k) { t.addEventListener('click', function () { show(k); }); });
-  modes.forEach(function (b) { b.addEventListener('click', function () { mode = b.getAttribute('data-mode'); apply(); }); });
-  window.addEventListener('resize', layout);
-  if ('IntersectionObserver' in window) new IntersectionObserver(function (e) { visible = e[0].isIntersecting; }).observe(g);
-  show(0);
-})();
-</script>
-
-<script>
-(function () {
-  'use strict';
-  // A small procedural scene in Amiga style, drawn at "game" resolution and
-  // shown at a whole number of device pixels per game pixel.
-  var VH = 80, VIEW = { narrow: 192, wide: 288 }, LOOP = 512, SPEED = 50; // game px per second = 1 px per 50 Hz tick
-  var SKY = ['#000044', '#001166', '#002288', '#1133aa', '#3344bb', '#6644bb', '#9944aa', '#cc5588', '#ee7766', '#ff9955', '#ffbb55', '#ffdd88'];
-
-  function strip(w, h, paint) { var c = document.createElement('canvas'); c.width = w; c.height = h; paint(c.getContext('2d')); return c; }
-  var sky = strip(1, VH, function (g) {
-    var band = Math.ceil(52 / SKY.length);
-    for (var i = 0; i < SKY.length; i++) { g.fillStyle = SKY[i]; g.fillRect(0, i * band, 1, band); }
-  });
-  var far = strip(LOOP, VH, function (g) {
-    g.fillStyle = '#2a1f5c';
-    for (var x = 0; x < LOOP; x++) {
-      var h = 30 + 9 * Math.sin(x * 2 * Math.PI / 256) + 5 * Math.sin(x * 2 * Math.PI / 64 + 1) + 2 * Math.sin(x * 2 * Math.PI / 32);
-      g.fillRect(x, Math.round(h), 1, VH);
-    }
-  });
-  var near = strip(LOOP, VH, function (g) {
-    var x, y;
-    for (x = 0; x < LOOP; x += 8) for (y = 64; y < VH; y += 4) {
-      g.fillStyle = ((x / 8 + y / 4) & 1) ? '#6b3b1f' : '#8a5229'; g.fillRect(x, y, 8, 4);
-    }
-    g.fillStyle = '#3ca23c'; g.fillRect(0, 62, LOOP, 2);
-    for (x = 24; x < LOOP; x += 64) {               // trees
-      g.fillStyle = '#5a3a1a'; g.fillRect(x + 6, 50, 3, 12);
-      g.fillStyle = '#1f7a2f'; g.fillRect(x, 38, 15, 13); g.fillStyle = '#2fa24a'; g.fillRect(x + 2, 40, 9, 6);
-    }
-    for (x = 56; x < LOOP; x += 128) {              // blocks
-      g.fillStyle = '#cccccc'; g.fillRect(x, 46, 16, 16); g.fillStyle = '#888888'; g.fillRect(x + 2, 48, 12, 12);
-      g.fillStyle = '#ffffff'; g.fillRect(x, 46, 16, 1);
-    }
-  });
-  var ship = strip(14, 7, function (g) {
-    var rows = ['......ww......', '...wwwwwww....', '.oowwbbwwwww..', 'ooowwwwwwwwwww', '.oowwbbwwwww..', '...wwwwwww....', '......ww......'];
-    var col = { w: '#ffffff', b: '#4d8ff0', o: '#ff8a1f' };
-    rows.forEach(function (r, y) { for (var x = 0; x < r.length; x++) if (col[r[x]]) { g.fillStyle = col[r[x]]; g.fillRect(x, y, 1, 1); } });
-  });
-
-  var lanes = [
-    { canvas: document.getElementById('lane-emu'), ticks: true },
-    { canvas: document.getElementById('lane-native'), ticks: false }
-  ];
-  var wide = false, playing = !matchMedia('(prefers-reduced-motion: reduce)').matches, t0 = performance.now(), paused = 0;
-
-  function layout() {
-    var dpr = window.devicePixelRatio || 1;
-    var avail = Math.min(lanes[0].canvas.parentNode.parentNode.clientWidth - 4, 720);
-    // the same window for both lanes: the wider view shows more world, not a bigger window
-    var Sn = Math.max(1, Math.floor(avail * dpr / VIEW.narrow));
-    lanes.forEach(function (l) {
-      // the wider view never gets a bigger window: fewer device pixels per game pixel instead
-      var w = wide && !l.ticks, vw = w ? VIEW.wide : VIEW.narrow, S = w ? Math.max(1, Math.floor(Sn * VIEW.narrow / VIEW.wide)) : Sn;
-      l.vw = vw; l.S = S;
-      l.canvas.width = vw * S; l.canvas.height = VH * S;
-      // a very small low-density screen cannot fit whole pixels: let the browser scale both lanes to one width
-      l.canvas.style.width = (Sn < 2 ? Math.min(avail, VIEW.narrow * 2) : vw * S / dpr) + 'px';
-      l.ctx = l.canvas.getContext('2d'); l.ctx.imageSmoothingEnabled = false;
-    });
-  }
-
-  function layer(g, img, pos, vw, S) {          // pos in game px, already snapped by the caller
-    var x = -(((pos % LOOP) + LOOP) % LOOP) * S;
-    for (; x < vw * S; x += LOOP * S) g.drawImage(img, 0, 0, LOOP, VH, x, 0, LOOP * S, VH * S);
-  }
-  function draw(now) {
-    var t = (playing ? now - t0 : paused) / 1000;
-    lanes.forEach(function (l) {
-      var g = l.ctx, S = l.S, pos;
-      if (l.ticks) pos = Math.floor(t * 50) * SPEED / 50;          // whole game pixels, 50 times a second
-      else pos = Math.round(t * SPEED * S) / S;                      // every frame, to the nearest device pixel
-      g.drawImage(sky, 0, 0, 1, VH, 0, 0, l.vw * S, VH * S);
-      layer(g, far, l.ticks ? Math.floor(pos / 2) : Math.round(pos / 2 * S) / S, l.vw, S);
-      layer(g, near, pos, l.vw, S);
-      var tb = l.ticks ? Math.floor(t * 50) / 50 : t, bob = Math.sin(tb * 2) * 3;
-      bob = l.ticks ? Math.round(bob) : Math.round(bob * S) / S;
-      g.drawImage(ship, 0, 0, 14, 7, 40 * S, (24 + bob) * S, 14 * S, 7 * S);
-    });
-  }
-
-  // measure the display: median time between animation frames
-  var deltas = [], last = 0, hzEl = document.getElementById('hz');
-  function frames(n) { return n + ' ' + (n === 1 ? 'snímek' : n < 5 ? 'snímky' : 'snímků'); }
-  function measure(now) {
-    if (last) deltas.push(now - last);
-    last = now;
-    if (deltas.length === 90) {
-      var d = deltas.slice().sort(function (a, b) { return a - b; })[45], hz = Math.round(1000 / d);
-      hzEl.innerHTML = 'Vaše obrazovka: <b>' + hz + ' Hz</b>. Emulovaný pruh drží každý obrázek ' +
-        (hz % 50 === 0 ? frames(hz / 50) : 'nerovnoměrně ' + Math.floor(hz / 50) + ' nebo ' + frames(Math.ceil(hz / 50))) + '.';
-    }
-  }
-
-  var visible = true;
-  function frame(now) {
-    if (deltas.length < 90) measure(now);
-    if (visible) draw(now);
-    requestAnimationFrame(frame);
-  }
-
-  var playBtn = document.getElementById('play-toggle');
-  function setPlaying(p) {
-    var now = performance.now();
-    if (p && !playing) t0 = now - paused;
-    if (!p && playing) paused = now - t0;
-    playing = p; playBtn.textContent = p ? 'Pozastavit' : 'Přehrát';
-  }
-  playBtn.addEventListener('click', function () { setPlaying(!playing); });
-  if (!playing) { playing = true; setPlaying(false); }
-  var wideBtn = document.getElementById('wide-toggle');
-  wideBtn.addEventListener('click', function () {
-    wide = !wide; wideBtn.setAttribute('aria-pressed', String(wide));
-    document.getElementById('rebuilt-note').textContent = wide ? 'každý snímek vaší obrazovky a o polovinu víc světa' : 'nová poloha pro každý snímek vaší obrazovky';
-    layout();
-  });
-  if ('IntersectionObserver' in window) new IntersectionObserver(function (e) { visible = e[0].isIntersecting; }).observe(document.querySelector('.demo'));
-  window.addEventListener('resize', layout);
-  matchMedia('(resolution: ' + (window.devicePixelRatio || 1) + 'dppx)').addEventListener('change', layout);
-  layout();
-  requestAnimationFrame(frame);
-})();
-</script>
 </body>
 </html>
