@@ -1179,7 +1179,7 @@ def build_parser():
     s = sp.add_parser('web', help='display contract: reference wb-obraz.js, demo page, Chromium tests (WB-OBRAZ-CRT.md)')
     s.add_argument('what', choices=['copy', 'demo', 'test', 'seal', 'check', 'payload', 'serve', 'strip', 'longrun', 'smooth'])
     s.add_argument('target', nargs='?', help='copy: destination folder (writes wb-obraz.js, wb-seal.js, wb-nastaveni.js, '
-                   'wb-zvuk.js, wb-atn.js, wb-content.js, wb-touch.js, wb-takt.js, wb-zvuk-out.js, wb-zvuk-worklet.js); serve: the bundle folder (default .); demo: nothing - it serves the package\'s demo.html on http://127.0.0.1:PORT/demo.html '
+                   'wb-zvuk.js, wb-atn.js, wb-content.js, wb-touch.js, wb-takt.js, wb-zvuk-out.js, wb-zvuk-worklet.js, wb-scene.js); serve: the bundle folder (default .); demo: nothing - it serves the package\'s demo.html on http://127.0.0.1:PORT/demo.html '
                    '(the file itself is arek/web/demo.html in the installed package); test: URL of a page with window.wbObrazTest; '
                    'seal: the first file; check: a presentation bundle folder; strip: the source file; longrun / smooth: the URL of a page with globalThis.WBLONGRUN')
     s.add_argument('rest', nargs='*', help='seal: more files; strip: the output file')

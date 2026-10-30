@@ -14,7 +14,7 @@ measurements (its `docs/code.md` M10-M13) and its specification for the kit (`do
 | 2 the engine in a thread | the kit's host (module E) | the project adds only "what the scene of this game is": the camera, the sprites, the objects with an identity, the time of a drawing pass, the palette per line |
 | 3 the clock | the kit (module C, `wb-takt.js`) | frames of the game allowed by the display's clock, the timeline, the interpolation, the keys at the event |
 | 4 the sound | the kit (module D; the filters are `wb-zvuk.js`) | an AudioWorklet over shared memory, a 30 ms reserve |
-| 5 the drawing | the kit's presenter (module B, `wb-obraz.js` 1.5) | the content of the layers is the project's |
+| 5 the drawing | the kit's presenter (module B, `wb-obraz.js` 1.5) and the scene (module G, `wb-scene.js` 1.0, kit 0.9.0) | the project gives one record per game frame (the window's clean picture, the map, the objects with an identity, the sprites, the HUD); the module composes the wider, smoother view on the GPU |
 | 6 the measurement | the kit (module F, `arek web smooth`) | the project provides the hooks |
 
 The limits (checked by F in Chromium and WebKit, 60 Hz, no frame cap):
@@ -163,6 +163,37 @@ The check hashes the picture and the chip RAM at every frame's end (`engine_hash
 runs on to its next wait loop) and the thread (which stops at the frame's end) give the same line; the synthetic
 test holds native, native in a thread, wasm with ASYNCIFY and wasm in a thread against each other (200 frames: one
 hash).
+
+## G. The scene (`wb-scene.js` 1.0, kit 0.9.0) - done
+
+One way to draw the wider, smoother view for every project, extracted from Alien Breed II (tools/web/gl.js,
+tools/host/view.h: the terrain on the GPU from a tile atlas and a grid, the objects and sprites as quads with index
+textures and a palette per row, the GPU held against a CPU composition pixel for pixel) with Superfrog's measured
+options (docs/POHYB-AUDIT.md, PLYNULOST-K4.md). The project gives one RECORD per game frame, in world coordinates:
+the game's camera and its limits, the window's CLEAN picture (indices, 255 = none, a palette per row - Alien Breed II
+reads it from the game's restore bitmap while the bitplane DMA fetches the line; Superfrog has a clean buffer too),
+the map for the margins (atlas + cells; "map only" where a project proved the map equals the frame), the objects
+with an identity and the time of their drawing pass, the hardware sprites of the frame, the HUD rows. The module
+composes: the camera between frames (wb-takt's pairs), the objects between drawing passes (a 25 Hz loop moves them
+every other frame - pairing consecutive frames would hold and jump), the sprites between frames, everything placed
+on whole device pixels. `WBSCENE.reference(composition)` is the CPU reference of the same composition, so a page can
+check its GPU path for 0 mismatches at any time (`scene.read()`), and a page without WebGL2 draws the reference.
+
+Options (off unless set, each measured in Superfrog): `softClamp { tau }` - at a map edge the stopped camera is
+the mean over tau ms of the clamped cameras, extrapolated past the newest frame by at most tau (a stop 5 -> 2.3 -> 0
+was jitter: 0.104 -> 0.028 px); `smoothY { tau }` - the terrain's vertical camera as a mean over tau ms, while the
+sprites keep their screen position as in the original (the player's landing stays the player's, not the ground's);
+`pairOlder` - a blinking sprite or object (drawn every other frame after a hit) paired with up to n older frames
+(paired 86 % -> 99.6 %); `fixedAxis { axis, value }` - a level whose camera axis is fixed, black outside the range;
+`x17(c)` - 12-bit colours as the DAC gives them. The clean window and the map are sampled at the device pixel's
+top-left corner with the camera split into an integer and a float32 fraction, on both paths, so the floor is the same.
+
+The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
+the 2D path) runs a generated map, a clean window with decorations the map does not have and holes the map shows
+through, three objects on a 25 Hz loop (one blinking), a sprite and HUD rows on the kit's clock; its hooks are
+WBLONGRUN 1.4 and `wbSceneTest.compare()` (the GPU band against the reference). Tests: the pure parts in Node, the
+GPU equality (0 of 114 688 and 458 752 pixels at S = 1 and 2, with and without the options) and `arek web smooth`
+over the page in Chromium (0 missing passes, camera and object jitter under the limit).
 
 ## A. The numbers (kit 0.8.1, the kit's synthetic page, headless)
 

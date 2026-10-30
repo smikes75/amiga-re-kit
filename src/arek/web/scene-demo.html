@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wb-scene demo</title>
+<style>
+  html, body { margin: 0; background: #0a3a8c; color: #fff; font: 15px/1.4 system-ui, sans-serif; }
+  .wrap { padding: 16px; }
+  .game { position: relative; display: inline-block; line-height: 0; background: #000; }
+  canvas { display: block; image-rendering: pixelated; }
+  p { max-width: 70ch; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p><b>wb-scene 1.0</b>: a synthetic game (no game data) drawn by the kit's scene module on the kit's clock: the window's clean
+  picture, the map for the margins, objects with an identity (one of them blinking), a hardware sprite, HUD rows; arrows move
+  the camera, <code>?soft=1</code> soft clamp, <code>?smooth=1</code> vertical smoothing, <code>?pair=2</code> pairing with older
+  frames, <code>?gl=0</code> the 2D path (the CPU reference), <code>?s=N</code> device pixels per game pixel.</p>
+  <div class="game" id="stage"><canvas id="screen"></canvas></div>
+  <p id="status"></p>
+</div>
+<script src="wb-obraz.js"></script>
+<script src="wb-takt.js"></script>
+<script src="wb-scene.js"></script>
+<script>
+'use strict';
+const Q = new URLSearchParams(location.search);
+const W0 = 320, H0 = 200, EXTX = 64, EXTY = 28, W = W0 + 2 * EXTX, H = H0 + 2 * EXTY, HUD = 12;
+const S = Math.max(1, Math.min(4, parseInt(Q.get('s') || '2', 10)));
+const COLS = 64, ROWS = 32, TILES = 8;
+const limits = { x0: 0, x1: COLS * 16 - W0, y0: 0, y1: ROWS * 16 - H0 };
+// the map: 8 tiles of 16 x 16 indices, cells by a fixed pseudo-random sequence
+let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+const atlas = new Uint8Array(TILES * 256);
+for (let t = 0; t < TILES; t++) for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) atlas[t * 256 + y * 16 + x] = 1 + ((t * 3 + ((x >> 2) + (y >> 2)) + (x === 0 || y === 0 ? 1 : 0)) % 14);
+const cells = new Uint16Array(COLS * ROWS); for (let i = 0; i < cells.length; i++) cells[i] = Math.floor(rnd() * TILES);
+const map = { gen: 1, atlas, nslots: TILES, dirty: null, cols: COLS, rows: ROWS, cells, origin: [0, 0] };
+// the palette per window row: 32 colours, a slight gradient down the rows so the per-row lookup is visible
+function palette() {
+  const pal = new Uint8Array(H0 * 32 * 4);
+  for (let r = 0; r < H0; r++) for (let i = 0; i < 32; i++) { const p = (r * 32 + i) * 4; pal[p] = (i * 37) & 255; pal[p + 1] = ((i * 91) & 255) * 0.7 + r * 0.3; pal[p + 2] = (i * 157) & 255; pal[p + 3] = 255; }
+  return pal;
+}
+const PAL = palette();
+// the window's clean picture at a camera: the map, plus decorations the map does not have (drawn once by "the game") and holes (255)
+function cleanWindow(cx, cy) {
+  const idx = new Uint8Array(W0 * H0);
+  for (let y = 0; y < H0; y++) for (let x = 0; x < W0; x++) {
+    const wx = cx + x, wy = cy + y, c = cells[(wy >> 4) * COLS + (wx >> 4)];
+    idx[y * W0 + x] = ((wx >> 3) + (wy >> 3)) % 23 === 0 ? 255 : atlas[c * 256 + (wy & 15) * 16 + (wx & 15)];
+    if (((wx - 100) % 160) < 12 && ((wy - 60) % 120) < 12 && wx >= 100 && wy >= 60) idx[y * W0 + x] = 20;   // a decoration every 160 x 120 world px
+  }
+  return idx;
+}
+const objImg = (w, h, c) => { const a = new Uint8Array(w * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) a[y * w + x] = (x === 0 || y === 0 || x === w - 1 || y === h - 1) ? 255 : c + ((x + y) & 1); return a; };
+const OBJ = [{ id: 1, w: 16, h: 16, idx: objImg(16, 16, 24), vx: 1.5, vy: 0.25 }, { id: 2, w: 24, h: 12, idx: objImg(24, 12, 26), vx: -0.75, vy: 0.5 }, { id: 3, w: 16, h: 16, idx: objImg(16, 16, 28), vx: 2.25, vy: -0.4, blink: true }];
+const SPR = new Uint8Array(16 * 24); for (let y = 0; y < 24; y++) for (let x = 0; x < 16; x++) SPR[y * 16 + x] = (x > 3 && x < 12 && y > 2 && y < 22) ? 30 : 255;
+const hudRow = (h) => { const a = new Uint8Array(W0 * h * 4); for (let y = 0; y < h; y++) for (let x = 0; x < W0; x++) { const p = (y * W0 + x) * 4; a[p] = (x >> 3) & 1 ? 200 : 40; a[p + 1] = 120; a[p + 2] = 30; a[p + 3] = 255; } return a; };
+const HUDT = hudRow(HUD), HUDB = hudRow(HUD);
+// the game: camera by the keys, objects on a 25 Hz loop (every other frame), the sprite at the window's centre
+let cam = [96, 40], keys = 0, done = 0, objs = OBJ.map((o) => ({ id: o.id, x: 160 + 90 * o.id, y: 100 + 40 * o.id }));
+const opts = { pairOlder: parseInt(Q.get('pair') || '0', 10) };
+if (Q.get('soft') === '1') opts.softClamp = { tau: 20 };
+if (Q.get('smooth') === '1') opts.smoothY = { tau: 40 };
+const screen = document.getElementById('screen'), O = WBOBRAZ;
+const pr = new O.Presenter(screen, { gl: Q.get('gl') === '0' ? 'off' : 'auto' });
+const takt = WBTAKT.create({ fps: 50, ahead: 1, latC: 30, latO: 60, lock: 'auto', allow: (n) => { while (done < n) step(); } });
+const scene = new WBSCENE.Scene(Object.assign({ takt }, opts));
+const glOn = pr.gl && scene.attach(pr);
+let drawn = 0, lastTs = 0;
+function step() {
+  done++;
+  const dx = (keys & 2 ? -2 : 0) + (keys & 1 ? 2 : 0), dy = (keys & 4 ? -1 : 0) + (keys & 8 ? 1 : 0);
+  cam = [Math.min(Math.max(cam[0] + dx, limits.x0), limits.x1), Math.min(Math.max(cam[1] + dy, limits.y0), limits.y1)];
+  const t = takt.stamp(done), pass = done & 1 ? t : null;               // the 25 Hz loop moves the objects on odd frames
+  if (pass !== null) for (const o of objs) { const d = OBJ[o.id - 1]; o.x += d.vx * 2; o.y += d.vy * 2; if (o.x < 0 || o.x > COLS * 16 - 24) d.vx = -d.vx; if (o.y < 0 || o.y > ROWS * 16 - 16) d.vy = -d.vy; }
+  if (pass !== null) { takt.pass(t); scene.lastPass = t; }
+  scene.frame({ n: done, t, pass: scene.lastPass || t, cam: cam.slice(), limits, window: { w: W0, h: H0, idx: cleanWindow(cam[0], cam[1]), pal: PAL }, map,
+    objects: objs.filter((o) => !(OBJ[o.id - 1].blink && (done & 1))).map((o) => ({ id: o.id, w: OBJ[o.id - 1].w, h: OBJ[o.id - 1].h, idx: OBJ[o.id - 1].idx, x: o.x, y: o.y })),
+    sprites: [{ k: 0, h: 24, idx: SPR, x: 152, y: 88 }], hud: { top: { h: HUD, rgba: HUDT, split: [60, 180, 260] }, bottom: { h: HUD, rgba: HUDB, split: [160] } } });
+}
+const view = { W, H, S, extX: EXTX, extY: EXTY, x0: 0, y0: HUD * S };
+function layout() { pr.size(W, H + 2 * HUD, S, 1, window.devicePixelRatio || 1); }
+function frame(ts) {
+  takt.tick(ts, done, document.hidden); lastTs = ts;
+  if (scene.frames.length > 1) {
+    if (glOn) pr.present({ draw: scene.drawer(ts, view) });
+    else {                                                                   // the 2D path: the CPU reference in game pixels (the presenter scales), the HUD rows widened by their splits
+      const c = scene.compose(ts, Object.assign({}, view, { S: 1 }));
+      if (c) { const px = WBSCENE.reference(c), full = new Uint8Array(W * (H + 2 * HUD) * 4); full.set(px, W * HUD * 4);
+        [['top', 0], ['bottom', HUD + H]].forEach(([k, row]) => { const hd = c.hud && c.hud[k]; if (!hd) return; const cols = WBSCENE.widenColumns(W0, W, hd.split);
+          for (let y = 0; y < hd.h; y++) for (let x = 0; x < W; x++) { const q = (y * W0 + cols[x]) * 4, o = ((row + y) * W + x) * 4; full[o] = hd.rgba[q]; full[o + 1] = hd.rgba[q + 1]; full[o + 2] = hd.rgba[q + 2]; full[o + 3] = 255; } });
+        pr.present({ pixels: full }); scene.last = c; } }
+    drawn++;
+  }
+  if ((drawn & 31) === 0) document.getElementById('status').textContent = 'frames ' + done + ' drawn ' + drawn + ' ' + (glOn ? 'webgl' : '2d') + ' objs ' + scene.stats.objs + ' uploads ' + scene.stats.uploads + ' ms ' + scene.stats.ms.toFixed(2);
+  requestAnimationFrame(frame);
+}
+WBTAKT.keyboard(window, { ArrowRight: 1, ArrowLeft: 2, ArrowUp: 4, ArrowDown: 8 }, (k) => { keys = k; });
+addEventListener('resize', layout); layout(); requestAnimationFrame(frame);
+globalThis.WBLONGRUN = {
+  version: '1.4',
+  ready: () => drawn > 2,
+  cam: () => scene.last ? scene.last.cam.slice() : [0, 0],
+  objs: () => scene.last ? scene.last.objs.map((o) => [o.o.id, o.x, o.y]) : [],
+  scale: () => S,
+  missing: () => takt.missing,
+  ahead: () => takt.stats().ahead / takt.fm(),
+  interp: () => true,
+  audio: () => ({ reserve: 30, dropouts: 0, latency: 0, simulated: true }),
+  status: () => 'frames ' + done + ' drawn ' + drawn + ' ' + (glOn ? 'webgl' : '2d') + ' display ' + takt.stats().hz + ' Hz',
+};
+// the test hooks: the GPU's band against the CPU reference of the same composition (0 mismatches), the options in force
+globalThis.wbSceneTest = {
+  gl: () => glOn, options: () => opts, size: () => ({ W, H, S }),
+  compare: () => { if (!glOn) return null; const r = scene.read(lastTs, view); if (!r) return null; const ref = WBSCENE.reference(r.composition); let bad = 0;
+    for (let i = 0; i < ref.length; i += 4) if (ref[i] !== r.pixels[i] || ref[i + 1] !== r.pixels[i + 1] || ref[i + 2] !== r.pixels[i + 2]) bad++;
+    return { pixels: ref.length / 4, bad, objs: r.composition.objs.length, sprs: r.composition.sprs.length, f: r.composition.f, cam: r.composition.cam }; },
+  composition: () => { const c = scene.compose(lastTs, view); return c ? { cam: c.cam, gcam: c.gcam, f: c.f, objs: c.objs.map((o) => [o.o.id, o.x, o.y]), n: c.n } : null; },
+};
+</script>
+</body>
+</html>

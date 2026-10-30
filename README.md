@@ -1,30 +1,50 @@
-# amiga-re-kit
+# amiga-re-kit (AREK)
 
-Tools for reverse-engineering Commodore Amiga games from a disk image —
-extracted from three complete game projects
-([S.W.I.V.](https://github.com/smikes75/swiv-amiga-re),
-[Turrican II](https://github.com/smikes75/turrican2-amiga-re-claude),
-[Superfrog](https://github.com/smikes75/superfrog-amiga-re)) and made
-game-agnostic. One Python package (`arek`), one command line (`arek`), and an
-**MCP server** (`arek-mcp`) so an AI assistant can drive the same instruments
-you do.
+**Old Amiga games, rebuilt to run in your browser.** AREK (Amiga Reverse
+Engineering Kit) is a free toolkit that lets an AI coding agent take a 1990s
+Amiga game apart, piece by piece, and build it again as a modern program: the
+game's own 68000 code from the disk is translated ahead of time to C and
+WebAssembly, the chipset is a model checked against the vAmiga emulator, and
+every step is measured against the original. The rebuilt game plays like the
+original, moves smoothly on today's screens and can show more of the level
+than the old window did.
+
+[![Alien Breed II in the rebuild: the original window next to the wider view](docs/img/og.png)](https://smikes75.github.io/amiga-re-kit/)
+
+**Website:** https://smikes75.github.io/amiga-re-kit/ (videos, the playable
+demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
+[FAQ](https://smikes75.github.io/amiga-re-kit/faq.html); Czech mirror).
+**Feedback:** [GitHub Discussions](https://github.com/smikes75/amiga-re-kit/discussions).
+
+## Status, October 2026
+
+- **Alien Breed II** (Team17, 1993): intro, title and levels 1–2 playable at
+  https://smikes75.github.io/arek-play/alienbreed2/ with your own disk images
+  (A500 version, disks 1 and 2 as `.adf`; the preserved Fairlight dumps are
+  verified, an original retail disk is not yet; AGA is not supported).
+  Original and Enhanced modes, one or two players.
+- **Superfrog** (Team17, 1993): in verification, not playable yet.
+- **The kit:** version 0.9.0 on PyPI, 2476 tests. Extracted from five game
+  rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
+  and made game-agnostic: one Python package (`arek`), one command line
+  (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
+  the same instruments you do.
 
 The method is the point: **first a complete, *measured* description of the
-original — only then anything else.** Nothing here guesses. The decoder
+original, only then anything else.** Nothing here guesses. The decoder
 refuses instructions it does not model, the walker reports every indirect
 jump it cannot follow, the packers verify with the checksums the originals
 carry, and the emulator captures are compared byte for byte.
 
-**No game data is included or needed to run the kit.** The tests use a
-hand-assembled 20-byte program and random buffers. Your disk image and
-Kickstart ROM stay on your machine, referenced from a git-ignored
-`local.conf`.
+**No game data is included or needed to run the kit.** The tests use
+hand-assembled programs and random buffers. Your disk image and Kickstart ROM
+stay on your machine, referenced from a git-ignored `local.conf`.
 
 ## Install
 
 ```sh
-pip install -e ".[mcp,dev]"         # or without extras: pip install -e .
-python -m pytest                    # 2376 tests: synthetic data + CPU timings measured on Moira
+pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
+python -m pytest                    # 2476 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -108,6 +128,8 @@ arek web serve build/present --isolated                 # ... with the COOP / CO
 arek web strip web/page.js build/present/page.js --drop FULL   # the presentation's variant: lines //@FULL and blocks //@FULL{ ... //@}FULL cut out
 arek web longrun http://127.0.0.1:8930/ --minutes 3     # smoothness over a longer play (playwright; the page's globalThis.WBLONGRUN hook)
 arek web smooth http://127.0.0.1:8920/smooth-demo.html  # the canon's limits in Chromium and WebKit: dropped frames, camera and object steps, missing passes, key latency, sound under stalls (docs/WB-PLYNULOST.md; --no-interp for an original mode)
+#    wb-scene.js (0.9.0): the wider, smoother view composed on the GPU from one record per game frame (clean window, map, objects, sprites, HUD),
+#    with a CPU reference for a 0-mismatch check; scene-demo.html shows it (docs/WB-PLYNULOST.md G)
 arek docs WB-PLYNULOST                                   # the kit's documents ship with it (arek docs: the list; --path: the file)
 arek shots cap/shots/o build/shots/h --align 8          # the pictures of two runs paired by frame, each pair aligned for a screen shake
 arek web test http://localhost:8911/?test=1            # ... and §6: the menu and the sound contract, when the page has the hooks
