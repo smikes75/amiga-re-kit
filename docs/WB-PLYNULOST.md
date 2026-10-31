@@ -199,6 +199,15 @@ no new pass came for longer (an interlude drawn by other code); the module warns
 than 500 ms behind the drawer's ts (rec.t and ts must share one clock). Superfrog on 1.0: 0 of 3 622 080 px against
 the reference in Chromium and WebKit, 0 dropped, object jitter 0.
 
+1.2 (kit 0.9.2, Superfrog's KIT-GAPS 44-46 after its measurements on 1.1: 0 of 7 845 552 px against the reference over
+worlds 1-7; the module's camera jitter 0.077 px against its old path's 0.057 came from the smoothing's lag and the
+interpolation across a teleport): `jumpMax` (40 game px) - a camera, object or sprite that moves farther between two
+frames is shown at the new place, not interpolated across (a teleport after a death crossed the map); `sprites[].id`
+- the identity for the pairs when the sprite number is not one (the player and a one-line leftover of the same
+sprite); `camMean { tau, shape }` - the terrain's camera as the symmetric mean of the clamped camera over t +- tau on
+both axes, always (Superfrog's best measured smoothing: no lag, the corners at a turn rounded), replacing softClamp
+and smoothY, while the sprites keep the original's screen position shifted only by the hard stop at a map edge.
+
 The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
 the 2D path) runs a generated map, a clean window with decorations the map does not have and holes the map shows
 through, three objects on a 25 Hz loop (one blinking), a sprite and HUD rows on the kit's clock; its hooks are

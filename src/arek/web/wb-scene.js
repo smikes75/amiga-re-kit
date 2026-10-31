@@ -1,6 +1,7 @@
-// wb-scene.js 1.1 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
+// wb-scene.js 1.2 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
 // after Superfrog's switch - KIT-GAPS 40-43: screen-fixed sprites, the means over the interpolated camera, a layer of
-// drawings without identity, a guard for a pass that never changes, one timebase).
+// drawings without identity, a guard for a pass that never changes, one timebase; 1.2 kit 0.9.2 - KIT-GAPS 44-46: no
+// interpolation across a jump, sprites[].id, camMean for both axes).
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -25,14 +26,20 @@
 //                                        texture cache; the module computes fnv1a(idx) when absent), idx = Uint8Array(w*h)
 //                                        (255 = transparent), x, y = world px (fractions allowed), pass = the time of the
 //                                        drawing pass the position belongs to (objects of a 25 Hz loop move every other frame)
-//     sprites: [{ k, h, idx, x, y, screen }],   hardware sprites of this frame: k = sprite number (lower on top), idx =
+//     sprites: [{ k, h, idx, x, y, screen, id }],   hardware sprites of this frame: k = sprite number (lower on top), idx =
 //                                        Uint8Array(16*h), x, y = screen px relative to the window; screen = true (1.1): fixed
-//                                        on the screen (a badge in a corner), so the clamp at a map edge does not move it
+//                                        on the screen (a badge in a corner), so the clamp at a map edge does not move it;
+//                                        id (1.2, optional) = the identity for the interpolation when k is not one (several
+//                                        runs of the same sprite number: the player and a one-line leftover) - default k
 //     hud: { top: { h, rgba, split }, bottom: {...} } }   optional rows above / below the playfield: rgba = Uint8Array(w*h*4) of
 //                                        the original's width, split = columns repeated to widen it (Alien Breed II: 6 cuts)
 // The view: { W, H, S, extX, extY, x0, y0 } - the wider window (W = window.w + 2 extX, H = window.h + 2 extY), S device pixels
 // per game pixel, x0 / y0 = where the view's top-left lands in the presenter's framebuffer (device px from the top).
-// Options (all measured in Superfrog, off unless set): softClamp { tau } (the stopped camera at a map edge as the mean of
+// Options (all measured in Superfrog, off unless set): jumpMax (1.2, default 40 game px: a camera, object or sprite that
+// moves farther than that between two frames is not interpolated - a teleport after a death crossed the map), camMean
+// { tau, shape } (1.2: the terrain's camera as the mean of the clamped camera over t +- tau on both axes, always, sampled
+// every 5 ms - Superfrog's best measured smoothing, symmetric so without lag; it replaces softClamp and smoothY when set;
+// the sprites keep their screen position as in the original, shifted only by the stop at a map edge), softClamp { tau } (the stopped camera at a map edge as the mean of
 // the interpolated clamped camera over t +- tau ms, sampled every 5 ms, extrapolated past the newest frame by at most tau),
 // smoothY { tau } (the terrain's vertical camera as a triangle-weighted mean over the last tau ms, sampled every 5 ms;
 // sprites keep their screen position as in the original), pairOlder (a blinking sprite / object paired with up to n older
@@ -48,7 +55,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '1.1';
+    const VERSION = '1.2';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -143,7 +150,11 @@ const WBSCENE = (() => {
         if (takt) { const v = takt.view(ts); tv = v.tv; tvO = v.tvO; p = takt.pair(frames, tv); q = takt.pair(passes, tvO); }
         else { p = pairOf(frames, tv); q = pairOf(passes, tvO); }
         if (!p) return null;
-        const A = p.a, B = p.b || p.a, f = Math.min(Math.max(p.f, 0), p.b ? 1 + (o.extrapolate || 0) : 0);
+        const jumpMax = o.jumpMax === undefined ? 40 : o.jumpMax;
+        const jumped = (u, v) => jumpMax > 0 && (Math.abs(u[0] - v[0]) > jumpMax || Math.abs(u[1] - v[1]) > jumpMax);
+        const A = p.a, B = p.b || p.a;
+        let f = Math.min(Math.max(p.f, 0), p.b ? 1 + (o.extrapolate || 0) : 0);
+        if (p.b && jumped(A.cam, B.cam)) f = 1;                                   // 1.2 (KIT-GAPS 44): a jump is shown, not crossed
         const OA = q ? q.a : A, OB = q ? (q.b || q.a) : B, of = q ? Math.min(Math.max(q.f, 0), 1) : 0;
         const win = B.window, lim = B.limits;
         // the game's camera between the frames, the view's camera clamped; soft clamp and vertical smoothing as means over frames
@@ -161,16 +172,23 @@ const WBSCENE = (() => {
         if (o.smoothY && o.smoothY.tau > 0 && !(o.fixedAxis && o.fixedAxis.axis === 'y')) {
             const my = windowMean(frames, tv, o.smoothY.tau, (fr) => clampedOf(fr, 1), { shape: 'past' }); if (my !== null) vcam[1] = my;   // sprites keep spriteCam
         }
+        if (o.camMean && o.camMean.tau > 0) {                                       // 1.2 (KIT-GAPS 46): the symmetric mean on both axes, always
+            const sh = { shape: o.camMean.shape || 'box' }, cl = clampCam(gcam[0], gcam[1], lim, win, ext);
+            const mx = windowMean(frames, tv, o.camMean.tau, (fr) => clampedOf(fr, 0), sh), my = windowMean(frames, tv, o.camMean.tau, (fr) => clampedOf(fr, 1), sh);
+            if (mx !== null) { vcam = [o.fixedAxis && o.fixedAxis.axis === 'x' ? vcam[0] : mx, o.fixedAxis && o.fixedAxis.axis === 'y' ? vcam[1] : my]; }
+            spriteCam[0] = cl[0]; spriteCam[1] = cl[1];                             // the sprites: the original's screen position plus the hard stop at an edge
+        }
         const history = passes.filter((fr) => fr.t < (OA ? OA.t : 0));
-        const objs = pairById(OA, OB, of, (fr) => fr.objects || [], o.pairOlder || 0, history).map((pr) => ({
-            o: pr.to, x: pr.from ? lerp(pr.from.x, pr.to.x, pr.f) : pr.to.x, y: pr.from ? lerp(pr.from.y, pr.to.y, pr.f) : pr.to.y }));
+        const objs = pairById(OA, OB, of, (fr) => fr.objects || [], o.pairOlder || 0, history).map((pr) => {
+            const from = pr.from && !jumped([pr.from.x, pr.from.y], [pr.to.x, pr.to.y]) ? pr.from : null;
+            return { o: pr.to, x: from ? lerp(from.x, pr.to.x, pr.f) : pr.to.x, y: from ? lerp(from.y, pr.to.y, pr.f) : pr.to.y }; });
         const shist = frames.filter((fr) => fr.t < A.t);
-        const sprs = pairById(A, B, f, (fr) => (fr.sprites || []).map((s) => Object.assign({ id: s.k }, s)), o.pairOlder || 0, shist).map((pr) => {
+        const sprs = pairById(A, B, f, (fr) => (fr.sprites || []).map((s) => Object.assign({ id: s.id !== undefined ? s.id : s.k }, s)), o.pairOlder || 0, shist).map((pr) => {
             if (pr.to.screen) return { s: pr.to, x: vcam[0] + ext.x + pr.to.x, y: vcam[1] + ext.y + pr.to.y, screen: true };   // 1.1: fixed on the screen
-            // screen px relative to the window -> world (window of its own frame) -> the view
-            const wx = pr.from ? lerp(pr.from.x + frameCam(frames, pr.from, A)[0], pr.to.x + B.cam[0], pr.f) : pr.to.x + B.cam[0];
-            const wy = pr.from ? lerp(pr.from.y + frameCam(frames, pr.from, A)[1], pr.to.y + B.cam[1], pr.f) : pr.to.y + B.cam[1];
-            return { s: pr.to, x: wx, y: wy };
+            // screen px relative to the window -> world (window of its own frame) -> the view; a jump is not crossed (1.2)
+            const fc = pr.from ? frameCam(frames, pr.from, A) : null, fw = fc ? [pr.from.x + fc[0], pr.from.y + fc[1]] : null, tw = [pr.to.x + B.cam[0], pr.to.y + B.cam[1]];
+            const from = fw && !jumped(fw, tw) ? fw : null;
+            return { s: pr.to, x: from ? lerp(from[0], tw[0], pr.f) : tw[0], y: from ? lerp(from[1], tw[1], pr.f) : tw[1] };
         });
         return { A, B, f, OA, OB, of, cam: vcam, spriteCam, gcam, win, map: B.map || null, limits: lim, objs, sprs, hud: B.hud || null,
                  W: win.w + 2 * ext.x, H: win.h + 2 * ext.y, S: view.S || 1, ext, fixed: o.fixedAxis || null, n: B.n };
@@ -223,7 +241,7 @@ const WBSCENE = (() => {
         };
         for (const ob of c.objs) blit(ob.o.idx, ob.o.w, ob.o.h, ob.x, ob.y);
         const sprs = c.sprs.slice().sort((p, q) => q.s.k - p.s.k);
-        for (const sp of sprs) { const d = sp.screen ? 0 : c.cam[1] - c.spriteCam[1]; blit(sp.s.idx, 16, sp.s.h, sp.x, sp.y + d); }
+        for (const sp of sprs) { const dx = sp.screen ? 0 : c.cam[0] - c.spriteCam[0], dy = sp.screen ? 0 : c.cam[1] - c.spriteCam[1]; blit(sp.s.idx, 16, sp.s.h, sp.x + dx, sp.y + dy); }
         return out;
     }
 
@@ -349,9 +367,9 @@ const WBSCENE = (() => {
             gl.uniform1i(u.u_mode, 2); this._quad(0, 0, Wd, Hd);
             gl.uniform1i(u.u_mode, 1); let objs = 0, sprs = 0;
             for (const ob of c.objs) { const e = this._objTex(ob.o); gl.bindTexture(gl.TEXTURE_2D, e.t); this._quad(Math.round((ob.x - c.cam[0]) * S), Math.round((ob.y - c.cam[1]) * S), e.w * S, e.h * S); objs++; }
-            const sorted = c.sprs.slice().sort((p, q) => q.s.k - p.s.k), dy = c.cam[1] - c.spriteCam[1];
+            const sorted = c.sprs.slice().sort((p, q) => q.s.k - p.s.k), dx = c.cam[0] - c.spriteCam[0], dy = c.cam[1] - c.spriteCam[1];
             for (const sp of sorted) { if (!this.pool[sprs]) this.pool[sprs] = this._tex(); this._r8(this.pool[sprs], 16, sp.s.h, sp.s.idx);
-                this._quad(Math.round((sp.x - c.cam[0]) * S), Math.round((sp.y + (sp.screen ? 0 : dy) - c.cam[1]) * S), 16 * S, sp.s.h * S); sprs++; }
+                this._quad(Math.round((sp.x + (sp.screen ? 0 : dx) - c.cam[0]) * S), Math.round((sp.y + (sp.screen ? 0 : dy) - c.cam[1]) * S), 16 * S, sp.s.h * S); sprs++; }
             if (c.hud) this._hud(c, view, d, x0, y0);
             gl.bindVertexArray(null); this.stats.objs = objs; this.stats.sprs = sprs; this.stats.ms = performance.now() - t0;
             return true;

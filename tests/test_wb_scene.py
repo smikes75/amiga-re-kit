@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '1.1' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '1.2' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -114,6 +114,30 @@ def test_screen_sprites_over_layer_and_pass_guard():
     assert r[0] >= 6 and r[1] == r[0] + 1 and r[2] == 1 and r[3] == 1                         # with the guard the objects follow the frames; without it the stale pass
 
 
+def test_jumps_sprite_ids_and_the_symmetric_mean():
+    """1.2 (Superfrog KIT-GAPS 44-46): a camera jump (a teleport after a death) is shown, not crossed - and so are jumps
+    of objects and sprites; sprites[].id pairs several runs of one sprite number; camMean smooths both axes with a
+    symmetric mean (no lag on a ramp) while the sprites keep the original's screen position plus the hard stop."""
+    r = js(with_mk("""(() => { const a = mk(1, 0, [110, 0], 0), b = mk(2, 20, [2000, 0], 200); b.limits = a.limits = { x0: 0, x1: 5000, y0: 0, y1: 0 };
+        const mid = S.compose([a, b], 10, { S: 1 }, {}, null), off = S.compose([a, b], 10, { S: 1 }, { jumpMax: 0 }, null);
+        const near = S.compose([a, mk(2, 20, [2000, 0], 9)], 10, { S: 1 }, {}, null);
+        return [mid.cam[0], mid.objs[0].x, mid.sprs[0].x, off.cam[0], off.objs[0].x, near.objs[0].x]; })()"""))
+    assert r[0] == 2000 and r[1] == 200 and r[2] == 2002 and r[3] == 1055 and r[4] == 100   # shown at B; without the guard crossed half way
+    assert r[5] == 4.5                                                                      # an object that moved 9 px still interpolates while the camera jumped
+    r = js(with_mk("""(() => { const a = mk(1, 0, [0, 0], 0), b = mk(2, 20, [0, 0], 0);
+        a.sprites = [{ k: 0, id: 'frog', h: 1, idx: a.sprites[0].idx, x: 10, y: 0 }, { k: 0, id: 'rest', h: 1, idx: a.sprites[0].idx, x: 100, y: 0 }];
+        b.sprites = [{ k: 0, id: 'rest', h: 1, idx: a.sprites[0].idx, x: 100, y: 0 }, { k: 0, id: 'frog', h: 1, idx: a.sprites[0].idx, x: 20, y: 0 }];
+        const c = S.compose([a, b], 10, { S: 1 }, {}, null); return c.sprs.map((s) => [s.s.id, s.x]); })()"""))
+    assert sorted(r) == [['frog', 15], ['rest', 100]]                                       # paired by id, not by the shared k
+    r = js(with_mk("""(() => { const fr = []; for (let i = 0; i < 8; i++) fr.push(mk(i + 1, i * 20, [i * 10, 0], 0));
+        const m = S.compose(fr, 70, { S: 1 }, { camMean: { tau: 20 } }, null), p = S.compose(fr, 70, { S: 1 }, {}, null);
+        const turn = []; for (let i = 0; i < 8; i++) turn.push(mk(i + 1, i * 20, [Math.min(i, 6 - i) * 10, 0], 0));   // up to 30 at t = 60, then back
+        const t = S.compose(turn, 60, { S: 1 }, { camMean: { tau: 20 } }, null);
+        return [m.cam, p.cam, m.spriteCam, t.cam[0], t.spriteCam[0]]; })()"""))
+    assert r[0] == r[1] == [35, 0] and r[2] == [35, 0]                                      # a ramp: the symmetric mean has no lag
+    assert r[3] < 30 and r[4] == 30                                                         # at a turn the terrain's camera rounds the corner, the sprites keep the game's
+
+
 def test_options_fixed_axis_soft_clamp_and_smoothing():
     r = js(with_mk("""(() => { const fr = [mk(1, 0, [0, 0], 0), mk(2, 20, [0, 10], 0), mk(3, 40, [0, 20], 0)];
         const fixed = S.compose(fr, 20, { S: 1 }, { fixedAxis: { axis: 'y', value: 3 } }, null);
@@ -150,7 +174,7 @@ def _run_page(url_tail, fn):
         srv.shutdown()
 
 
-@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2&soft=1&smooth=1'])
+@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2&soft=1&smooth=1', '?s=2&pair=2&mean=1'])
 def test_gpu_equals_the_reference(tail):
     """The GPU band against the CPU reference of the same composition, pixel for pixel, while the camera moves and the
     objects interpolate (as Alien Breed II checked its WebGL path: 0 of 60 M pixels)."""
