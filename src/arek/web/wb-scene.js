@@ -1,7 +1,8 @@
 // wb-scene.js 1.2 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
 // after Superfrog's switch - KIT-GAPS 40-43: screen-fixed sprites, the means over the interpolated camera, a layer of
 // drawings without identity, a guard for a pass that never changes, one timebase; 1.2 kit 0.9.2 - KIT-GAPS 44-46: no
-// interpolation across a jump, sprites[].id, camMean for both axes).
+// interpolation across a jump, sprites[].id, camMean for both axes; 1.3 kit 0.9.3 - objects[].ox/oy, the drawing's offset
+// from the logical position).
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -21,11 +22,13 @@
 //                                        rebuilt, dirty = Uint16Array of slots changed since the last frame (null = none),
 //                                        cells = Uint16Array(cols*rows) slot per 16 x 16 cell (0xffff = none), origin = [wx, wy]
 //                                        world px of cell (0, 0)
-//     objects: [{ id, key, w, h, idx, x, y, pass, opaque }],   moving things drawn by the game's own records: id = identity
+//     objects: [{ id, key, w, h, idx, x, y, ox, oy }],   moving things drawn by the game's own records: id = identity
 //                                        across frames (for the interpolation), key = a content key of the graphics (the
 //                                        texture cache; the module computes fnv1a(idx) when absent), idx = Uint8Array(w*h)
-//                                        (255 = transparent), x, y = world px (fractions allowed), pass = the time of the
-//                                        drawing pass the position belongs to (objects of a 25 Hz loop move every other frame)
+//                                        (255 = transparent), x, y = the object's LOGICAL position in world px (fractions
+//                                        allowed) - the position the game moves, not the drawing's corner (an animation shifts
+//                                        the corner by a few px, which would interpolate as motion - Superfrog); ox, oy (1.3,
+//                                        optional) = the drawing's offset from x, y, so the image need not carry blank pixels
 //     sprites: [{ k, h, idx, x, y, screen, id }],   hardware sprites of this frame: k = sprite number (lower on top), idx =
 //                                        Uint8Array(16*h), x, y = screen px relative to the window; screen = true (1.1): fixed
 //                                        on the screen (a badge in a corner), so the clamp at a map edge does not move it;
@@ -55,7 +58,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '1.2';
+    const VERSION = '1.3';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -239,7 +242,7 @@ const WBSCENE = (() => {
                     const v = idx[Math.floor(j / S) * w + Math.floor(i / S)]; if (v === 255) continue;
                     put(dx, dy, v, palRow(gameY(dy))); } }
         };
-        for (const ob of c.objs) blit(ob.o.idx, ob.o.w, ob.o.h, ob.x, ob.y);
+        for (const ob of c.objs) blit(ob.o.idx, ob.o.w, ob.o.h, ob.x + (ob.o.ox || 0), ob.y + (ob.o.oy || 0));   // 1.3: the drawing's offset from the logical position
         const sprs = c.sprs.slice().sort((p, q) => q.s.k - p.s.k);
         for (const sp of sprs) { const dx = sp.screen ? 0 : c.cam[0] - c.spriteCam[0], dy = sp.screen ? 0 : c.cam[1] - c.spriteCam[1]; blit(sp.s.idx, 16, sp.s.h, sp.x + dx, sp.y + dy); }
         return out;
@@ -366,7 +369,7 @@ const WBSCENE = (() => {
             gl.activeTexture(gl.TEXTURE0); this._r8(this.texWin, win.w, win.h, win.idx);
             gl.uniform1i(u.u_mode, 2); this._quad(0, 0, Wd, Hd);
             gl.uniform1i(u.u_mode, 1); let objs = 0, sprs = 0;
-            for (const ob of c.objs) { const e = this._objTex(ob.o); gl.bindTexture(gl.TEXTURE_2D, e.t); this._quad(Math.round((ob.x - c.cam[0]) * S), Math.round((ob.y - c.cam[1]) * S), e.w * S, e.h * S); objs++; }
+            for (const ob of c.objs) { const e = this._objTex(ob.o); gl.bindTexture(gl.TEXTURE_2D, e.t); this._quad(Math.round((ob.x + (ob.o.ox || 0) - c.cam[0]) * S), Math.round((ob.y + (ob.o.oy || 0) - c.cam[1]) * S), e.w * S, e.h * S); objs++; }
             const sorted = c.sprs.slice().sort((p, q) => q.s.k - p.s.k), dx = c.cam[0] - c.spriteCam[0], dy = c.cam[1] - c.spriteCam[1];
             for (const sp of sorted) { if (!this.pool[sprs]) this.pool[sprs] = this._tex(); this._r8(this.pool[sprs], 16, sp.s.h, sp.s.idx);
                 this._quad(Math.round((sp.x + (sp.screen ? 0 : dx) - c.cam[0]) * S), Math.round((sp.y + (sp.screen ? 0 : dy) - c.cam[1]) * S), 16 * S, sp.s.h * S); sprs++; }

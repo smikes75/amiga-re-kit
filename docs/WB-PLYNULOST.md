@@ -208,6 +208,12 @@ sprite); `camMean { tau, shape }` - the terrain's camera as the symmetric mean o
 both axes, always (Superfrog's best measured smoothing: no lag, the corners at a turn rounded), replacing softClamp
 and smoothY, while the sprites keep the original's screen position shifted only by the hard stop at a map edge.
 
+1.3 (kit 0.9.3): `objects[].ox, oy` - the drawing's offset from the object's logical position. x, y must be the
+position the game moves, not the drawing's corner: an animation shifts the corner by a few pixels, which the
+interpolation would take for motion (Superfrog measured 0.84-2.5 px per frame on the screen instead of 1.25).
+Superfrog on 1.2 (camMean 20, pairOlder 2, level 1, 30 s, a loaded machine): 0 dropped of 1 774, camera jitter
+0.032 px against its old path's 0.052, objects 0, 0 of 2 535 456 px against the reference.
+
 The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
 the 2D path) runs a generated map, a clean window with decorations the map does not have and holes the map shows
 through, three objects on a 25 Hz loop (one blinking), a sprite and HUD rows on the kit's clock; its hooks are

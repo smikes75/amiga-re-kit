@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '1.2' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '1.3' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -136,6 +136,13 @@ def test_jumps_sprite_ids_and_the_symmetric_mean():
         return [m.cam, p.cam, m.spriteCam, t.cam[0], t.spriteCam[0]]; })()"""))
     assert r[0] == r[1] == [35, 0] and r[2] == [35, 0]                                      # a ramp: the symmetric mean has no lag
     assert r[3] < 30 and r[4] == 30                                                         # at a turn the terrain's camera rounds the corner, the sprites keep the game's
+
+
+def test_object_drawing_offset():
+    """1.3: objects[].ox/oy place the drawing relative to the object's logical position, which is what interpolates."""
+    r = js(with_mk("""(() => { const a = mk(1, 0, [0, 0], 0), b = mk(2, 20, [0, 0], 2); a.objects[0].ox = 1; b.objects[0].ox = 1; a.sprites[0].x = 3; b.sprites[0].x = 3;
+        const c = S.compose([a, b], 10, { S: 1 }, {}, null); const px = S.reference(c); return [c.objs[0].x, px[0], px[1 * 4], px[2 * 4], px[3 * 4]]; })()"""))
+    assert r[0] == 1 and r[1] == 10 and r[2] == 20 and r[3] == 30 and r[4] == 40            # logical x 1 (half way 0 -> 2), the drawing at x 2; x 1 shows the map through the hole, the sprite at x 3
 
 
 def test_options_fixed_axis_soft_clamp_and_smoothing():
