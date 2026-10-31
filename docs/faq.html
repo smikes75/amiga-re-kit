@@ -173,7 +173,7 @@
     <dt id="vrr">Why not just use an emulator with a variable-refresh (VRR) monitor?</dt>
     <dd><p>VRR removes the judder of 50 Hz on a 60 Hz screen, and for the Original mode that is a fine solution. But the game's main loop still moves its objects 25 times a second (the camera 50) and the window is still 330 pixels wide. The Enhanced mode interpolates the camera and the objects between game frames and draws a wider view from the game's own data, which no emulator setting can do.</p></dd>
     <dt id="lag">Does the Enhanced mode add input lag?</dt>
-    <dd><p>Smoothing needs the next game frame before it can draw the step in between, so the picture is drawn a little behind the game: the camera about 30 ms, the objects about 40 ms. Measured on the current build with the kit's tool in headless Chromium (a key event dispatched in the page until the camera moves): about 80 ms. The version on this site cannot use the faster engine thread, because GitHub Pages does not send the headers it needs. A side-by-side measurement against a real Amiga is on the list.</p></dd>
+    <dd><p>Smoothing needs to know the next game frame before it can draw the step in between, so in Enhanced mode the camera is drawn about one game frame (20 ms) later. Exact numbers for the published build will follow once I have measured it.</p></dd>
     <dt id="disks">Which disk images work?</dt>
     <dd><p>The commonly preserved dumps of the Amiga 500 version (the Fairlight release, with and without trainer), disks 1 and 2 as <code>.adf</code>; the page unlocks by the game's files on the disks, not by one exact image. An original retail disk has not been verified yet: if you own one, please <a href="about.html#feedback">write to me</a>. The AGA version is not supported. The page tells you when a disk is not recognised. Each image below was started on the public build and reached level 1 (TOSEC names and the first 16 hex digits of their SHA-256):</p>
       <table>
@@ -188,6 +188,8 @@
         <tr><td>[cr FLT](Disk 2 of 3)</td><td>30ab30957ba36e68…</td></tr>
         </tbody>
       </table></dd>
+    <dt id="levels">Why only two levels?</dt>
+    <dd><p>The rebuild runs the whole game. The Enhanced view, though, is tuned and checked level by level: the wider window, the earlier activation of objects and the sound routing all depend on how each level is built, and levels 1 and 2 are the ones that are done. The later levels run, but I have not played them through myself yet and would rather not show them until they are finished.</p></dd>
     <dt id="data">Does the page contain the game?</dt>
     <dd><p>No game data: no graphics, levels, music or code listings. The code derived from the game and its start state are encrypted and unlock only with a key derived from your own disks. Your disk images are checked in your browser and never uploaded.</p></dd>
     <dt id="ai">What exactly does the AI do?</dt>

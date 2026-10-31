@@ -173,7 +173,7 @@
     <dt id="vrr">Proč prostě nepoužít emulátor s monitorem s proměnnou obnovovací frekvencí (VRR)?</dt>
     <dd><p>VRR odstraní poskakování 50 Hz na 60Hz monitoru a pro režim Originál je to dobré řešení. Hlavní smyčka hry ale pořád posouvá objekty 25krát za sekundu (kameru 50krát) a okno je pořád 330 bodů široké. Režim Vylepšeno dopočítává polohu kamery i objektů mezi snímky hry a z vlastních dat hry kreslí širší výhled, což žádné nastavení emulátoru neumí.</p></dd>
     <dt id="lag">Přidává režim Vylepšeno zpoždění ovládání?</dt>
-    <dd><p>Plynulý pohyb potřebuje znát další snímek hry, než nakreslí mezikrok, takže obraz je o kousek za hrou: kamera asi o 30 ms, objekty asi o 40 ms. Změřeno na současném sestavení nástrojem kitu v bezhlavém Chromiu (od stisku klávesy vyvolaného ve stránce po pohyb kamery): asi 80 ms. Verze na tomto webu nemůže použít rychlejší vlákno enginu, protože GitHub Pages neposílá hlavičky, které potřebuje. Měření vedle skutečné Amigy je v plánu.</p></dd>
+    <dd><p>Plynulý pohyb potřebuje znát další snímek hry, než nakreslí mezikrok, takže v režimu Vylepšeno se kamera kreslí asi o jeden snímek hry (20 ms) později. Přesná čísla pro zveřejněné sestavení doplním, až je změřím.</p></dd>
     <dt id="disks">Které obrazy disket fungují?</dt>
     <dd><p>Běžně dochované dumpy verze pro Amigu 500 (vydání Fairlight, s trainerem i bez něj), diskety 1 a 2 jako <code>.adf</code>; stránka se odemyká soubory hry na disketách, ne jedním přesným obrazem. Originální prodejní disketa ověřená není: pokud ji máte, <a href="about.cs.html#feedback">napište mi</a> prosím. Verze AGA podporovaná není. Když stránka disketu nepozná, řekne to. Každý obraz níže byl na zveřejněném sestavení spuštěný a došel do prvního levelu (jména v TOSEC a prvních 16 hexadecimálních číslic SHA-256):</p>
       <table>
@@ -188,6 +188,8 @@
         <tr><td>[cr FLT](Disk 2 of 3)</td><td>30ab30957ba36e68…</td></tr>
         </tbody>
       </table></dd>
+    <dt id="levels">Proč jen dva levely?</dt>
+    <dd><p>V přestavbě běží celá hra. Režim Vylepšeno se ale ladí a ověřuje level po levelu: širší okno, dřívější aktivace objektů i směrování zvuku závisí na tom, jak je který level postavený, a hotové jsou levely 1 a 2. Další levely běží, ale sám jsem je ještě nedohrál a nechci je ukazovat, dokud nebudou hotové.</p></dd>
     <dt id="data">Obsahuje stránka hru?</dt>
     <dd><p>Žádná data hry: žádnou grafiku, levely, hudbu ani výpisy kódu. Kód odvozený ze hry a její počáteční stav jsou zašifrované a odemknou se jen klíčem odvozeným z vašich vlastních disket. Obrazy disket se kontrolují ve vašem prohlížeči a nikam se nenahrávají.</p></dd>
     <dt id="ai">Co přesně dělá umělá inteligence?</dt>
