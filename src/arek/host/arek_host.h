@@ -187,6 +187,7 @@ void cia_write_hook(uint32_t a, uint8_t v) {
     }
     if (a == 0xbfe201) H_CIAA_DDRA = v;
     if (a == 0xbfe001 && (H_CIAA_DDRA & 2)) { H_LED_OFF = (v >> 1) & 1; H_CIAA_PRA = (uint8_t)((H_CIAA_PRA & ~2) | (v & 2)); }
+    if (a == 0xbfec01) H_CIAA_SDR = v;                 /* SDR is loaded by a write: the keyboard handshake writes $FF and reads it back (G53 - a held key repeated) */
     h_cia_wait();
 }
 

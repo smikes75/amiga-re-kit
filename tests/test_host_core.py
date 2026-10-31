@@ -152,6 +152,64 @@ PROG2 = {
 }
 
 
+PROG3 = {
+    MAIN: '4df900dff000'          # lea $dff000,a6
+          '3d7cc020009a'          # move.w #$c020,$9a(a6)    INTENA: master + VERTB
+          '103900bfec01'          # move.b $bfec01,d0        SDR: the key the keyboard shifted in
+          '13c000004010'          # move.b d0,$4010
+          '13fc00ff00bfec01'      # move.b #$ff,$bfec01      the handshake: SDR loaded with $FF
+          '123900bfec01'          # move.b $bfec01,d1        reads back $FF on the hardware (G53)
+          '13c100004011'          # move.b d1,$4011
+          '103900bfed01'          # move.b $bfed01,d0        ICR: SP pending
+          '13c000004012'          # move.b d0,$4012
+          '103900bfed01'          # move.b $bfed01,d0        the read cleared it
+          '13c000004013'          # move.b d0,$4013
+          '30384002'              # loop: move.w $4002,d0
+          'b0784002'              # w2:   cmp.w $4002,d0
+          '67fa'                  #       beq.s w2
+          '60f4',                 #       bra.s loop
+    L3: '52784002'                # addq.w #1,$4002
+        '33fc002000dff09c'        # move.w #$20,$dff09c       clear VERTB
+        '4e73',                   # rte
+    COPLIST: 'fffffffe',
+}
+
+
+def test_cia_sdr_write_is_stored(tmp_path):
+    """G53 (Alien Breed II): a game's keyboard routine reads SDR, acknowledges by writing $FF into it and reads it
+    again; the hardware returns $FF, the host returned the old key, so a held key repeated (AAA in the hall of
+    fame). ICR reads SP once and is clear afterwards."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    img = bytearray(0x2000)
+    for at, hx in PROG3.items():
+        img[at:at + len(hx) // 2] = bytes.fromhex(hx)
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN, L3], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1044u',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', os.path.join(HOST, 'arek_host_trace.c'),
+                    os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'), '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', 0x0200)
+    creg[0x82:0x84] = struct.pack('>H', COPLIST)
+    (st / 'creg.bin').write_bytes(creg)
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 0 1000\nfe bf 8 0 0 5500\n100\n')   # SDR = ~($20 << 1): space held, SP in ICR
+    out = tmp_path / 'run.vtr'
+    r = subprocess.run([str(exe), str(st), str(out), '2', '--full'], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    last = list(trace.records(str(out)))[-1]['ranges'][0]
+    assert list(last[0x4010:0x4014]) == [0xbf, 0xff, 0x08, 0x00]
+    assert 'io_unknown 0' in r.stderr
+
+
 def test_potgo_readback_and_cia_timer(tmp_path):
     cc = bus.compiler()
     if not cc:
