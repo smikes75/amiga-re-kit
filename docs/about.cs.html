@@ -4,9 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>O AREKu</title>
-<meta name="description" content="Co je AREK, jak se hra přestavuje, pokus, který za tím stojí, a kam napsat.">
-<link rel="alternate" hreflang="cs" href="about.cs.html">
-<link rel="alternate" hreflang="en" href="about.html">
+<meta name="description" content="Co je AREK, proč vznikl, jak se hra přestavuje, pokus, který za tím stojí, a kam napsat.">
+<link rel="canonical" href="https://smikes75.github.io/amiga-re-kit/about.cs.html">
+<link rel="alternate" hreflang="cs" href="https://smikes75.github.io/amiga-re-kit/about.cs.html">
+<link rel="alternate" hreflang="en" href="https://smikes75.github.io/amiga-re-kit/about.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="AREK">
+<meta property="og:title" content="O AREKu">
+<meta property="og:description" content="Co je AREK, proč vznikl, jak se hra přestavuje, pokus, který za tím stojí, a kam napsat.">
+<meta property="og:url" content="https://smikes75.github.io/amiga-re-kit/about.cs.html">
+<meta property="og:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Alien Breed II in the AREK rebuild: the original window next to the wider view">
+<meta property="og:locale" content="cs_CZ">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="O AREKu">
+<meta name="twitter:description" content="Co je AREK, proč vznikl, jak se hra přestavuje, pokus, který za tím stojí, a kam napsat.">
+<meta name="twitter:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="img/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
@@ -95,6 +113,16 @@
   .game ul { margin: 0 0 1.2em; padding-left: 1.2em; max-width: 60ch; }
   .game li { margin-bottom: .4em; }
   .note { color: var(--muted); font-size: .95rem; }
+  .status { list-style: none; padding: 0; margin: 0; max-width: 72ch; }
+  .status li { padding: 10px 0; border-top: 1px solid var(--line); }
+  .status li strong { font-weight: 600; }
+  .faq dt { font-weight: 600; margin-top: 26px; font-size: 1.1rem; }
+  .faq dd { margin: 8px 0 0; max-width: 68ch; }
+  .faq dd p { max-width: 68ch; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; max-width: 72ch; }
+  th, td { text-align: left; padding: 7px 10px 7px 0; vertical-align: top; border-top: 1px solid var(--line); }
+  th { font-weight: 600; border-top: 0; color: var(--muted); }
+  td:first-child { font-family: var(--mono); font-size: .85rem; white-space: nowrap; }
   footer { padding: 40px 0 60px; border-top: 2px solid var(--line); color: var(--muted); font-size: .92rem; }
   footer p { max-width: 80ch; }
 
@@ -127,10 +155,12 @@
     <a class="name" href="./" aria-label="AREK"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 37 8" width="148" height="32" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><path fill="#ff8a1f" d="M0 0h7v1h-7zM0 1h2v1h-2zM3 1h5v1h-5zM0 2h2v1h-2zM3 2h5v1h-5zM0 3h8v1h-8zM0 4h8v1h-8zM0 5h1v1h-1zM7 5h1v1h-1zM0 6h1v1h-1zM7 6h1v1h-1zM0 7h8v1h-8z"/><path fill="#ffd27a" d="M1 5h6v1h-6zM1 6h6v1h-6z"/><path fill="#ffffff" d="M11 1h4v1h-4zM10 2h1v1h-1zM15 2h1v1h-1zM10 3h1v1h-1zM15 3h1v1h-1zM10 4h6v1h-6zM10 5h1v1h-1zM15 5h1v1h-1zM10 6h1v1h-1zM15 6h1v1h-1zM10 7h1v1h-1zM15 7h1v1h-1zM17 1h5v1h-5zM17 2h1v1h-1zM22 2h1v1h-1zM17 3h1v1h-1zM22 3h1v1h-1zM17 4h5v1h-5zM17 5h1v1h-1zM20 5h1v1h-1zM17 6h1v1h-1zM21 6h1v1h-1zM17 7h1v1h-1zM22 7h1v1h-1zM24 1h6v1h-6zM24 2h1v1h-1zM24 3h1v1h-1zM24 4h5v1h-5zM24 5h1v1h-1zM24 6h1v1h-1zM24 7h6v1h-6zM31 1h1v1h-1zM36 1h1v1h-1zM31 2h1v1h-1zM35 2h1v1h-1zM31 3h1v1h-1zM34 3h1v1h-1zM31 4h3v1h-3zM31 5h1v1h-1zM34 5h1v1h-1zM31 6h1v1h-1zM35 6h1v1h-1zM31 7h1v1h-1zM36 7h1v1h-1z"/></svg></a>
     <nav>
       <a href="index.cs.html">Úvod</a>
+      <a href="#why">Proč</a>
       <a href="#how">Jak</a>
       <a href="#ai">AI</a>
       <a href="#dev">Vývojáři</a>
       <a href="#feedback">Napište mi</a>
+      <a href="faq.cs.html">Otázky</a>
       <a href="https://github.com/smikes75/amiga-re-kit">GitHub</a>
       <a href="about.html" lang="en" hreflang="en">English</a>
     </nav>
@@ -138,10 +168,13 @@
 
   <div class="hero">
     <h1>O AREKu</h1>
-    <p class="lede">S Amigou jsem vyrůstal a skutečné stroje mám pořád na stole: A500, A600 a A1200. Emulátory na dnešním monitoru mi nikdy nedaly pocit originálu; pohyb nebyl nikdy úplně plynulý. Tak jsem si postavil vlastní cestu zpátky ke hrám.</p>
-    <p><strong>AREK</strong> (Amiga Reverse Engineering Kit) je volně dostupná sada nástrojů s otevřeným kódem, kterou stavím proto, aby AI agent pro programování rozebral hru z Amigy z devadesátých let a postavil ji znovu jako moderní program pro prohlížeč. Na stránce neběží žádný emulátor: vlastní kód hry je přeložený předem a běží nativně, takže se hra hraje přesně jako originál, na dnešních monitorech se hýbe plynule a umí ukázat víc z levelu, než se vešlo do starého okna.</p>
-    <p>Proč ne prostě emulátor? Emulátor předstírá, že je Amiga, a spouští starý program tak, jak je. To funguje, jenže hra posouvá svůj svět 50krát za sekundu, zatímco váš monitor se obnovuje 60krát, 120krát i častěji, takže obraz poskakuje nerovnoměrně. Přestavěná hra ví, kde co je i mezi dvěma kroky, a nakreslí nový obraz pro každé obnovení monitoru.</p>
+    <p class="lede"><strong>AREK</strong> (Amiga Reverse Engineering Kit) je volně dostupná sada nástrojů s otevřeným kódem, kterou stavím proto, aby AI agent pro programování rozebral hru z Amigy z devadesátých let a postavil ji znovu jako moderní program pro prohlížeč. Na stránce neběží žádný emulátor: vlastní kód hry je přeložený předem a běží nativně, takže se hra hraje jako originál, na dnešních monitorech se hýbe plynule a umí ukázat víc z levelu, než se vešlo do starého okna.</p>
   </div>
+
+  <section id="why">
+    <h2>Proč jsem to postavil</h2>
+    <p>Mám několik skutečných Amig a hraju na nich od začátku devadesátých let. Na CRT monitoru scrolluje hra jako Alien Breed II jako po másle. Na dnešním monitoru přes emulátor nikdy: hra kreslí 50 snímků za sekundu, což se nevejde do 60 ani 120 Hz, a i jen přiblížit se tomu znamenalo hodiny ladění emulátoru. Z toho AREK vznikl. Místo smíření s obrazem, který je skoro správně, hru přestavět tak, aby mohla nakreslit nový obraz pro každé obnovení monitoru, a když už ví, kde co je, ukázat víc z levelu, než staré okno kdy mohlo.</p>
+  </section>
 
   <section id="how">
     <h2>Jak se hra přestavuje</h2>
@@ -152,6 +185,7 @@
       <li><div><strong>Dokázat to</strong><p>Pustit přestavěnou hru a originál vedle sebe a krok po kroku porovnat paměť, obraz a zvuk. Shodné, jinak to není hotové.</p></div></li>
       <li><div><strong>Vylepšit</strong><p>Až potom přijdou vylepšení, která starý hardware neuměl: plynulý pohyb na každém monitoru a širší výhled na level.</p></div></li>
     </ol>
+    <p style="margin-top:22px">Při ověřování se našly dvě chyby v původní hře: trosky po výbuchu můžou proletět zdí a ven z mapy (hra pak čte paměť mimo mapu, na Amize neškodně) a zvukový ovladač si může splést číslo zvuku (zbylý horní bajt), takže jeden kanál ztichne. Obojí je ošetřené, aniž by se změnilo, jak se originál hraje.</p>
   </section>
 
   <section id="ai">
@@ -165,8 +199,8 @@
     <h2>Pro vývojáře</h2>
     <p>AREK je balíček pro Python s nástrojem pro příkazovou řádku a se serverem MCP, takže ho AI agent jako Claude Code používá přímo: obrazy disket, packery té doby, přísný dekodér 68000, překladač do C a WebAssembly, emulátor jako měřicí přístroj a části, které potřebuje hratelná webová stránka.</p>
     <ul class="facts">
-      <li>verze <b>0.8.6</b></li>
-      <li><b>2466</b> testů</li>
+      <li>verze <b>0.9.1</b></li>
+      <li><b>2477</b> testů</li>
       <li>licence MIT</li>
     </ul>
     <pre><code>pip install amiga-re-kit
@@ -176,14 +210,15 @@ arek --help</code></pre>
 
   <section id="feedback">
     <h2>Napište mi</h2>
-    <p>Našli jste chybu, máte nápad nebo byste rádi viděli nějakou konkrétní hru? Napište mi do diskusí na GitHubu. Potřebujete k tomu bezplatný účet na GitHubu. U chyby uveďte prohlížeč a počítač a co jste viděli, to mi pomůže nejvíc.</p>
+    <p>Našli jste chybu, máte nápad, vlastníte originální disketu nebo byste rádi viděli nějakou konkrétní hru? Napište mi do diskusí na GitHubu. Potřebujete k tomu bezplatný účet na GitHubu. U chyby uveďte prohlížeč a počítač a co jste viděli, to mi pomůže nejvíc.</p>
+    <p>Pokud GitHub nepoužíváte, napište na <a href="mailto:arek.kit@gmail.com">arek.kit@gmail.com</a>.</p>
     <p><a class="btn" href="https://github.com/smikes75/amiga-re-kit/discussions">Otevřít diskuse</a></p>
   </section>
 
   <footer>
     <p>AREK je zdarma a s otevřeným kódem (MIT) a neobsahuje žádné obrazy disket, žádný Kickstart ROM ani data her. Hry měří přes emulátor <a href="https://github.com/dirkwhoffmann/vAmiga">vAmiga</a> od Dirka W. Hoffmanna; kit nese jen jeho malé úpravy (MPL-2.0), ne emulátor samotný.</p>
     <p>Alien Breed II a Superfrog patří společnosti Team17. Hratelná stránka žádná data hry neobsahuje: obrazy disket hry, kterou vlastníte, dodáte sami a kód odvozený ze hry se otevře jen s nimi.</p>
-    <p>Vytvořeno s Claude Code a OpenAI Codex. <a href="about.cs.html">O AREKu</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit na GitHubu</a>, <a href="https://pypi.org/project/amiga-re-kit/">balíček na PyPI</a>.</p>
+    <p>Vytvořeno s Claude Code a OpenAI Codex. <a href="about.cs.html">O AREKu</a>, <a href="faq.cs.html">otázky a odpovědi</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit na GitHubu</a>, <a href="https://pypi.org/project/amiga-re-kit/">balíček na PyPI</a>.</p>
   </footer>
 </div>
 </body>

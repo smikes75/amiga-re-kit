@@ -4,9 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AREK: the kit</title>
-<link rel="alternate" hreflang="en" href="kit.html">
-<link rel="alternate" hreflang="cs" href="kit.cs.html">
+<link rel="canonical" href="https://smikes75.github.io/amiga-re-kit/kit.html">
+<link rel="alternate" hreflang="en" href="https://smikes75.github.io/amiga-re-kit/kit.html">
+<link rel="alternate" hreflang="cs" href="https://smikes75.github.io/amiga-re-kit/kit.cs.html">
 <meta name="description" content="Tools for measured reverse engineering of Amiga floppy games: entropy maps, packers, a strict 68000 decoder and recompiler, headless vAmiga captures, and an MCP server. Drop your own .adf to see the first measurement.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="AREK">
+<meta property="og:title" content="AREK: the kit">
+<meta property="og:description" content="Tools for measured reverse engineering of Amiga floppy games: entropy maps, packers, a strict 68000 decoder and recompiler, headless vAmiga captures, and an MCP server. Drop your own .adf to see the first measurement.">
+<meta property="og:url" content="https://smikes75.github.io/amiga-re-kit/kit.html">
+<meta property="og:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Alien Breed II in the AREK rebuild: the original window next to the wider view">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="AREK: the kit">
+<meta name="twitter:description" content="Tools for measured reverse engineering of Amiga floppy games: entropy maps, packers, a strict 68000 decoder and recompiler, headless vAmiga captures, and an MCP server. Drop your own .adf to see the first measurement.">
+<meta name="twitter:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="img/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
@@ -114,6 +132,7 @@
     <nav>
       <a href="./">Home</a>
       <a href="about.html">About</a>
+      <a href="faq.html">FAQ</a>
       <a href="#claude">For your Claude</a>
       <a href="#method">Method</a>
       <a href="#mcp">MCP</a>
@@ -198,14 +217,14 @@ trace_compare  trace_bus</code></pre>
         <tr><td>arek.contract</td><td>byte-level comparison of captures, register diffs, "must not touch" assertions</td><td>Superfrog</td></tr>
         <tr><td>arek.m68k.profile</td><td>per-routine calls, clocks and memory pages from a profiled recompilation: which routines an enhancement has to touch</td><td>new</td></tr>
         <tr><td>arek.display, parity</td><td>a frame rendered from chip RAM with vAmiga's colour pipeline, 0 pixels off; long-run parity of a rebuild against the emulator's register and input logs</td><td>Turrican II, Alien Breed, Superfrog</td></tr>
-        <tr><td>arek.seal, web</td><td>what a playable page needs: the display contract (whole device pixels, CRT, tests), code sealed to the visitor's own disk, a checker for the published bundle</td><td>Alien Breed, Superfrog</td></tr>
+        <tr><td>arek.seal, web</td><td>what a playable page needs: the display contract (whole device pixels, CRT, tests), code sealed to the visitor's own disk, a checker for the published bundle; the canon of a smooth picture and sound (the presenter on the GPU, the clock, the sound over shared memory, the scene composed on the GPU from one record per game frame with a CPU reference, the measurement)</td><td>Alien Breed, Superfrog, Alien Breed II</td></tr>
         <tr><td>arek.m68k.cover, fuzz, parity suite</td><td>coverage of a translation run and random input for both sides (where a long run stalls, a bug hides); a suite of scenarios against the original: state, picture, sound per tick</td><td>Superfrog</td></tr>
         <tr><td>arek.m68k.timing.bus</td><td>bus cycles of every instruction, not only its clocks: what a model of the Amiga bus per DMA slot needs</td><td>Alien Breed</td></tr>
         <tr><td>arek.bus</td><td>the Amiga bus per DMA slot for recompiled games: who owns each slot, the blitter cycle by cycle, the CPU by its accesses - on which instruction an interrupt lands, when a blit ends, whether the original overran the frame; checked against the emulator's bus log by <code>arek selftest bus</code></td><td>Alien Breed</td></tr>
         <tr><td>arek, arek-mcp</td><td>the command line (32 subcommands) and the MCP server (26 tools)</td><td>new</td></tr>
       </tbody>
     </table>
-    <p style="margin-top:18px">2466 tests: synthetic data (hand-assembled programs, random buffers, generated boot blocks and disk images) and 68000 clock counts measured on Moira.</p>
+    <p style="margin-top:18px">2477 tests: synthetic data (hand-assembled programs, random buffers, generated boot blocks and disk images) and 68000 clock counts measured on Moira.</p>
   </section>
 
   <footer>

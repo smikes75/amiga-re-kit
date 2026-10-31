@@ -4,9 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AREK: kit</title>
-<link rel="alternate" hreflang="en" href="kit.html">
-<link rel="alternate" hreflang="cs" href="kit.cs.html">
+<link rel="canonical" href="https://smikes75.github.io/amiga-re-kit/kit.cs.html">
+<link rel="alternate" hreflang="en" href="https://smikes75.github.io/amiga-re-kit/kit.html">
+<link rel="alternate" hreflang="cs" href="https://smikes75.github.io/amiga-re-kit/kit.cs.html">
 <meta name="description" content="Nástroje pro měřené reverzní inženýrství disketových her z Amigy: mapy entropie, packery, přísný dekodér a rekompilátor 68000, snímky z bezhlavé vAmigy a MCP server. Přetáhněte vlastní .adf a uvidíte první měření.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="AREK">
+<meta property="og:title" content="AREK: kit">
+<meta property="og:description" content="Nástroje pro měřené reverzní inženýrství disketových her z Amigy: mapy entropie, packery, přísný dekodér a rekompilátor 68000, snímky z bezhlavé vAmigy a MCP server. Přetáhněte vlastní .adf a uvidíte první měření.">
+<meta property="og:url" content="https://smikes75.github.io/amiga-re-kit/kit.cs.html">
+<meta property="og:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Alien Breed II in the AREK rebuild: the original window next to the wider view">
+<meta property="og:locale" content="cs_CZ">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="AREK: kit">
+<meta name="twitter:description" content="Nástroje pro měřené reverzní inženýrství disketových her z Amigy: mapy entropie, packery, přísný dekodér a rekompilátor 68000, snímky z bezhlavé vAmigy a MCP server. Přetáhněte vlastní .adf a uvidíte první měření.">
+<meta name="twitter:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="img/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
@@ -114,6 +132,7 @@
     <nav>
       <a href="index.cs.html">Úvod</a>
       <a href="about.cs.html">O projektu</a>
+      <a href="faq.cs.html">Otázky</a>
       <a href="#claude">Pro vašeho Claude</a>
       <a href="#method">Metoda</a>
       <a href="#mcp">MCP</a>
@@ -198,14 +217,14 @@ trace_compare  trace_bus</code></pre>
         <tr><td>arek.contract</td><td>porovnání otisků po bajtech, rozdíly registrů, tvrzení „nesmí se dotknout“</td><td>Superfrog</td></tr>
         <tr><td>arek.m68k.profile</td><td>volání, takty a stránky paměti po rutinách z profilované rekompilace: kterých rutin se vylepšení musí dotknout</td><td>nové</td></tr>
         <tr><td>arek.display, parity</td><td>snímek vykreslený z chip RAM barevným řetězcem vAmigy, 0 pixelů rozdíl; dlouhodobá shoda přestavby s logy registrů a vstupů z emulátoru</td><td>Turrican II, Alien Breed, Superfrog</td></tr>
-        <tr><td>arek.seal, web</td><td>co potřebuje hratelná stránka: kontrakt obrazu (celé pixely zařízení, CRT, testy), kód zapečetěný k disketě návštěvníka, kontrola zveřejněného balíku</td><td>Alien Breed, Superfrog</td></tr>
+        <tr><td>arek.seal, web</td><td>co potřebuje hratelná stránka: kontrakt obrazu (celé pixely zařízení, CRT, testy), kód zapečetěný k disketě návštěvníka, kontrola zveřejněného balíku; kánon plynulého obrazu a zvuku (presenter na GPU, takt, zvuk přes sdílenou paměť, scéna složená na GPU z jednoho záznamu na snímek hry s referencí na procesoru, měření)</td><td>Alien Breed, Superfrog, Alien Breed II</td></tr>
         <tr><td>arek.m68k.cover, fuzz, parity suite</td><td>pokrytí běhu překladu a náhodný vstup pro obě strany (kde se dlouhý běh zasekne, je chyba); sada scénářů proti originálu: stav, obraz, zvuk po ticích</td><td>Superfrog</td></tr>
         <tr><td>arek.m68k.timing.bus</td><td>přístupy každé instrukce na sběrnici, ne jen takty: co potřebuje model sběrnice Amigy po slotech DMA</td><td>Alien Breed</td></tr>
         <tr><td>arek.bus</td><td>sběrnice Amigy po DMA slotech pro rekompilované hry: kdo vlastní který slot, blitter po taktech, procesor podle svých přístupů – na kterou instrukci padne přerušení, kdy skončí blit, jestli originál nestihl snímek; proti bus logu emulátoru přes <code>arek selftest bus</code></td><td>Alien Breed</td></tr>
         <tr><td>arek, arek-mcp</td><td>příkazová řádka (32 podpříkazů) a MCP server (26 nástrojů)</td><td>nové</td></tr>
       </tbody>
     </table>
-    <p style="margin-top:18px">2466 testů: syntetická data (ručně assemblované programy, náhodné buffery, generované boot bloky a obrazy disket) a takty 68000 změřené na Moiře.</p>
+    <p style="margin-top:18px">2477 testů: syntetická data (ručně assemblované programy, náhodné buffery, generované boot bloky a obrazy disket) a takty 68000 změřené na Moiře.</p>
   </section>
 
   <footer>

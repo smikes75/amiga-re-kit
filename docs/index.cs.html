@@ -5,8 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AREK: staré hry z Amigy, přestavěné pro prohlížeč</title>
 <meta name="description" content="AREK je volně dostupná sada nástrojů, se kterou umělá inteligence rozebere starou hru z Amigy a postaví ji znovu jako program pro prohlížeč: věrně podle originálu, plynule na dnešních monitorech a se širším výhledem. První hra: Alien Breed II, dva levely hratelné s vlastními disketami.">
-<link rel="alternate" hreflang="cs" href="index.cs.html">
-<link rel="alternate" hreflang="en" href="index.html">
+<link rel="canonical" href="https://smikes75.github.io/amiga-re-kit/index.cs.html">
+<link rel="alternate" hreflang="cs" href="https://smikes75.github.io/amiga-re-kit/index.cs.html">
+<link rel="alternate" hreflang="en" href="https://smikes75.github.io/amiga-re-kit/index.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="AREK">
+<meta property="og:title" content="AREK: staré hry z Amigy, přestavěné pro prohlížeč">
+<meta property="og:description" content="AREK je volně dostupná sada nástrojů, se kterou umělá inteligence rozebere starou hru z Amigy a postaví ji znovu jako program pro prohlížeč: věrně podle originálu, plynule na dnešních monitorech a se širším výhledem. První hra: Alien Breed II, dva levely hratelné s vlastními disketami.">
+<meta property="og:url" content="https://smikes75.github.io/amiga-re-kit/index.cs.html">
+<meta property="og:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Alien Breed II in the AREK rebuild: the original window next to the wider view">
+<meta property="og:locale" content="cs_CZ">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="AREK: staré hry z Amigy, přestavěné pro prohlížeč">
+<meta name="twitter:description" content="AREK je volně dostupná sada nástrojů, se kterou umělá inteligence rozebere starou hru z Amigy a postaví ji znovu jako program pro prohlížeč: věrně podle originálu, plynule na dnešních monitorech a se širším výhledem. První hra: Alien Breed II, dva levely hratelné s vlastními disketami.">
+<meta name="twitter:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="img/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
@@ -95,6 +113,16 @@
   .game ul { margin: 0 0 1.2em; padding-left: 1.2em; max-width: 60ch; }
   .game li { margin-bottom: .4em; }
   .note { color: var(--muted); font-size: .95rem; }
+  .status { list-style: none; padding: 0; margin: 0; max-width: 72ch; }
+  .status li { padding: 10px 0; border-top: 1px solid var(--line); }
+  .status li strong { font-weight: 600; }
+  .faq dt { font-weight: 600; margin-top: 26px; font-size: 1.1rem; }
+  .faq dd { margin: 8px 0 0; max-width: 68ch; }
+  .faq dd p { max-width: 68ch; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; max-width: 72ch; }
+  th, td { text-align: left; padding: 7px 10px 7px 0; vertical-align: top; border-top: 1px solid var(--line); }
+  th { font-weight: 600; border-top: 0; color: var(--muted); }
+  td:first-child { font-family: var(--mono); font-size: .85rem; white-space: nowrap; }
   footer { padding: 40px 0 60px; border-top: 2px solid var(--line); color: var(--muted); font-size: .92rem; }
   footer p { max-width: 80ch; }
 
@@ -129,6 +157,7 @@
       <a href="#watch">Video</a>
       <a href="#play">Hrát</a>
       <a href="about.cs.html">O projektu</a>
+      <a href="faq.cs.html">Otázky</a>
       <a href="kit.cs.html">Kit</a>
       <a href="https://github.com/smikes75/amiga-re-kit">GitHub</a>
       <a href="index.html" lang="en" hreflang="en">English</a>
@@ -137,22 +166,22 @@
 
   <div class="hero">
     <h1>Staré hry z Amigy, přestavěné pro váš prohlížeč.</h1>
-    <p class="lede"><strong>AREK</strong> (Amiga Reverse Engineering Kit) je volně dostupná sada nástrojů, se kterou umělá inteligence rozebere hru z Amigy z devadesátých let kousek po kousku a postaví ji znovu jako moderní program. Přestavěná hra se hraje přesně jako originál, na dnešních monitorech se hýbe plynule a umí ukázat víc z levelu, než se vešlo do starého okna.</p>
+    <p class="lede"><strong>AREK</strong> (Amiga Reverse Engineering Kit) je volně dostupná sada nástrojů, se kterou umělá inteligence rozebere hru z Amigy z devadesátých let kousek po kousku a postaví ji znovu jako moderní program. Přestavěná hra se hraje jako originál, na dnešních monitorech se hýbe plynule a umí ukázat víc z levelu, než se vešlo do starého okna.</p>
     <p>První hrou je <strong>Alien Breed II</strong>. Jeho první dva levely si tu zahrajete s vlastní kopií hry. Další na řadě je <strong>Superfrog</strong>.</p>
     <p><a class="btn" href="#watch">Podívat se na video</a> <a class="btn quiet" href="#play">Hrát Alien Breed II</a></p>
   </div>
 
   <section id="watch">
     <h2>Jak to vypadá</h2>
-    <p>Nahráno v obyčejném webovém prohlížeči. Žádný emulátor, žádná Amiga: vlastní kód hry, přeložený a spuštěný jako součást stránky.</p>
+    <p>Nahráno v obyčejném webovém prohlížeči, dvakrát stejný úsek prvního levelu. Žádný emulátor, žádná Amiga: vlastní kód hry, přeložený a spuštěný jako součást stránky.</p>
     <div class="videos">
       <figure class="video">
-        <video controls preload="metadata" playsinline poster="video/arek-1.jpg"><source src="video/arek-1.mp4" type="video/mp4"></video>
-        <figcaption>Alien Breed II, level 1, v původním okně: obraz přesně tak, jak ho hra kreslila v roce 1993, tady se zapnutým vzhledem starého monitoru.</figcaption>
+        <video controls muted playsinline preload="metadata" poster="video/arek-1.jpg"><source src="video/arek-1.mp4" type="video/mp4"></video>
+        <figcaption>Původní okno: vlastní obraz hry, 50 snímků za sekundu na 60Hz monitoru, nahráno při 60 fps; tady se zapnutým vzhledem starého monitoru.</figcaption>
       </figure>
       <figure class="video">
-        <video controls preload="metadata" playsinline poster="video/arek-2.jpg"><source src="video/arek-2.mp4" type="video/mp4"></video>
-        <figcaption>Tentýž level v širším výhledu: víc mapy kolem hráče a pohyb, který zůstává plynulý i na dnešním monitoru.</figcaption>
+        <video controls muted playsinline preload="metadata" poster="video/arek-2.jpg"><source src="video/arek-2.mp4" type="video/mp4"></video>
+        <figcaption>Širší výhled: víc mapy kolem hráče a pohyb dopočítaný na 60 Hz monitoru, nahráno při 60 fps (120Hz monitor tu vidět není).</figcaption>
       </figure>
     </div>
   </section>
@@ -168,7 +197,8 @@
           <li>Klávesnice (šipky, Ctrl nebo Z střelba, M mapa, mezerník u terminálu) nebo gamepad; jeden nebo dva hráči.</li>
           <li>Klávesa E kdykoli přepne mezi původním obrazem a širším, plynulejším výhledem.</li>
         </ul>
-        <p>Potřebujete vlastní obrazy disket verze pro Amigu 500, diskety 1 a 2 jako soubory <code>.adf</code>. Ověřeno zatím s crackovanými obrazy, které kolují (vydání Fairlight, s trainerem i bez něj); originální prodejní disketa ověřená není a verze AGA pro A1200 podporovaná není. Diskety se kontrolují ve vašem prohlížeči a nikam se neposílají. Stránka neobsahuje žádná data hry, grafiku, levely ani hudbu; kód odvozený ze hry je zašifrovaný a otevře se jen s vašimi disketami.</p>
+        <p>Potřebujete vlastní obrazy disket verze pro Amigu 500 (diskety 1 a 2 jako <code>.adf</code>). Ověřeno zatím s dumpy, které se dochovaly (vydání Fairlight, s trainerem i bez něj; <a href="faq.cs.html#disks">seznam</a>). Originální prodejní disketa ověřená není: pokud ji máte, <a href="about.cs.html#feedback">ozvěte se</a> prosím, to je pomoc, kterou potřebuju nejvíc. Verze AGA pro A1200 podporovaná není.</p>
+        <p>Stránka neobsahuje žádná data hry: žádnou grafiku, levely, výpisy kódu ani hudbu. Kód odvozený ze hry je zašifrovaný a odemkne se jen vašimi vlastními disketami, které nikdy neopustí váš počítač.</p>
         <p><a class="btn" href="https://smikes75.github.io/arek-play/alienbreed2/">Hrát první dva levely</a></p>
       </div>
     </div>
@@ -176,17 +206,28 @@
 
   <section id="next">
     <h2>Dál pracuju na Superfrogu</h2>
-    <p>Superfrog (Team17, 1993). Jeho přestavbu teď ladím, zatím si ji tu nezahrajete. Dva obrázky z ní, se zapnutým vzhledem starého monitoru:</p>
+    <p>Superfrog (Team17, 1993). Jeho přestavba se ověřuje proti originálu, zatím si ji tu nezahrajete. Dva obrázky z ní, se zapnutým vzhledem starého monitoru:</p>
     <div class="pair">
       <figure class="shot"><img src="img/superfrog-original.jpg" width="840" height="658" alt="Superfrog v přestavbě, původní okno: žabák na travnaté římse, nad ním mince" loading="lazy"><figcaption>Původní okno, jak ho kreslila hra.</figcaption></figure>
       <figure class="shot"><img src="img/superfrog-wider.jpg" width="1080" height="719" alt="Superfrog v přestavbě, širší výhled: létající ostrovy, mince, ježek a šnek" loading="lazy"><figcaption>Širší výhled: víc z levelu na obě strany.</figcaption></figure>
     </div>
   </section>
 
+  <section id="status">
+    <h2>Stav, říjen 2026</h2>
+    <ul class="status">
+      <li><strong>Alien Breed II:</strong> úvod, titulní obrazovka a levely 1–2 hratelné, režimy Originál a Vylepšeno, jeden nebo dva hráči. Změřeno proti originálu v emulátoru (level 1, čtyři třicetisekundové běhy s náhodným joystickem): shoduje se 99,9 % bodů obrazu, zápisy do zvukového čipu se shodují v 97–100 % snímků a stav hry se shoduje tik po tiku po celý běh v jednom ze čtyř; v ostatních se běhy po 1–3 sekundách rozejdou kvůli malým rozdílům v časování procesoru.</li>
+      <li><strong>Proč jen dva levely:</strong> level zveřejňuju, až když ho sám poctivě dohraju a porovnám s originálem, a to je pomalá práce; zatím jsou to první dva. Další přibudou.</li>
+      <li><strong>Superfrog:</strong> ve fázi ověřování, zatím nehratelný.</li>
+      <li><strong>Nepodporováno:</strong> verze AGA Alien Breed II; originální prodejní diskety zatím ověřené nejsou (viz <a href="faq.cs.html#disks">otázky a odpovědi</a>).</li>
+      <li><strong>Vyzkoušeno v:</strong> Chromium 156 a WebKit 27 (jádro Safari) na Macu přes testovací prohlížeče kitu: ukázka se s disketami 1 a 2 spustí a hraje v obou režimech. Na telefonu zatím nevyzkoušeno.</li>
+    </ul>
+  </section>
+
   <footer>
     <p>AREK je zdarma a s otevřeným kódem (MIT) a neobsahuje žádné obrazy disket, žádný Kickstart ROM ani data her. Hry měří přes emulátor <a href="https://github.com/dirkwhoffmann/vAmiga">vAmiga</a> od Dirka W. Hoffmanna; kit nese jen jeho malé úpravy (MPL-2.0), ne emulátor samotný.</p>
     <p>Alien Breed II a Superfrog patří společnosti Team17. Hratelná stránka žádná data hry neobsahuje: obrazy disket hry, kterou vlastníte, dodáte sami a kód odvozený ze hry se otevře jen s nimi.</p>
-    <p>Vytvořeno s Claude Code a OpenAI Codex. <a href="about.cs.html">O AREKu</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit na GitHubu</a>, <a href="https://pypi.org/project/amiga-re-kit/">balíček na PyPI</a>.</p>
+    <p>Vytvořeno s Claude Code a OpenAI Codex. <a href="about.cs.html">O AREKu</a>, <a href="faq.cs.html">otázky a odpovědi</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit na GitHubu</a>, <a href="https://pypi.org/project/amiga-re-kit/">balíček na PyPI</a>.</p>
   </footer>
 </div>
 </body>

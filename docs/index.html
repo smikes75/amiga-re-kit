@@ -5,8 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AREK: old Amiga games, rebuilt for the browser</title>
 <meta name="description" content="AREK is a free toolkit that lets an AI take an old Amiga game apart and rebuild it to run natively in the browser: faithful to the original, smooth on today's screens, with a wider view. First game: Alien Breed II, two levels playable with your own disks.">
-<link rel="alternate" hreflang="en" href="index.html">
-<link rel="alternate" hreflang="cs" href="index.cs.html">
+<link rel="canonical" href="https://smikes75.github.io/amiga-re-kit/index.html">
+<link rel="alternate" hreflang="en" href="https://smikes75.github.io/amiga-re-kit/index.html">
+<link rel="alternate" hreflang="cs" href="https://smikes75.github.io/amiga-re-kit/index.cs.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="AREK">
+<meta property="og:title" content="AREK: old Amiga games, rebuilt for the browser">
+<meta property="og:description" content="AREK is a free toolkit that lets an AI take an old Amiga game apart and rebuild it to run natively in the browser: faithful to the original, smooth on today's screens, with a wider view. First game: Alien Breed II, two levels playable with your own disks.">
+<meta property="og:url" content="https://smikes75.github.io/amiga-re-kit/index.html">
+<meta property="og:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Alien Breed II in the AREK rebuild: the original window next to the wider view">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="AREK: old Amiga games, rebuilt for the browser">
+<meta name="twitter:description" content="AREK is a free toolkit that lets an AI take an old Amiga game apart and rebuild it to run natively in the browser: faithful to the original, smooth on today's screens, with a wider view. First game: Alien Breed II, two levels playable with your own disks.">
+<meta name="twitter:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="img/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
@@ -95,6 +113,16 @@
   .game ul { margin: 0 0 1.2em; padding-left: 1.2em; max-width: 60ch; }
   .game li { margin-bottom: .4em; }
   .note { color: var(--muted); font-size: .95rem; }
+  .status { list-style: none; padding: 0; margin: 0; max-width: 72ch; }
+  .status li { padding: 10px 0; border-top: 1px solid var(--line); }
+  .status li strong { font-weight: 600; }
+  .faq dt { font-weight: 600; margin-top: 26px; font-size: 1.1rem; }
+  .faq dd { margin: 8px 0 0; max-width: 68ch; }
+  .faq dd p { max-width: 68ch; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; max-width: 72ch; }
+  th, td { text-align: left; padding: 7px 10px 7px 0; vertical-align: top; border-top: 1px solid var(--line); }
+  th { font-weight: 600; border-top: 0; color: var(--muted); }
+  td:first-child { font-family: var(--mono); font-size: .85rem; white-space: nowrap; }
   footer { padding: 40px 0 60px; border-top: 2px solid var(--line); color: var(--muted); font-size: .92rem; }
   footer p { max-width: 80ch; }
 
@@ -129,6 +157,7 @@
       <a href="#watch">Watch</a>
       <a href="#play">Play</a>
       <a href="about.html">About</a>
+      <a href="faq.html">FAQ</a>
       <a href="kit.html">The kit</a>
       <a href="https://github.com/smikes75/amiga-re-kit">GitHub</a>
       <a href="index.cs.html" lang="cs" hreflang="cs">Česky</a>
@@ -137,22 +166,22 @@
 
   <div class="hero">
     <h1>Old Amiga games, rebuilt to run in your browser.</h1>
-    <p class="lede"><strong>AREK</strong> (Amiga Reverse Engineering Kit) is a free toolkit that lets an AI take a 1990s Amiga game apart, piece by piece, and build it again as a modern program. The rebuilt game plays exactly like the original, moves smoothly on today's screens and can show more of the level than the old window did.</p>
+    <p class="lede"><strong>AREK</strong> (Amiga Reverse Engineering Kit) is a free toolkit that lets an AI take a 1990s Amiga game apart, piece by piece, and build it again as a modern program. The rebuilt game plays like the original, moves smoothly on today's screens and can show more of the level than the old window did.</p>
     <p>The first game is <strong>Alien Breed II</strong>. Its first two levels are playable here with your own copy of the game. <strong>Superfrog</strong> is next.</p>
     <p><a class="btn" href="#watch">Watch it run</a> <a class="btn quiet" href="#play">Play Alien Breed II</a></p>
   </div>
 
   <section id="watch">
     <h2>See it run</h2>
-    <p>Recorded in an ordinary web browser. No emulator, no Amiga: the game's own code, translated and running as part of the page.</p>
+    <p>Recorded in an ordinary web browser, the same section of level 1 twice. No emulator, no Amiga: the game's own code, translated and running as part of the page.</p>
     <div class="videos">
       <figure class="video">
-        <video controls preload="metadata" playsinline poster="video/arek-1.jpg"><source src="video/arek-1.mp4" type="video/mp4"></video>
-        <figcaption>Alien Breed II, level 1, in the original window: the picture exactly as the game drew it in 1993, here with the old-monitor look switched on.</figcaption>
+        <video controls muted playsinline preload="metadata" poster="video/arek-1.jpg"><source src="video/arek-1.mp4" type="video/mp4"></video>
+        <figcaption>Original window: the game's own picture, 50 frames a second on a 60 Hz display, recorded at 60 fps; here with the old-monitor look switched on.</figcaption>
       </figure>
       <figure class="video">
-        <video controls preload="metadata" playsinline poster="video/arek-2.jpg"><source src="video/arek-2.mp4" type="video/mp4"></video>
-        <figcaption>The same level in the wider view: more of the map around the player, and motion that stays smooth on a modern screen.</figcaption>
+        <video controls muted playsinline preload="metadata" poster="video/arek-2.jpg"><source src="video/arek-2.mp4" type="video/mp4"></video>
+        <figcaption>Wider view: more of the map around the player and the motion interpolated to the display's 60 Hz, recorded at 60 fps (a 120 Hz screen is not shown here).</figcaption>
       </figure>
     </div>
   </section>
@@ -162,13 +191,14 @@
     <div class="game">
       <figure class="shot"><img src="img/alienbreed2-enhanced.png" width="448" height="293" alt="Alien Breed II in the rebuild: the landing zone of level 1 in the wider view"></figure>
       <div>
-        <p class="meta">Alien Breed II: The Horror Continues. Team17, 1993. A preview that ends after level 2.</p>
+        <p class="meta">Alien Breed II: The Horror Continues. Team17, 1993. A demo that ends after the second level.</p>
         <ul>
           <li>The intro, the title and the first two levels: fight through the alien-infested base, collect keys and credits, buy weapons at the terminals and reach the exit.</li>
           <li>Keyboard (arrows, Ctrl or Z to fire, M for the map, Space at a terminal) or a gamepad; one or two players.</li>
           <li>E switches between the original picture and the wider, smoother view at any time.</li>
         </ul>
-        <p>You need your own disk images of the Amiga 500 version, disks 1 and 2 as <code>.adf</code> files. Verified so far with the cracked images that circulate (the Fairlight releases, with or without a trainer); an original retail disk has not been checked yet, and the AGA version for the A1200 is not supported. The disks are checked in your browser and never leave your computer. The page holds no data of the game, no graphics, levels or music; the code derived from the game is encrypted and opens only with your disks.</p>
+        <p>You need your own disk images of the Amiga 500 version (disks 1 and 2 as <code>.adf</code>). Verified so far with the dumps that have been preserved (the Fairlight release, with and without trainer; <a href="faq.html#disks">the list</a>). An original retail disk has not been verified yet: if you own one, please <a href="about.html#feedback">get in touch</a>, that is the help I need most. The AGA version for the A1200 is not supported.</p>
+        <p>The page contains no game data: no graphics, levels, code listings or music. The code derived from the game is encrypted and unlocks only with your own disks, which never leave your computer.</p>
         <p><a class="btn" href="https://smikes75.github.io/arek-play/alienbreed2/">Play the first two levels</a></p>
       </div>
     </div>
@@ -176,17 +206,28 @@
 
   <section id="next">
     <h2>Working on next: Superfrog</h2>
-    <p>Superfrog (Team17, 1993). I am tuning its rebuild now; it is not playable here yet. Two pictures from it, with the old-monitor look switched on:</p>
+    <p>Superfrog (Team17, 1993). Its rebuild is in verification against the original; it is not playable here yet. Two pictures from it, with the old-monitor look switched on:</p>
     <div class="pair">
       <figure class="shot"><img src="img/superfrog-original.jpg" width="840" height="658" alt="Superfrog in the rebuild, original window: the frog on a grassy ledge with coins above" loading="lazy"><figcaption>The original window, as the game drew it.</figcaption></figure>
       <figure class="shot"><img src="img/superfrog-wider.jpg" width="1080" height="719" alt="Superfrog in the rebuild, wider view: floating islands, coins, a hedgehog and a snail" loading="lazy"><figcaption>The wider view: more of the level in both directions.</figcaption></figure>
     </div>
   </section>
 
+  <section id="status">
+    <h2>Status, October 2026</h2>
+    <ul class="status">
+      <li><strong>Alien Breed II:</strong> intro, title and levels 1–2 playable, Original and Enhanced modes, one or two players. Measured against the original in an emulator (level 1, four 30-second runs with random joystick input): 99.9 % of the pixels match, the sound chip writes match in 97–100 % of the frames, and the game state matches tick by tick for the whole run in one of the four; in the others small CPU timing differences make the runs drift apart after 1–3 seconds.</li>
+      <li><strong>Why only two levels:</strong> I publish a level only after I have played it through myself, against the original, and that is slow work; so far that is the first two. More will follow.</li>
+      <li><strong>Superfrog:</strong> in verification, not playable yet.</li>
+      <li><strong>Not supported:</strong> the AGA version of Alien Breed II; original retail disks are not verified yet (see the <a href="faq.html#disks">FAQ</a>).</li>
+      <li><strong>Tested in:</strong> Chromium 156 and WebKit 27 (the engine of Safari) on a Mac through the kit's test browsers: the demo starts with disks 1 and 2 and plays in both modes. Not tested on a phone yet.</li>
+    </ul>
+  </section>
+
   <footer>
     <p>AREK is free and open source (MIT) and ships no disk images, no Kickstart ROM and no game data. It measures games through the <a href="https://github.com/dirkwhoffmann/vAmiga">vAmiga</a> emulator by Dirk W. Hoffmann; the kit carries small patches to it (MPL-2.0), not the emulator itself.</p>
     <p>Alien Breed II and Superfrog belong to Team17. The playable page holds none of the game's data: you supply disk images of a game you own, and the code derived from the game opens only with them.</p>
-    <p>Made with Claude Code and OpenAI Codex. <a href="about.html">About AREK</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit on GitHub</a>, <a href="https://pypi.org/project/amiga-re-kit/">package on PyPI</a>.</p>
+    <p>Made with Claude Code and OpenAI Codex. <a href="about.html">About AREK</a>, <a href="faq.html">FAQ</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit on GitHub</a>, <a href="https://pypi.org/project/amiga-re-kit/">package on PyPI</a>.</p>
   </footer>
 </div>
 </body>

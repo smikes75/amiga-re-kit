@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AREK: questions and answers</title>
+<meta name="description" content="Emulator or port, VRR monitors, input lag, which disk images work, what the page contains, what the AI does, Team17, the next game.">
+<link rel="canonical" href="https://smikes75.github.io/amiga-re-kit/faq.html">
+<link rel="alternate" hreflang="en" href="https://smikes75.github.io/amiga-re-kit/faq.html">
+<link rel="alternate" hreflang="cs" href="https://smikes75.github.io/amiga-re-kit/faq.cs.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="AREK">
+<meta property="og:title" content="AREK: questions and answers">
+<meta property="og:description" content="Emulator or port, VRR monitors, input lag, which disk images work, what the page contains, what the AI does, Team17, the next game.">
+<meta property="og:url" content="https://smikes75.github.io/amiga-re-kit/faq.html">
+<meta property="og:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Alien Breed II in the AREK rebuild: the original window next to the wider view">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="AREK: questions and answers">
+<meta name="twitter:description" content="Emulator or port, VRR monitors, input lag, which disk images work, what the page contains, what the AI does, Team17, the next game.">
+<meta name="twitter:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="img/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --blue: #0a3a8c;        /* Workbench 1.3 blue, a shade deeper */
+    --blue-2: #10479f;
+    --line: #2d63c4;
+    --ink: #ffffff;
+    --muted: #b9c8ea;
+    --orange: #ff8a1f;      /* Workbench orange */
+    --sand: #ffd27a;
+    --black: #000000;
+    --sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--blue); }
+  body {
+    margin: 0; color: var(--ink); background: var(--blue);
+    font-family: var(--sans); font-size: 17px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--ink); text-decoration-color: var(--orange); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+  a:hover { color: var(--sand); }
+  a:focus-visible, button:focus-visible { outline: 3px solid var(--orange); outline-offset: 3px; }
+  code, pre { font-family: var(--mono); }
+  code { font-size: .9em; background: rgba(0,0,0,.35); padding: .05em .35em; border-radius: 3px; }
+  pre {
+    background: var(--black); color: var(--ink); padding: 18px 20px; margin: 0;
+    font-size: 14px; line-height: 1.5; overflow-x: auto; border-left: 6px solid var(--orange);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.01em; line-height: 1.15; margin: 0; }
+  h1 { font-size: clamp(2rem, 4.6vw, 3.4rem); max-width: 20ch; }
+  h2 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin-bottom: .6em; }
+  h3 { font-size: 1.15rem; margin: 0 0 .3em; }
+  p { margin: 0 0 1em; max-width: 64ch; }
+  .wrap { width: min(1120px, 100% - 32px); margin: 0 auto; }
+
+  header.top {
+    position: sticky; top: 0; z-index: 10; background: var(--blue);
+    display: flex; justify-content: space-between; align-items: baseline; gap: 24px; flex-wrap: wrap;
+    padding: 22px 0; border-bottom: 2px solid var(--line);
+  }
+  header.top .name { font-weight: 600; font-size: 1.05rem; text-decoration: none; }
+  header.top nav a { margin-left: 22px; font-size: .95rem; }
+
+  .hero { padding: 48px 0 20px; }
+  .hero .lede { font-size: 1.15rem; margin-top: 1em; }
+  .hero .btn { margin: 0 8px 8px 0; }
+
+  .btn {
+    background: var(--orange); color: var(--black); border: 0; padding: 9px 16px; font: inherit;
+    font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block;
+  }
+  .btn:hover { background: var(--sand); color: var(--black); }
+  .btn.quiet { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px var(--muted); }
+  .btn.quiet:hover { box-shadow: inset 0 0 0 2px var(--orange); color: var(--ink); }
+  .btn.quiet[aria-pressed=true], .btn.quiet[aria-pressed=true]:hover { background: var(--ink); color: var(--blue); box-shadow: none; }
+
+  section { padding: 48px 0; border-top: 2px solid var(--line); }
+
+  .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; max-width: 72ch; }
+  .steps li { counter-increment: s; display: grid; grid-template-columns: 2.4em 1fr; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
+  .steps li::before { content: counter(s); font-family: var(--mono); color: var(--orange); font-size: 1.3rem; line-height: 1.2; }
+  .steps li strong { display: block; font-weight: 600; }
+  .steps li p { margin: .2em 0 0; color: var(--muted); }
+
+  .shot { margin: 0 0 14px; line-height: 0; }
+  .shot img { display: block; max-width: 100%; height: auto; background: var(--black); border: 2px solid var(--black); image-rendering: pixelated; }
+  .shot figcaption { line-height: 1.4; color: var(--muted); font-size: .85rem; margin-top: 6px; }
+
+
+  .facts { list-style: none; padding: 0; margin: 0 0 1.2em; display: flex; flex-wrap: wrap; gap: 6px 22px; color: var(--muted); font-size: .95rem; }
+  .facts b { color: var(--ink); font-weight: 600; font-family: var(--mono); }
+
+  /* the videos: the rebuild running, recorded from a browser */
+  .videos { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 28px 32px; margin-top: 18px; align-items: start; }   /* the wider view gets the larger frame */
+  .video { margin: 0; }
+  .video video { display: block; width: 100%; height: auto; background: var(--black); border: 2px solid var(--black); }
+  .video figcaption { color: var(--muted); font-size: .95rem; margin-top: 8px; max-width: 60ch; }
+  .game { display: grid; grid-template-columns: minmax(0, 448px) minmax(0, 1fr); gap: 24px 40px; align-items: start; margin-top: 12px; }
+  .game .meta { color: var(--muted); margin: 0 0 .8em; }
+  .pair { display: grid; grid-template-columns: minmax(0, 840fr) minmax(0, 1080fr); gap: 24px; align-items: end; margin-top: 18px; }
+  .pair .shot img { image-rendering: auto; width: 100%; }
+  .game ul { margin: 0 0 1.2em; padding-left: 1.2em; max-width: 60ch; }
+  .game li { margin-bottom: .4em; }
+  .note { color: var(--muted); font-size: .95rem; }
+  .status { list-style: none; padding: 0; margin: 0; max-width: 72ch; }
+  .status li { padding: 10px 0; border-top: 1px solid var(--line); }
+  .status li strong { font-weight: 600; }
+  .faq dt { font-weight: 600; margin-top: 26px; font-size: 1.1rem; }
+  .faq dd { margin: 8px 0 0; max-width: 68ch; }
+  .faq dd p { max-width: 68ch; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; max-width: 72ch; }
+  th, td { text-align: left; padding: 7px 10px 7px 0; vertical-align: top; border-top: 1px solid var(--line); }
+  th { font-weight: 600; border-top: 0; color: var(--muted); }
+  td:first-child { font-family: var(--mono); font-size: .85rem; white-space: nowrap; }
+  footer { padding: 40px 0 60px; border-top: 2px solid var(--line); color: var(--muted); font-size: .92rem; }
+  footer p { max-width: 80ch; }
+
+  @media (max-width: 860px) {
+    .videos, .game, .pair { grid-template-columns: 1fr; gap: 0 28px; }
+    .videos { gap: 28px; }
+    header.top nav a { margin: 0 14px 0 0; }
+    body { font-size: 16px; }
+  }
+  @media (max-width: 500px) {
+    .shot img { image-rendering: auto; }   /* a scaled-down screenshot looks better smooth than pixelated */
+  }
+  /* the logo: a 3.5" floppy and a bitmap wordmark, 4 CSS px per cell, so every cell is whole device pixels */
+  header.top { align-items: center; }
+  header.top .name { display: block; line-height: 0; }
+  header.top .name svg { display: block; }
+  /* the header stays on screen; the page scrolls under it, anchors land below it */
+  html { scroll-padding-top: 84px; }
+  @media (max-width: 860px) {
+    html { scroll-padding-top: 96px; }
+    header.top { padding: 12px 0; gap: 6px 16px; }
+    header.top .name svg { width: 99px; height: 24px; }
+    header.top nav a { font-size: .9rem; white-space: nowrap; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="name" href="./" aria-label="AREK"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 37 8" width="148" height="32" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><path fill="#ff8a1f" d="M0 0h7v1h-7zM0 1h2v1h-2zM3 1h5v1h-5zM0 2h2v1h-2zM3 2h5v1h-5zM0 3h8v1h-8zM0 4h8v1h-8zM0 5h1v1h-1zM7 5h1v1h-1zM0 6h1v1h-1zM7 6h1v1h-1zM0 7h8v1h-8z"/><path fill="#ffd27a" d="M1 5h6v1h-6zM1 6h6v1h-6z"/><path fill="#ffffff" d="M11 1h4v1h-4zM10 2h1v1h-1zM15 2h1v1h-1zM10 3h1v1h-1zM15 3h1v1h-1zM10 4h6v1h-6zM10 5h1v1h-1zM15 5h1v1h-1zM10 6h1v1h-1zM15 6h1v1h-1zM10 7h1v1h-1zM15 7h1v1h-1zM17 1h5v1h-5zM17 2h1v1h-1zM22 2h1v1h-1zM17 3h1v1h-1zM22 3h1v1h-1zM17 4h5v1h-5zM17 5h1v1h-1zM20 5h1v1h-1zM17 6h1v1h-1zM21 6h1v1h-1zM17 7h1v1h-1zM22 7h1v1h-1zM24 1h6v1h-6zM24 2h1v1h-1zM24 3h1v1h-1zM24 4h5v1h-5zM24 5h1v1h-1zM24 6h1v1h-1zM24 7h6v1h-6zM31 1h1v1h-1zM36 1h1v1h-1zM31 2h1v1h-1zM35 2h1v1h-1zM31 3h1v1h-1zM34 3h1v1h-1zM31 4h3v1h-3zM31 5h1v1h-1zM34 5h1v1h-1zM31 6h1v1h-1zM35 6h1v1h-1zM31 7h1v1h-1zM36 7h1v1h-1z"/></svg></a>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="about.html">About</a>
+      <a href="kit.html">The kit</a>
+      <a href="https://github.com/smikes75/amiga-re-kit">GitHub</a>
+      <a href="faq.cs.html" lang="cs" hreflang="cs">Česky</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <h1>Questions and answers</h1>
+  </div>
+
+  <section class="faq">
+    <dl>
+    <dt id="emu">Is this an emulator or a port?</dt>
+    <dd><p>Neither. The game's own 68000 code from your disks is translated ahead of time into C and WebAssembly (static recompilation) and runs natively in the browser. The Amiga chipset, bus timing, Copper, Blitter, bitplanes, sprites, Paula, is a model checked against the vAmiga emulator. No processor is emulated at run time and no game logic has been rewritten by hand.</p></dd>
+    <dt id="vrr">Why not just use an emulator with a variable-refresh (VRR) monitor?</dt>
+    <dd><p>VRR removes the judder of 50 Hz on a 60 Hz screen, and for the Original mode that is a fine solution. But the game's main loop still moves its objects 25 times a second (the camera 50) and the window is still 330 pixels wide. The Enhanced mode interpolates the camera and the objects between game frames and draws a wider view from the game's own data, which no emulator setting can do.</p></dd>
+    <dt id="lag">Does the Enhanced mode add input lag?</dt>
+    <dd><p>Smoothing needs the next game frame before it can draw the step in between, so the picture is drawn a little behind the game: the camera about 30 ms, the objects about 40 ms. Measured on the current build with the kit's tool in headless Chromium (a key event dispatched in the page until the camera moves): about 80 ms. The version on this site cannot use the faster engine thread, because GitHub Pages does not send the headers it needs. A side-by-side measurement against a real Amiga is on the list.</p></dd>
+    <dt id="disks">Which disk images work?</dt>
+    <dd><p>The commonly preserved dumps of the Amiga 500 version (the Fairlight release, with and without trainer), disks 1 and 2 as <code>.adf</code>; the page unlocks by the game's files on the disks, not by one exact image. An original retail disk has not been verified yet: if you own one, please <a href="about.html#feedback">write to me</a>. The AGA version is not supported. The page tells you when a disk is not recognised. Each image below was started on the public build and reached level 1 (TOSEC names and the first 16 hex digits of their SHA-256):</p>
+      <table>
+        <thead><tr><th>image (TOSEC name after "Alien Breed II - The Horror Continues (1993)(Team 17)")</th><th>SHA-256</th></tr></thead>
+        <tbody>
+        <tr><td>[cr FLT](Disk 1 of 3)</td><td>fda8d13cc4077beb…</td></tr>
+        <tr><td>[cr FLT](Disk 1 of 3)[a]</td><td>d21d472555553888…</td></tr>
+        <tr><td>[cr FLT](Disk 1 of 3)[t +7 Backlash]</td><td>cb847dd10f0b6e3c…</td></tr>
+        <tr><td>[cr FLT](Disk 1 of 3)[t +15 ZNT]</td><td>aba0f9402cbb9dcb…</td></tr>
+        <tr><td>[cr FLT](Disk 1 of 3)[t +25 INS]</td><td>3bdba12d15705267…</td></tr>
+        <tr><td>[cr FLT](Disk 1 of 3)[t +30 GOD]</td><td>aaf685378adb8499…</td></tr>
+        <tr><td>[cr FLT](Disk 2 of 3)</td><td>30ab30957ba36e68…</td></tr>
+        </tbody>
+      </table></dd>
+    <dt id="data">Does the page contain the game?</dt>
+    <dd><p>No game data: no graphics, levels, music or code listings. The code derived from the game and its start state are encrypted and unlock only with a key derived from your own disks. Your disk images are checked in your browser and never uploaded.</p></dd>
+    <dt id="ai">What exactly does the AI do?</dt>
+    <dd><p>It drives the kit: reads the disk, finds the loader and the packers, translates routines, runs the rebuilt code against the original in an emulator and compares memory, picture and sound. The rule is measure, never guess: nothing is accepted that is not equal to the original. The AI does not generate graphics, levels or code of its own; everything on screen comes from your disks.</p></dd>
+    <dt id="legal">Is this legal? What about Team17?</dt>
+    <dd><p>Alien Breed II and Superfrog belong to Team17. AREK is a free fan project that ships no game data, no disk images and no Kickstart ROM; you need to own the game. If you represent the rights holder and have any concerns, please <a href="about.html#feedback">write to me</a> first; I will respond.</p></dd>
+    <dt id="next">Which game is next?</dt>
+    <dd><p>Superfrog (Team17, 1993). Suggestions are welcome in the <a href="https://github.com/smikes75/amiga-re-kit/discussions">GitHub discussions</a>.</p></dd>
+    </dl>
+  </section>
+
+  <footer>
+    <p>AREK is free and open source (MIT) and ships no disk images, no Kickstart ROM and no game data. It measures games through the <a href="https://github.com/dirkwhoffmann/vAmiga">vAmiga</a> emulator by Dirk W. Hoffmann; the kit carries small patches to it (MPL-2.0), not the emulator itself.</p>
+    <p>Alien Breed II and Superfrog belong to Team17. The playable page holds none of the game's data: you supply disk images of a game you own, and the code derived from the game opens only with them.</p>
+    <p>Made with Claude Code and OpenAI Codex. <a href="about.html">About AREK</a>, <a href="faq.html">FAQ</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit on GitHub</a>, <a href="https://pypi.org/project/amiga-re-kit/">package on PyPI</a>.</p>
+  </footer>
+</div>
+</body>
+</html>

@@ -4,9 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>About AREK</title>
-<meta name="description" content="What AREK is, how a game gets rebuilt, the experiment behind it, and where to write.">
-<link rel="alternate" hreflang="en" href="about.html">
-<link rel="alternate" hreflang="cs" href="about.cs.html">
+<meta name="description" content="What AREK is, why I built it, how a game gets rebuilt, the experiment behind it, and where to write.">
+<link rel="canonical" href="https://smikes75.github.io/amiga-re-kit/about.html">
+<link rel="alternate" hreflang="en" href="https://smikes75.github.io/amiga-re-kit/about.html">
+<link rel="alternate" hreflang="cs" href="https://smikes75.github.io/amiga-re-kit/about.cs.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="AREK">
+<meta property="og:title" content="About AREK">
+<meta property="og:description" content="What AREK is, why I built it, how a game gets rebuilt, the experiment behind it, and where to write.">
+<meta property="og:url" content="https://smikes75.github.io/amiga-re-kit/about.html">
+<meta property="og:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Alien Breed II in the AREK rebuild: the original window next to the wider view">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="About AREK">
+<meta name="twitter:description" content="What AREK is, why I built it, how a game gets rebuilt, the experiment behind it, and where to write.">
+<meta name="twitter:image" content="https://smikes75.github.io/amiga-re-kit/img/og.png">
+<link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="img/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
@@ -95,6 +113,16 @@
   .game ul { margin: 0 0 1.2em; padding-left: 1.2em; max-width: 60ch; }
   .game li { margin-bottom: .4em; }
   .note { color: var(--muted); font-size: .95rem; }
+  .status { list-style: none; padding: 0; margin: 0; max-width: 72ch; }
+  .status li { padding: 10px 0; border-top: 1px solid var(--line); }
+  .status li strong { font-weight: 600; }
+  .faq dt { font-weight: 600; margin-top: 26px; font-size: 1.1rem; }
+  .faq dd { margin: 8px 0 0; max-width: 68ch; }
+  .faq dd p { max-width: 68ch; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; max-width: 72ch; }
+  th, td { text-align: left; padding: 7px 10px 7px 0; vertical-align: top; border-top: 1px solid var(--line); }
+  th { font-weight: 600; border-top: 0; color: var(--muted); }
+  td:first-child { font-family: var(--mono); font-size: .85rem; white-space: nowrap; }
   footer { padding: 40px 0 60px; border-top: 2px solid var(--line); color: var(--muted); font-size: .92rem; }
   footer p { max-width: 80ch; }
 
@@ -127,10 +155,12 @@
     <a class="name" href="./" aria-label="AREK"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 37 8" width="148" height="32" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><path fill="#ff8a1f" d="M0 0h7v1h-7zM0 1h2v1h-2zM3 1h5v1h-5zM0 2h2v1h-2zM3 2h5v1h-5zM0 3h8v1h-8zM0 4h8v1h-8zM0 5h1v1h-1zM7 5h1v1h-1zM0 6h1v1h-1zM7 6h1v1h-1zM0 7h8v1h-8z"/><path fill="#ffd27a" d="M1 5h6v1h-6zM1 6h6v1h-6z"/><path fill="#ffffff" d="M11 1h4v1h-4zM10 2h1v1h-1zM15 2h1v1h-1zM10 3h1v1h-1zM15 3h1v1h-1zM10 4h6v1h-6zM10 5h1v1h-1zM15 5h1v1h-1zM10 6h1v1h-1zM15 6h1v1h-1zM10 7h1v1h-1zM15 7h1v1h-1zM17 1h5v1h-5zM17 2h1v1h-1zM22 2h1v1h-1zM17 3h1v1h-1zM22 3h1v1h-1zM17 4h5v1h-5zM17 5h1v1h-1zM20 5h1v1h-1zM17 6h1v1h-1zM21 6h1v1h-1zM17 7h1v1h-1zM22 7h1v1h-1zM24 1h6v1h-6zM24 2h1v1h-1zM24 3h1v1h-1zM24 4h5v1h-5zM24 5h1v1h-1zM24 6h1v1h-1zM24 7h6v1h-6zM31 1h1v1h-1zM36 1h1v1h-1zM31 2h1v1h-1zM35 2h1v1h-1zM31 3h1v1h-1zM34 3h1v1h-1zM31 4h3v1h-3zM31 5h1v1h-1zM34 5h1v1h-1zM31 6h1v1h-1zM35 6h1v1h-1zM31 7h1v1h-1zM36 7h1v1h-1z"/></svg></a>
     <nav>
       <a href="index.html">Home</a>
+      <a href="#why">Why</a>
       <a href="#how">How</a>
       <a href="#ai">AI</a>
       <a href="#dev">Developers</a>
       <a href="#feedback">Write to me</a>
+      <a href="faq.html">FAQ</a>
       <a href="https://github.com/smikes75/amiga-re-kit">GitHub</a>
       <a href="about.cs.html" lang="cs" hreflang="cs">Česky</a>
     </nav>
@@ -138,10 +168,13 @@
 
   <div class="hero">
     <h1>About AREK</h1>
-    <p class="lede">I grew up with the Amiga and still have the real machines on the desk: an A500, an A600 and an A1200. Emulators on a modern monitor never gave me the feeling of the original; the motion was never quite smooth. So I built my own way back to the games.</p>
-    <p><strong>AREK</strong> (Amiga Reverse Engineering Kit) is a free, open-source toolkit I build so that an AI coding agent can take a 1990s Amiga game apart and rebuild it as a modern program for the browser. No emulator runs on the page: the game's own code is translated ahead of time and runs natively, so it plays exactly like the original, moves smoothly on today's screens and can show more of the level than the old window did.</p>
-    <p>Why not just use an emulator? An emulator pretends to be an Amiga and runs the old program as it is. That works, but the game moves its world 50 times a second while your screen refreshes 60, 120 or more times, so the picture jumps unevenly. A rebuilt game knows where everything is between two steps and draws a fresh picture for every refresh of your screen.</p>
+    <p class="lede"><strong>AREK</strong> (Amiga Reverse Engineering Kit) is a free, open-source toolkit I build so that an AI coding agent can take a 1990s Amiga game apart and rebuild it as a modern program for the browser. No emulator runs on the page: the game's own code is translated ahead of time and runs natively, so it plays like the original, moves smoothly on today's screens and can show more of the level than the old window did.</p>
   </div>
+
+  <section id="why">
+    <h2>Why I built it</h2>
+    <p>I own several real Amigas and have played them since the early nineties. On a CRT, a game like Alien Breed II scrolls like silk. On a modern monitor through an emulator it never did: the game draws 50 frames a second and that does not fit a 60 or 120 Hz screen, and getting even close meant hours of emulator settings. AREK started from that. Instead of settling for a picture that was almost right, rebuild the game so it can draw a fresh picture for every refresh of the screen, and, once it knows where everything is, show more of the level than the old window ever could.</p>
+  </section>
 
   <section id="how">
     <h2>How a game gets rebuilt</h2>
@@ -152,6 +185,7 @@
       <li><div><strong>Prove it</strong><p>Run the rebuilt game and the original side by side and compare memory, picture and sound, step by step. Equal, or not done.</p></div></li>
       <li><div><strong>Make it better</strong><p>Only then the extras the old hardware could not do: smooth motion on any screen and a wider view of the level.</p></div></li>
     </ol>
+    <p style="margin-top:22px">On the way, the checking found two bugs in the original game: explosion debris can fly through a wall and off the map (the game then reads memory outside the map, harmless on an Amiga), and the sound driver can mix up a sound number (a leftover high byte), which silences a channel. Both are handled without changing how the original plays.</p>
   </section>
 
   <section id="ai">
@@ -165,8 +199,8 @@
     <h2>For developers</h2>
     <p>AREK is a Python package with a command line tool and an MCP server, so an AI coding agent such as Claude Code can use it directly: disk images, the packers of the time, a strict 68000 decoder, a recompiler to C and WebAssembly, an emulator as a measuring instrument, and the pieces a playable web page needs.</p>
     <ul class="facts">
-      <li>version <b>0.8.6</b></li>
-      <li><b>2466</b> tests</li>
+      <li>version <b>0.9.1</b></li>
+      <li><b>2477</b> tests</li>
       <li>MIT licence</li>
     </ul>
     <pre><code>pip install amiga-re-kit
@@ -176,14 +210,15 @@ arek --help</code></pre>
 
   <section id="feedback">
     <h2>Write to me</h2>
-    <p>Found a bug, have an idea, or want to see a particular game next? Write to me in the discussions on GitHub. You need a free GitHub account. For a bug, say which browser and computer you used and what you saw; that helps me the most.</p>
+    <p>Found a bug, have an idea, own an original disk, or want to see a particular game next? Write to me in the discussions on GitHub. You need a free GitHub account. For a bug, say which browser and computer you used and what you saw; that helps me the most.</p>
+    <p>If you don't use GitHub, write to <a href="mailto:arek.kit@gmail.com">arek.kit@gmail.com</a>.</p>
     <p><a class="btn" href="https://github.com/smikes75/amiga-re-kit/discussions">Open the discussions</a></p>
   </section>
 
   <footer>
     <p>AREK is free and open source (MIT) and ships no disk images, no Kickstart ROM and no game data. It measures games through the <a href="https://github.com/dirkwhoffmann/vAmiga">vAmiga</a> emulator by Dirk W. Hoffmann; the kit carries small patches to it (MPL-2.0), not the emulator itself.</p>
     <p>Alien Breed II and Superfrog belong to Team17. The playable page holds none of the game's data: you supply disk images of a game you own, and the code derived from the game opens only with them.</p>
-    <p>Made with Claude Code and OpenAI Codex. <a href="about.html">About AREK</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit on GitHub</a>, <a href="https://pypi.org/project/amiga-re-kit/">package on PyPI</a>.</p>
+    <p>Made with Claude Code and OpenAI Codex. <a href="about.html">About AREK</a>, <a href="faq.html">FAQ</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit on GitHub</a>, <a href="https://pypi.org/project/amiga-re-kit/">package on PyPI</a>.</p>
   </footer>
 </div>
 </body>
