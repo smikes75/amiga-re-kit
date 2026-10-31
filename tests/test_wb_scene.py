@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '1.3' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '1.4' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -196,6 +196,28 @@ def test_gpu_equals_the_reference(tail):
         pytest.skip('no WebGL2 in this Chromium')
     for r in res:
         assert r['bad'] == 0 and r['pixels'] > 100000 and r['objs'] >= 2 and r['sprs'] == 2, r      # the frog and the screen-fixed badge
+
+
+def test_sprites_above_the_hud_rows():
+    """1.4 (Superfrog KIT-GAPS 49): with hud.under the HUD is drawn before the sprites, so a sprite reaching into the HUD
+    rows shows above them (the hardware draws sprites over the playfield, HUD included); without it the HUD covers it."""
+    pytest.importorskip('playwright')
+    from PIL import Image
+    import io
+    def go(p):
+        p.wait_for_timeout(400)
+        box = p.locator('#screen').bounding_box()
+        png = p.locator('#screen').screenshot()
+        im = Image.open(io.BytesIO(png)).convert('RGB')
+        S = p.evaluate('wbSceneTest.size().S')
+        dpr = p.evaluate('window.devicePixelRatio') or 1
+        # the frog's head: sprite x 152 + ext 64 = view px 216..231, rows -6..-1 of the band = the last rows of the top HUD (12 rows)
+        x, y = int((216 + 8) * S * dpr), int((12 - 3) * S * dpr)
+        return im.getpixel((x, y)), im.size, S
+    (px_under, size, S) = _run_page('?s=1&under=1', go)
+    (px_over, _, _) = _run_page('?s=1', go)
+    assert px_under != px_over and px_under[2] > 100                 # the sprite's colour (index 30: blue-ish) over the HUD only with under
+    assert px_over == (40, 120, 30) or px_over == (200, 120, 30)      # the HUD's own stripes otherwise
 
 
 def test_smooth_on_the_scene_page():

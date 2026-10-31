@@ -1,8 +1,8 @@
-// wb-scene.js 1.2 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
+// wb-scene.js 1.4 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
 // after Superfrog's switch - KIT-GAPS 40-43: screen-fixed sprites, the means over the interpolated camera, a layer of
 // drawings without identity, a guard for a pass that never changes, one timebase; 1.2 kit 0.9.2 - KIT-GAPS 44-46: no
 // interpolation across a jump, sprites[].id, camMean for both axes; 1.3 kit 0.9.3 - objects[].ox/oy, the drawing's offset
-// from the logical position).
+// from the logical position; 1.4 kit 0.9.4 - hud.under: the sprites above the HUD rows as the hardware draws them).
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -30,12 +30,19 @@
 //                                        the corner by a few px, which would interpolate as motion - Superfrog); ox, oy (1.3,
 //                                        optional) = the drawing's offset from x, y, so the image need not carry blank pixels
 //     sprites: [{ k, h, idx, x, y, screen, id }],   hardware sprites of this frame: k = sprite number (lower on top), idx =
-//                                        Uint8Array(16*h), x, y = screen px relative to the window; screen = true (1.1): fixed
+//                                        Uint8Array(16*h), x, y = the HARDWARE position of the occurrence (hs, vs) in screen px
+//                                        relative to the window, the image carrying its blank columns and rows - not the box of
+//                                        the visible pixels, which moves with the animation (Superfrog); screen = true (1.1): fixed
 //                                        on the screen (a badge in a corner), so the clamp at a map edge does not move it;
 //                                        id (1.2, optional) = the identity for the interpolation when k is not one (several
-//                                        runs of the same sprite number: the player and a one-line leftover) - default k
-//     hud: { top: { h, rgba, split }, bottom: {...} } }   optional rows above / below the playfield: rgba = Uint8Array(w*h*4) of
-//                                        the original's width, split = columns repeated to widen it (Alien Breed II: 6 cuts)
+//                                        runs of the same sprite number: the player and a one-line leftover) - default k.
+//                                        Only real sprite occurrences with stable ids belong here: pixels that merely differ
+//                                        from the clean window (a diff layer) go into window.over, else they pair with a
+//                                        real sprite of the same id and split it (Superfrog)
+//     hud: { top: { h, rgba, split }, bottom: {...}, under } }   optional rows above / below the playfield: rgba = Uint8Array(w*h*4) of
+//                                        the original's width, split = columns repeated to widen it (Alien Breed II: 6 cuts);
+//                                        under = true (1.4): the HUD is drawn before the sprites, so a sprite reaching into the
+//                                        HUD rows shows above them as the hardware draws it (Superfrog's frog at a level entry)
 // The view: { W, H, S, extX, extY, x0, y0 } - the wider window (W = window.w + 2 extX, H = window.h + 2 extY), S device pixels
 // per game pixel, x0 / y0 = where the view's top-left lands in the presenter's framebuffer (device px from the top).
 // Options (all measured in Superfrog, off unless set): jumpMax (1.2, default 40 game px: a camera, object or sprite that
@@ -58,7 +65,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '1.3';
+    const VERSION = '1.4';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -368,12 +375,15 @@ const WBSCENE = (() => {
             } else gl.uniform4i(u.u_map, 0, 0, 0, 0);
             gl.activeTexture(gl.TEXTURE0); this._r8(this.texWin, win.w, win.h, win.idx);
             gl.uniform1i(u.u_mode, 2); this._quad(0, 0, Wd, Hd);
+            const under = !!(c.hud && c.hud.under), topD = under && c.hud.top ? c.hud.top.h * S : 0, botD = under && c.hud.bottom ? c.hud.bottom.h * S : 0;
+            if (under) { this._hud(c, view, d, x0, y0); gl.viewport(x0, vy, Wd, Hd); gl.uniform2f(u.u_size, Wd, Hd); gl.activeTexture(gl.TEXTURE0); }   // 1.4: the HUD first, the sprites over it
             gl.uniform1i(u.u_mode, 1); let objs = 0, sprs = 0;
             for (const ob of c.objs) { const e = this._objTex(ob.o); gl.bindTexture(gl.TEXTURE_2D, e.t); this._quad(Math.round((ob.x + (ob.o.ox || 0) - c.cam[0]) * S), Math.round((ob.y + (ob.o.oy || 0) - c.cam[1]) * S), e.w * S, e.h * S); objs++; }
             const sorted = c.sprs.slice().sort((p, q) => q.s.k - p.s.k), dx = c.cam[0] - c.spriteCam[0], dy = c.cam[1] - c.spriteCam[1];
+            if (under) { gl.viewport(x0, vy - botD, Wd, Hd + topD + botD); gl.uniform2f(u.u_size, Wd, Hd + topD + botD); }   // the sprites may reach into the HUD rows
             for (const sp of sorted) { if (!this.pool[sprs]) this.pool[sprs] = this._tex(); this._r8(this.pool[sprs], 16, sp.s.h, sp.s.idx);
-                this._quad(Math.round((sp.x + (sp.screen ? 0 : dx) - c.cam[0]) * S), Math.round((sp.y + (sp.screen ? 0 : dy) - c.cam[1]) * S), 16 * S, sp.s.h * S); sprs++; }
-            if (c.hud) this._hud(c, view, d, x0, y0);
+                this._quad(Math.round((sp.x + (sp.screen ? 0 : dx) - c.cam[0]) * S), Math.round((sp.y + (sp.screen ? 0 : dy) - c.cam[1]) * S) + topD, 16 * S, sp.s.h * S); sprs++; }
+            if (c.hud && !under) this._hud(c, view, d, x0, y0);
             gl.bindVertexArray(null); this.stats.objs = objs; this.stats.sprs = sprs; this.stats.ms = performance.now() - t0;
             return true;
         }

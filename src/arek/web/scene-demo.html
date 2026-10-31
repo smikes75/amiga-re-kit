@@ -16,7 +16,7 @@
 <div class="wrap">
   <p><b>wb-scene 1.0</b>: a synthetic game (no game data) drawn by the kit's scene module on the kit's clock: the window's clean
   picture, the map for the margins, objects with an identity (one of them blinking), a hardware sprite, HUD rows; arrows move
-  the camera, <code>?soft=1</code> soft clamp, <code>?smooth=1</code> vertical smoothing, <code>?mean=1</code> the symmetric camera mean, <code>?pair=2</code> pairing with older
+  the camera, <code>?soft=1</code> soft clamp, <code>?smooth=1</code> vertical smoothing, <code>?mean=1</code> the symmetric camera mean, <code>?under=1</code> the sprite above the HUD, <code>?pair=2</code> pairing with older
   frames, <code>?gl=0</code> the 2D path (the CPU reference), <code>?s=N</code> device pixels per game pixel.</p>
   <div class="game" id="stage"><canvas id="screen"></canvas></div>
   <p id="status"></p>
@@ -68,6 +68,7 @@ const opts = { pairOlder: parseInt(Q.get('pair') || '0', 10) };
 if (Q.get('soft') === '1') opts.softClamp = { tau: 20 };
 if (Q.get('smooth') === '1') opts.smoothY = { tau: 60 };
 if (Q.get('mean') === '1') opts.camMean = { tau: 20 };
+const UNDER = Q.get('under') === '1';                                     // 1.4: the sprites above the HUD rows; the frog's head reaches into the top HUD
 const screen = document.getElementById('screen'), O = WBOBRAZ;
 const pr = new O.Presenter(screen, { gl: Q.get('gl') === '0' ? 'off' : 'auto' });
 const takt = WBTAKT.create({ fps: 50, ahead: 1, latC: 30, latO: 60, lock: 'auto', allow: (n) => { while (done < n) step(); } });
@@ -83,7 +84,7 @@ function step() {
   if (pass !== null) { takt.pass(t); scene.lastPass = t; }
   scene.frame({ n: done, t, pass: scene.lastPass || t, cam: cam.slice(), limits, window: { w: W0, h: H0, idx: cleanWindow(cam[0], cam[1]), pal: PAL, over: overLayer(done) }, map,
     objects: objs.filter((o) => !(OBJ[o.id - 1].blink && (done & 1))).map((o) => ({ id: o.id, w: OBJ[o.id - 1].w, h: OBJ[o.id - 1].h, idx: OBJ[o.id - 1].idx, x: o.x, y: o.y })),
-    sprites: [{ k: 0, h: 24, idx: SPR, x: 152, y: 88 }, { k: 1, h: 10, idx: BADGE, x: 4, y: 4, screen: true }], hud: { top: { h: HUD, rgba: HUDT, split: [60, 180, 260] }, bottom: { h: HUD, rgba: HUDB, split: [160] } } });
+    sprites: [{ k: 0, h: 24, idx: SPR, x: 152, y: UNDER ? -EXTY - 6 : 88 }, { k: 1, h: 10, idx: BADGE, x: 4, y: 4, screen: true }], hud: { top: { h: HUD, rgba: HUDT, split: [60, 180, 260] }, bottom: { h: HUD, rgba: HUDB, split: [160] }, under: UNDER } });
 }
 const view = { W, H, S, extX: EXTX, extY: EXTY, x0: 0, y0: HUD * S };
 function layout() { pr.size(W, H + 2 * HUD, S, 1, window.devicePixelRatio || 1); }

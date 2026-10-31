@@ -214,6 +214,13 @@ interpolation would take for motion (Superfrog measured 0.84-2.5 px per frame on
 Superfrog on 1.2 (camMean 20, pairOlder 2, level 1, 30 s, a loaded machine): 0 dropped of 1 774, camera jitter
 0.032 px against its old path's 0.052, objects 0, 0 of 2 535 456 px against the reference.
 
+1.4 (kit 0.9.4): `hud.under = true` draws the HUD rows before the sprites, so a sprite reaching into them shows
+above the HUD as the hardware draws it (Superfrog's frog hangs with its head across the HUD for 61 frames at every
+level entry); `sprites[].x, y` are the hardware position of the occurrence with the image carrying its blank
+columns and rows (the box of the visible pixels moves with the animation and interpolated the halves of a
+two-sprite player apart); only real sprite occurrences with stable ids belong in `sprites[]`, a diff layer goes
+into `window.over`.
+
 The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
 the 2D path) runs a generated map, a clean window with decorations the map does not have and holes the map shows
 through, three objects on a 25 Hz loop (one blinking), a sprite and HUD rows on the kit's clock; its hooks are
