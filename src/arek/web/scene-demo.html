@@ -57,13 +57,16 @@ function cleanWindow(cx, cy) {
 const objImg = (w, h, c) => { const a = new Uint8Array(w * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) a[y * w + x] = (x === 0 || y === 0 || x === w - 1 || y === h - 1) ? 255 : c + ((x + y) & 1); return a; };
 const OBJ = [{ id: 1, w: 16, h: 16, idx: objImg(16, 16, 24), vx: 1.5, vy: 0.25 }, { id: 2, w: 24, h: 12, idx: objImg(24, 12, 26), vx: -0.75, vy: 0.5 }, { id: 3, w: 16, h: 16, idx: objImg(16, 16, 28), vx: 2.25, vy: -0.4, blink: true }];
 const SPR = new Uint8Array(16 * 24); for (let y = 0; y < 24; y++) for (let x = 0; x < 16; x++) SPR[y * 16 + x] = (x > 3 && x < 12 && y > 2 && y < 22) ? 30 : 255;
+const BADGE = new Uint8Array(16 * 10); for (let y = 0; y < 10; y++) for (let x = 0; x < 16; x++) BADGE[y * 16 + x] = (x + y) & 1 ? 22 : 255;   // 1.1: a screen-fixed badge in the corner
+const OVER = new Uint8Array(W0 * H0).fill(255);                                                                          // 1.1: what the game draws over the window without a record (a popping score)
+function overLayer(n) { OVER.fill(255); if ((n % 100) < 12) for (let y = 0; y < 8; y++) for (let x = 0; x < 20; x++) OVER[(90 + y) * W0 + 150 + x] = x & 2 ? 31 : 255; return OVER; }
 const hudRow = (h) => { const a = new Uint8Array(W0 * h * 4); for (let y = 0; y < h; y++) for (let x = 0; x < W0; x++) { const p = (y * W0 + x) * 4; a[p] = (x >> 3) & 1 ? 200 : 40; a[p + 1] = 120; a[p + 2] = 30; a[p + 3] = 255; } return a; };
 const HUDT = hudRow(HUD), HUDB = hudRow(HUD);
 // the game: camera by the keys, objects on a 25 Hz loop (every other frame), the sprite at the window's centre
 let cam = [96, 40], keys = 0, done = 0, objs = OBJ.map((o) => ({ id: o.id, x: 160 + 90 * o.id, y: 100 + 40 * o.id }));
 const opts = { pairOlder: parseInt(Q.get('pair') || '0', 10) };
 if (Q.get('soft') === '1') opts.softClamp = { tau: 20 };
-if (Q.get('smooth') === '1') opts.smoothY = { tau: 40 };
+if (Q.get('smooth') === '1') opts.smoothY = { tau: 60 };
 const screen = document.getElementById('screen'), O = WBOBRAZ;
 const pr = new O.Presenter(screen, { gl: Q.get('gl') === '0' ? 'off' : 'auto' });
 const takt = WBTAKT.create({ fps: 50, ahead: 1, latC: 30, latO: 60, lock: 'auto', allow: (n) => { while (done < n) step(); } });
@@ -77,9 +80,9 @@ function step() {
   const t = takt.stamp(done), pass = done & 1 ? t : null;               // the 25 Hz loop moves the objects on odd frames
   if (pass !== null) for (const o of objs) { const d = OBJ[o.id - 1]; o.x += d.vx * 2; o.y += d.vy * 2; if (o.x < 0 || o.x > COLS * 16 - 24) d.vx = -d.vx; if (o.y < 0 || o.y > ROWS * 16 - 16) d.vy = -d.vy; }
   if (pass !== null) { takt.pass(t); scene.lastPass = t; }
-  scene.frame({ n: done, t, pass: scene.lastPass || t, cam: cam.slice(), limits, window: { w: W0, h: H0, idx: cleanWindow(cam[0], cam[1]), pal: PAL }, map,
+  scene.frame({ n: done, t, pass: scene.lastPass || t, cam: cam.slice(), limits, window: { w: W0, h: H0, idx: cleanWindow(cam[0], cam[1]), pal: PAL, over: overLayer(done) }, map,
     objects: objs.filter((o) => !(OBJ[o.id - 1].blink && (done & 1))).map((o) => ({ id: o.id, w: OBJ[o.id - 1].w, h: OBJ[o.id - 1].h, idx: OBJ[o.id - 1].idx, x: o.x, y: o.y })),
-    sprites: [{ k: 0, h: 24, idx: SPR, x: 152, y: 88 }], hud: { top: { h: HUD, rgba: HUDT, split: [60, 180, 260] }, bottom: { h: HUD, rgba: HUDB, split: [160] } } });
+    sprites: [{ k: 0, h: 24, idx: SPR, x: 152, y: 88 }, { k: 1, h: 10, idx: BADGE, x: 4, y: 4, screen: true }], hud: { top: { h: HUD, rgba: HUDT, split: [60, 180, 260] }, bottom: { h: HUD, rgba: HUDB, split: [160] } } });
 }
 const view = { W, H, S, extX: EXTX, extY: EXTY, x0: 0, y0: HUD * S };
 function layout() { pr.size(W, H + 2 * HUD, S, 1, window.devicePixelRatio || 1); }

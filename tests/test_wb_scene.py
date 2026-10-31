@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '1.0' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '1.1' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -35,12 +35,21 @@ def test_view_camera_inside_the_limits():
     assert js('S.clampCam(0, 0, {x0: 0, x1: 0, y0: 0, y1: 0}, %s, %s)' % (win, ext)) == [-64, -16]   # a map narrower than the view: centred
 
 
-def test_window_mean_softens_a_stop_and_extrapolates_at_most_tau():
+def test_window_mean_over_the_interpolated_value():
+    """1.1 (Superfrog KIT-GAPS 41): the mean is taken over the value interpolated between the frames and sampled every
+    5 ms, not over the 2 or 3 frames that happen to fall into the window; past the newest frame the value continues
+    with the last velocity for at most tau; 'past' = a triangle over the last tau ms (the vertical smoothing)."""
     fr = '[{t: 0, v: 0}, {t: 20, v: 10}, {t: 40, v: 20}]'
-    assert js('S.windowMean(%s, 20, 20, (f) => f.v)' % fr) == 10
-    assert js('S.windowMean(%s, 60, 20, (f) => f.v)' % fr) == 25             # (20 + the newest continued 20 ms at 0.5 px/ms) / 2
-    assert js('S.windowMean(%s, 200, 20, (f) => f.v)' % fr) == 30            # past the newest by more than tau: tau only
+    assert js('S.windowMean(%s, 20, 20, (f) => f.v)' % fr) == 10                               # a ramp: its middle
+    assert abs(js('S.windowMean(%s, 60, 20, (f) => f.v)' % fr) - 245 / 9) < 1e-9             # 40..80: 20, 22.5, 25, 27.5, then 30 (capped at tau)
+    assert js('S.windowMean(%s, 200, 20, (f) => f.v)' % fr) == 30                              # far past the newest: tau only
+    assert js('S.windowMean(%s, 40, 20, (f) => f.v, { shape: "past" })' % fr) == 17.5          # the triangle over 20..40 of the ramp
+    assert js('[S.valueAt(%s.map((x) => x), 10, (f) => f.v, 20), S.valueAt(%s, -5, (f) => f.v, 20), S.valueAt(%s, 50, (f) => f.v, 20)]' % (fr, fr, fr)) == [5, 0, 25]
     assert js('S.windowMean([], 5, 20, (f) => f.v)') is None
+    # a phase test: the mean must not jump by 2.5 px when a third frame enters the window (the old mean of the frames did)
+    seq = js('(() => { const fr = []; for (let i = 0; i < 12; i++) fr.push({ t: i * 20, v: i * 10 }); const out = []; for (let t = 100; t <= 140; t += 4) out.push(S.windowMean(fr, t, 20, (f) => f.v)); return out; })()')
+    steps = [b - a for a, b in zip(seq, seq[1:])]
+    assert max(steps) - min(steps) < 1e-9 and abs(steps[0] - 2) < 1e-9                        # 4 ms at 0.5 px/ms = 2 px, every step
 
 
 def test_pairs_by_identity_with_older_frames():
@@ -87,6 +96,24 @@ def test_reference_composition_rules():
     assert r == [0.5, [2, 0], 2, 4, 4 * 2 * 2 * 2 * 4]                                  # half way: camera, object and the sprite's world x interpolated
 
 
+def test_screen_sprites_over_layer_and_pass_guard():
+    """1.1: a sprite with screen = true stays in the view's corner whatever the clamp does (KIT-GAPS 40); window.over is
+    the game's own drawings over the clean window, above the terrain and below the objects (42); a pass that never
+    changes for longer than passMax makes every frame a pass (43)."""
+    r = js(with_mk("""(() => { const a = mk(1, 0, [0, 0], 0, { x0: 0, x1: 0, y0: 0, y1: 100 }); a.sprites.push({ k: 1, h: 1, idx: new Uint8Array(16).fill(255).map((v, i) => i === 0 ? 5 : 255), x: 1, y: 0, screen: true });
+        const c = S.compose([a], 0, { S: 1, extX: 2, extY: 0 }, {}, null); const px = S.reference(c); const R = (x) => px[x * 4];
+        return [c.cam, c.sprs.map((s) => [s.x, s.y, !!s.screen]), R(0), R(1), R(2), R(3)]; })()"""))
+    assert r[0] == [-2, 0] and [s for s in r[1] if s[2]] == [[1, 0, True]]                  # the badge at window px 1 = view px 3 = world x 1; the frog in the world
+    assert r[2] == 0 and r[3] == 0 and r[4] == 30 and r[5] == 50                             # black, black, the object (idx 3) over the window, the badge (idx 5) over the object's hole
+    r = js(with_mk("""(() => { const a = mk(1, 0, [0, 0], 9); a.window = Object.assign({}, a.window, { over: new Uint8Array([255, 255, 255, 6, 255, 255, 255, 255]) });
+        const c = S.compose([a], 0, { S: 1, extX: 0, extY: 0 }, {}, null); const px = S.reference(c); return [px[3 * 4], px[0], px[1 * 4], px[2 * 4]]; })()"""))
+    assert r == [60, 10, 20, 40]                                                              # over idx 6 at x 3 beats the window's idx 1; the window, the map hole and the sprite (x 2) untouched
+    r = js(with_mk("""(() => { const fr = []; for (let i = 0; i < 10; i++) { const f = mk(i + 1, i * 20, [0, 0], i); f.pass = 0; fr.push(f); }
+        const guard = S.compose(fr, 170, { S: 1 }, {}, null), none = S.compose(fr, 170, { S: 1 }, { passMax: 0 }, null);
+        return [guard.OA.n, guard.OB.n, none.OA.n, none.OB.n]; })()"""))
+    assert r[0] >= 6 and r[1] == r[0] + 1 and r[2] == 1 and r[3] == 1                         # with the guard the objects follow the frames; without it the stale pass
+
+
 def test_options_fixed_axis_soft_clamp_and_smoothing():
     r = js(with_mk("""(() => { const fr = [mk(1, 0, [0, 0], 0), mk(2, 20, [0, 10], 0), mk(3, 40, [0, 20], 0)];
         const fixed = S.compose(fr, 20, { S: 1 }, { fixedAxis: { axis: 'y', value: 3 } }, null);
@@ -94,7 +121,7 @@ def test_options_fixed_axis_soft_clamp_and_smoothing():
         const plain = S.compose(fr, 40, { S: 1 }, {}, null);
         return [fixed.cam, smooth.cam, smooth.spriteCam, plain.cam]; })()"""))
     assert r[0] == [0, 3] and r[3] == [0, 20]
-    assert r[1][1] == 15 and r[2][1] == 20                                             # the terrain's camera a mean over tau, the sprites keep the game's
+    assert abs(r[1][1] - 17.5) < 1e-9 and r[2][1] == 20                                # the terrain's camera a past triangle over tau, the sprites keep the game's
     r = js(with_mk("""(() => { const fr = [mk(1, 0, [-30, 0], 0), mk(2, 20, [-10, 0], 0), mk(3, 40, [0, 0], 0)];
         const soft = S.compose(fr, 50, { S: 1, extX: 0 }, { softClamp: { tau: 20 } }, null), hard = S.compose(fr, 50, { S: 1, extX: 0 }, {}, null);
         return [hard.cam, soft.cam]; })()"""))
@@ -137,7 +164,7 @@ def test_gpu_equals_the_reference(tail):
     if not gl:
         pytest.skip('no WebGL2 in this Chromium')
     for r in res:
-        assert r['bad'] == 0 and r['pixels'] > 100000 and r['objs'] >= 2 and r['sprs'] == 1, r
+        assert r['bad'] == 0 and r['pixels'] > 100000 and r['objs'] >= 2 and r['sprs'] == 2, r      # the frog and the screen-fixed badge
 
 
 def test_smooth_on_the_scene_page():

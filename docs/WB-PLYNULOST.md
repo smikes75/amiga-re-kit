@@ -188,6 +188,17 @@ sprites keep their screen position as in the original (the player's landing stay
 `x17(c)` - 12-bit colours as the DAC gives them. The clean window and the map are sampled at the device pixel's
 top-left corner with the camera split into an integer and a float32 fraction, on both paths, so the floor is the same.
 
+1.1 (kit 0.9.1, after Superfrog's switch - its KIT-GAPS 40-43): the means of the soft clamp and the vertical
+smoothing are taken over the camera interpolated between the frames and sampled every 5 ms (a mean of the 2 or 3
+frames that fall into the window jumps by a step as a third one enters; Superfrog measured y jitter 0.34-0.44 px with
+that, 0.02 with the sampled mean), the vertical one as a triangle over the last tau ms; `sprites[].screen = true` for
+a sprite fixed on the screen (a badge in a corner, which the clamp at a map edge must not move); `window.over` for
+what the game drew over the clean window without an object record (a popping score, a picked coin, the player in an
+interlude - above the terrain, below the objects, not interpolated); `passMax` (100 ms) makes every frame a pass when
+no new pass came for longer (an interlude drawn by other code); the module warns once when the newest frame is more
+than 500 ms behind the drawer's ts (rec.t and ts must share one clock). Superfrog on 1.0: 0 of 3 622 080 px against
+the reference in Chromium and WebKit, 0 dropped, object jitter 0.
+
 The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
 the 2D path) runs a generated map, a clean window with decorations the map does not have and holes the map shows
 through, three objects on a 25 Hz loop (one blinking), a sprite and HUD rows on the kit's clock; its hooks are
