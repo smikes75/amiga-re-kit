@@ -13,6 +13,7 @@
 // (W*S x H*S, before the aspect; both together: pixels first, draw on top); the geometry of 1.4 holds on both paths
 // and §3 (brightness, contrast, saturation, blur) runs in the shader on the WebGL path. 1.5.1: size() that resizes the
 // canvas shows the last picture again at once (a page drawing only on a new game frame blinked at a mode change in Safari).
+// 1.5.2: the CRT layer is kept above the game canvas (a canvas appended after .crt-layer hid the CRT - Superfrog).
 // No game data. Works as a <script> (global WBOBRAZ, also globalThis.WBOBRAZ - an ES module that imports
 // nothing can read it there), as CommonJS (require) and in Node for tests.
 // Projects copy this file (`arek web copy DIR`) and keep its sha256 in their docs.
@@ -389,6 +390,12 @@ const WBOBRAZ = (() => {
             if (!this.layer) {
                 this.layer = document.createElement('canvas'); this.layer.className = 'crt-layer';
                 this.layer.setAttribute('aria-hidden', 'true'); gameEl.appendChild(this.layer);
+            }
+            // 1.5.2 (Superfrog): a game canvas added after .crt-layer (a scene module's own canvas) lies above the CRT and
+            // hides it but the vignette; the layer belongs right after the canvas - moved when they share a parent, else warned
+            if (canvas && canvas.parentNode && typeof canvas.compareDocumentPosition === 'function' && (canvas.compareDocumentPosition(this.layer) & 2)) {
+                if (canvas.parentNode === this.layer.parentNode) canvas.parentNode.insertBefore(this.layer, canvas.nextSibling);
+                if (typeof console !== 'undefined') console.warn('wb-obraz: the CRT layer was under the game canvas' + (canvas.parentNode === this.layer.parentNode ? ' - moved above it' : '') + ' (keep the canvas before .crt-layer)');
             }
             this.key = ''; this.pd = { P: 3, D: 1, shape: 'lines' }; this.ax = 0; this.ay = 0; this.on = 0;
             if (getComputedStyle(gameEl).position === 'static') gameEl.style.position = 'relative';

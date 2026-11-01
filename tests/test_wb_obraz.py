@@ -188,3 +188,46 @@ def test_presenter_redraws_after_a_resize(tmp_path):
             br.close()
     finally:
         srv.shutdown()
+
+
+LAYER_PAGE = """<!doctype html><meta charset="utf-8"><body style="margin:0;background:#000">
+<div class="game" style="position:relative"><canvas class="crt-layer" aria-hidden="true"></canvas></div>
+<script src="wb-obraz.js"></script><script>
+const warns = []; const w0 = console.warn; console.warn = (m) => { warns.push(String(m)); w0(m); };
+const game = document.querySelector('.game'), cv = document.createElement('canvas'); cv.id = 'c'; cv.width = 64; cv.height = 32;
+if (new URLSearchParams(location.search).get('after') === '1') game.appendChild(cv); else game.insertBefore(cv, game.firstChild);
+const sc = new WBOBRAZ.Screen(game, cv);
+window.result = { warns, order: !!(cv.compareDocumentPosition(sc.layer) & Node.DOCUMENT_POSITION_FOLLOWING), parent: sc.layer.parentNode === game, kids: game.children.length };
+</script>"""
+
+
+def test_crt_layer_stays_above_the_game_canvas(tmp_path):
+    """1.5.2 (Superfrog): a game canvas appended after .crt-layer hid the CRT; the Screen moves the layer right above the
+    canvas and warns; a canvas before the layer is left alone; `arek web test` §5.5 reads the order."""
+    pytest.importorskip('playwright')
+    import threading
+    from playwright.sync_api import sync_playwright
+    from arek import web
+    shutil.copy(WEB / 'wb-obraz.js', tmp_path / 'wb-obraz.js')
+    (tmp_path / 'l.html').write_text(LAYER_PAGE)
+    srv = web.serve(tmp_path, 0)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            out = {}
+            for tail in ('?after=1', ''):
+                p = b.new_page()
+                p.goto('http://127.0.0.1:%d/l.html%s' % (port, tail))
+                p.wait_for_function('window.result')
+                out[tail] = (p.evaluate('window.result'), p.evaluate(webtest.ORDER_JS))
+                p.close()
+            b.close()
+    finally:
+        srv.shutdown()
+    r, order = out['?after=1']
+    assert r['order'] is True and r['parent'] is True and r['kids'] == 2 and order is True
+    assert len(r['warns']) == 1 and 'moved above it' in r['warns'][0]
+    r, order = out['']
+    assert r['order'] is True and r['warns'] == [] and order is True

@@ -24,7 +24,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
   verified, an original retail disk is not yet; AGA is not supported).
   Original and Enhanced modes, one or two players.
 - **Superfrog** (Team17, 1993): in verification, not playable yet.
-- **The kit:** version 0.9.13 on PyPI, 2497 tests. Extracted from five game
+- **The kit:** version 0.9.14 on PyPI, 2498 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -127,6 +127,7 @@ arek web serve build/present --port 8930               # the bundle with the dis
 arek web serve build/present --isolated                 # ... with the COOP / COEP headers (an engine with shared memory)
 arek web strip web/page.js build/present/page.js --drop FULL   # the presentation's variant: lines //@FULL and blocks //@FULL{ ... //@}FULL cut out
 arek web longrun http://127.0.0.1:8930/ --minutes 3     # smoothness over a longer play (playwright; the page's globalThis.WBLONGRUN hook)
+#    arek web test 1.5.2 §5.5: the game canvas must lie under the presenter's .crt-layer (a scene canvas appended after it hid the CRT - Superfrog); the Screen moves the layer and warns
 arek web smooth http://127.0.0.1:8920/smooth-demo.html  # the canon's limits in Chromium and WebKit: dropped frames, camera and object steps, missing passes, key latency, sound under stalls (docs/WB-PLYNULOST.md; --no-interp for an original mode)
 #    wb-scene.js (0.9.0): the wider, smoother view composed on the GPU from one record per game frame (clean window, map, objects, sprites, HUD),
 #    with a CPU reference for a 0-mismatch check; scene-demo.html shows it (docs/WB-PLYNULOST.md G); 1.5: subpixel - the playfield

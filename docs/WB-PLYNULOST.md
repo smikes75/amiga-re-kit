@@ -147,6 +147,18 @@ against 1-128, key -> camera 37-101 against 35-57 ms, missing 0 %, sound 0 dropo
 frame one GAME frame ahead where PACE granted one DISPLAY frame + 2 ms ahead (the frame is computed in the last
 display frame before its time and reads fresher input: 1.3 ms at 60 Hz, 10-11 ms at 120 / 144 Hz) - `horizon` in 1.4.
 
+Superfrog on kit 0.9.13 (cbb61a2: `timeOf`, latO 48 fixed, the default horizon, `extrapolateObjects: 1` as its
+default): `arek web smooth --gpu`, Chromium, 30 s, 10 stalls, load 3-5, two runs each - without the objects'
+extrapolation missing passes 2.3 / 2.2 % and jitter 0.059 / 0.056; with it missing 0.0 / 0.0 % and jitter 0.056 /
+0.029, every limit of A passed; both 0 dropped, 0 sound dropouts, key -> camera 12-14 ms. Replay EQUAL with the
+fingerprints of 0.9.10; GPU against the reference 0.
+
+The blind test of the subpixel shift (Superfrog, Debug "Posun A / B", 2026-11-01): the author preferred the picture
+WITHOUT the shift - the sharp edges on whole device pixels over the even motion in a platformer at zoom 3 with a
+tracked sprite. In Alien Breed II (a top-down game scrolling in eight directions) the same author's best feel was
+the scene module WITH the shift. So the option stays in the module, the default is the game's (the author decides
+per game), and a per-sprite shift is not pursued.
+
 ## D. The sound (`wb-zvuk-worklet.js` + `wb-zvuk-out.js` 1.0, kit 0.8.1) - done
 
 Extracted from Alien Breed II (audio-worklet.js) and Superfrog: an AudioWorkletProcessor (`wb-paula`) over a ring of
@@ -204,6 +216,11 @@ composes: the camera between frames (wb-takt's pairs), the objects between drawi
 every other frame - pairing consecutive frames would hold and jump), the sprites between frames, everything placed
 on whole device pixels. `WBSCENE.reference(composition)` is the CPU reference of the same composition, so a page can
 check its GPU path for 0 mismatches at any time (`scene.read()`), and a page without WebGL2 draws the reference.
+The scene draws into the presenter's canvas, and that canvas must lie UNDER the presenter's `.crt-layer`: Superfrog
+appended its own canvas for the module after the layer and the CRT vanished but its vignette (its row contrast 0.42
+against 8.91 with the old drawing; found by the author's eye, fixed by inserting the canvas before the layer,
+dc26710). Since wb-obraz 1.5.2 the Screen moves the layer above a canvas that comes after it and warns; `arek web
+test` checks the order (§5.5).
 
 Options (off unless set, each measured in Superfrog): `softClamp { tau }` - at a map edge the stopped camera is
 the mean over tau ms of the clamped cameras, extrapolated past the newest frame by at most tau (a stop 5 -> 2.3 -> 0

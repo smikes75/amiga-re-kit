@@ -135,6 +135,14 @@ def with_gl(url, gl):
     return url + ('&' if '?' in url else '?') + 'gl=%d' % gl
 
 
+ORDER_JS = """(() => {
+    const cs = Array.from(document.querySelectorAll('canvas')).filter((c) => !c.classList.contains('crt-layer'));
+    const l = document.querySelector('.crt-layer'); if (!cs.length || !l) return null;
+    const c = cs.sort((a, b) => b.width * b.height - a.width * a.height)[0];      // the game canvas: the largest
+    return !!(c.compareDocumentPosition(l) & Node.DOCUMENT_POSITION_FOLLOWING);  // true: the layer comes after the canvas (above it)
+})()"""
+
+
 def run(url, quick=False, log=print):
     """Run the checks; returns {'checks': n, 'fails': [...]} (raises ImportError without playwright)."""
     from playwright.sync_api import sync_playwright
@@ -149,6 +157,11 @@ def run(url, quick=False, log=print):
                 page = ctx.new_page()
                 page.goto(url)
                 page.wait_for_function('window.wbObrazTest')
+                if dpr == DPRS[0] and width == WIDTHS[0]:      # §5.5 (wb-obraz 1.5.2, Superfrog): the game canvas under the CRT layer
+                    order = page.evaluate(ORDER_JS)
+                    checks += 1
+                    if order is False:
+                        fails.append('§5.5: the game canvas lies above the CRT layer (keep the canvas before .crt-layer)')
                 for mode, detail, zoom, par in itertools.product(MODES, DETAILS, zooms, (1, PAR)):
                     if par != 1 and zoom not in (2, 0):
                         continue
