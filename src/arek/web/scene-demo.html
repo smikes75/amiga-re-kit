@@ -130,7 +130,7 @@ globalThis.wbSceneTest = {
   gl: () => glOn, options: () => opts, size: () => ({ W, H, S }),
   compare: () => { if (!glOn) return null; const r = scene.read(lastTs, view); if (!r) return null; const ref = WBSCENE.reference(r.composition); let bad = 0;
     for (let i = 0; i < ref.length; i += 4) if (ref[i] !== r.pixels[i] || ref[i + 1] !== r.pixels[i + 1] || ref[i + 2] !== r.pixels[i + 2]) bad++;
-    return { pixels: ref.length / 4, bad, objs: r.composition.objs.length, sprs: r.composition.sprs.length, f: r.composition.f, cam: r.composition.cam }; },
+    return { pixels: ref.length / 4, bad, objs: r.composition.objs.length, sprs: r.composition.sprs.length, f: r.composition.f, cam: r.composition.cam, glErr: pr.g.getError() }; },   // glErr: the first GL error since the last call (0 = none), KIT-GAPS 50
   composition: () => { const c = scene.compose(lastTs, view); return c ? { cam: c.cam, gcam: c.gcam, f: c.f, objs: c.objs.map((o) => [o.o.id, o.x, o.y]), n: c.n } : null; },
 };
 </script>

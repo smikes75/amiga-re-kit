@@ -11,8 +11,9 @@
  *   // = void game_dsk_io(M68 *m) { D0 = 0 when the sectors moved, AHDD_FAIL (30, TDERR_SeekError) otherwise; rts }
  *
  * A game whose one routine serves its own disks too (Superfrog) decides in its own extern: the data disk is in the drive
- * (ahdd_in(); the project calls ahdd_insert(1 / 0) around the game's "insert datadisk" prompt, or leaves it in for
- * good - the default) and unit 0 -> ahdd_io(), otherwise ahd_read() of arek_host_disk.h.
+ * (ahdd_in()) and unit 0 -> ahdd_io(), otherwise ahd_read() of arek_host_disk.h. The disk starts in the drive
+ * (AHDD_INSERTED 1, right for a dedicated routine); such a game reads sector 0 of every unit at start, so it builds with
+ * -DAHDD_INSERTED=0 and calls ahdd_insert(1 / 0) around its "insert datadisk" prompt.
  * The page: ahdd_buf() / ahdd_size() are the sectors (the page writes them before the game runs and reads them back
  * when ahdd_gen() changed - every write by the game bumps it); ahdd_set(ok) says whether they hold a disk. An empty
  * drive (no disk saved yet) reads as zeros and still takes a write - what a blank disk does; the game decides what a
@@ -34,9 +35,12 @@
 #ifndef AHDD_FAIL
 #define AHDD_FAIL 30u                                       /* trackdisk's TDERR_SeekError: the disk cannot be accessed */
 #endif
+#ifndef AHDD_INSERTED
+#define AHDD_INSERTED 1                                     /* the disk is in the drive from the start */
+#endif
 #define AHDD_SECTOR 512
 static uint8_t AHDD[AHDD_SECTORS * AHDD_SECTOR];
-static volatile int AHDD_OK = 0, AHDD_GEN = 0, AHDD_IN = 1;
+static volatile int AHDD_OK = 0, AHDD_GEN = 0, AHDD_IN = AHDD_INSERTED;
 static long AHDD_READS = 0, AHDD_WRITES = 0, AHDD_MISS = 0;    /* for the page's diagnostics */
 /* count sectors from `sector` between the disk and the translation's memory at addr; 1 = done, 0 = outside the disk */
 static int ahdd_io(long sector, int count, int write, uint32_t addr) {

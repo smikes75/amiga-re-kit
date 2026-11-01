@@ -21,8 +21,7 @@ import subprocess
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FILES = ('arek_host_pre.h', 'arek_host.h', 'arek_display.h', 'arek_audio.h', 'arek_host_disk.h', 'arek_host_trace.c',
-         'arek_display_render.c', 'arek_host_engine.c', 'arek_host_engine_check.js')
+FILES = tuple(sorted(f for f in os.listdir(HERE) if f.endswith(('.h', '.c', '.js'))))   # every source of the host (G55: a list forgot a header)
 STATE_MAGIC = b'AREKSTATE1\0'
 ENGINE_API = ('engine_alloc', 'engine_init', 'engine_set_disk', 'engine_run', 'engine_waiting', 'engine_ended', 'engine_error',
               'engine_done', 'engine_allow', 'engine_keys', 'engine_keys2', 'engine_key', 'engine_fr_frame', 'engine_fr_aud0',

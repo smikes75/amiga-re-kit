@@ -235,6 +235,11 @@ wobble by up to half a pixel in a sawtooth), an object standing on the ground ma
 the smoothly moving ground instead - the trade the blind test on Superfrog decides (the games put the option
 behind a Debug switch; `scene.opts.subpixel` can change at run time). On a 50 or 100 Hz display, or when the
 camera lands on the device grid, the picture is identical to the plain drawing.
+Superfrog's switch (kit 0.9.8, Debug "Posun A / B" with a reveal button, the letter drawn once per browser, the
+default without the shift): replay of Enhanced on the scene module with the shift, 1000 frames with a route, EQUAL
+at the four rates and the same fingerprint as without it. KIT-GAPS 50 (0.9.9): the shift's own texture was made on
+unit 0 under the window's, so the page's first draw into it formed a feedback loop (GL_INVALID_OPERATION once, 1 of
+14 974 calls); it is now made and sized on its own unit; the synthetic page's `compare()` reports `glErr`.
 
 The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
 the 2D path; `?fine=1` the subpixel shift) runs a generated map, a clean window with decorations the map does not have and holes the map shows
@@ -259,9 +264,16 @@ needs no display and is as fast as the page computes (the Codex Superfrog rebuil
 The page's hooks (`WBLONGRUN` 1.5, beside those of F): `done()` the game frames computed so far; `state()` a string
 fingerprint of the game's state (a hash of its RAM, or of what moves: the camera and the objects); `inputs([[frame,
 mask], ...])` (optional) holds the keys `mask` from game frame `frame` on - a page without it is replayed without
-input. A page whose engine runs in a worker must let `done()` reflect the frames really computed. The synthetic
-scene page implements all three; the kit's test replays it with a route at the four rates (equal state, more display
-frames at the higher rates) and checks that the route changes the state.
+input. The hooks may return promises (the tool awaits them). A page whose engine runs in a worker (Superfrog, kit
+0.9.7): `done()` waits until the worker has computed every frame the clock permitted and reports at most one more
+than the last call, `state()` is the fingerprint of exactly that frame from the ring in shared memory - otherwise
+the worker runs past N and the fingerprints differ by rate. `prepare()` must return only once the game runs from a
+verified set of disks: Superfrog's first DIFFERS was one byte, the game had started before the page verified its
+last disk, and a click on a still-disabled button hung the next context. Measured: Superfrog Original and Enhanced,
+300 frames with a route, EQUAL at the four rates; Enhanced on the scene module EQUAL over 1000; without the route
+a different fingerprint, so the inputs take. The synthetic scene page implements all three; the kit's test replays
+it with a route at the four rates (equal state, more display frames at the higher rates) and checks that the route
+changes the state.
 
 ## A. The numbers (kit 0.8.1, the kit's synthetic page, headless)
 

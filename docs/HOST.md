@@ -160,16 +160,22 @@ AHDD_EXTERN(game_dsk_io, m->d[0] & 3, (uint16_t)m->d[1], (uint16_t)m->d[2], m->d
 ```
 
 A game whose one routine also reads its own disks (Superfrog) writes the extern itself: when the data disk
-is in the drive (`ahdd_in()`; the project calls `ahdd_insert(1 / 0)` around the game's prompt, or leaves it
-in for good, the default) and the unit is 0, `ahdd_io(sector, count, write, addr)`, otherwise `ahd_read()`
-of `arek_host_disk.h`. An empty drive reads as zeros and still takes a write - what a blank disk does; the
-game decides what a sector without its marker means (its own DISK ERROR on LOAD, a plain SAVE).
+is in the drive (`ahdd_in()`) and the unit is 0, `ahdd_io(sector, count, write, addr)`, otherwise `ahd_read()`
+of `arek_host_disk.h`. The disk starts in the drive (`AHDD_INSERTED`, default 1 - right for a dedicated
+routine as Alien Breed II's); such a game reads sector 0 of every unit at start, so it compiles with
+`-DAHDD_INSERTED=0` (or calls `ahdd_insert(0)` before the game runs) and inserts the disk with
+`ahdd_insert(1)` around its "insert datadisk" prompt. An empty drive reads as zeros and still takes a write -
+what a blank disk does; the game decides what a sector without its marker means (its own DISK ERROR on LOAD,
+a plain SAVE). The disk answers at once where the original took seconds: a menu then reads the fire button
+still held from the prompt as the next choice and shows the prompt again - the page or the engine holds the
+button as released after the disk call until the real release (Superfrog).
 
 The page keeps the sectors in localStorage with `wb-datadisk.js`: the header exports `ahdd_buf`,
 `ahdd_size`, `ahdd_set`, `ahdd_gen` (EMSCRIPTEN_KEEPALIVE on their own, no EXPORTED_FUNCTIONS entry needed),
-`WBDATADISK.host(M)` maps them, `open({ key, host, label, log })` gives `load()` (after the engine's init,
-before the game runs), `poll()` (once per frame: the game wrote, the write is saved) and `clear()`, plus a
-two-click clear button. Natively `ahdd_sync(path)` once per frame keeps a file equal to the disk. What the
+`WBDATADISK.host(M)` maps them; an engine in a worker gives `open()` its own `host` adapter over the shared
+memory instead (the sectors, the generation and the flag - Superfrog). `open({ key, host, label, log })` gives
+`load()` (after the engine's init, before the game runs), `poll()` (once per frame: the game wrote, the write
+is saved) and `clear()`, plus a two-click clear button. Natively `ahdd_sync(path)` once per frame keeps a file equal to the disk. What the
 game does with the table beyond SAVE / LOAD - an automatic save after a name is entered, the table's address
 and format - is the project's (Alien Breed II has it in its engine).
 

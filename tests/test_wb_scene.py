@@ -214,7 +214,7 @@ def test_gpu_equals_the_reference(tail):
     if not gl:
         pytest.skip('no WebGL2 in this Chromium')
     for r in res:
-        assert r['bad'] == 0 and r['pixels'] > 100000 and r['objs'] >= 2 and r['sprs'] == 2, r      # the frog and the screen-fixed badge
+        assert r['bad'] == 0 and r['pixels'] > 100000 and r['objs'] >= 2 and r['sprs'] == 2 and r['glErr'] == 0, r   # the frog and the screen-fixed badge; no GL error since the page's first draw (KIT-GAPS 50)
 
 
 def test_sprites_above_the_hud_rows():

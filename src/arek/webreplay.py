@@ -11,6 +11,8 @@ The page provides, besides ``globalThis.WBLONGRUN`` 1.4 (ready, status, prepare,
   state() -> a string: the fingerprint of the game's state (a hash of its RAM or of what moves - camera, objects);
   inputs(schedule) (optional) -> accepts [[frame, mask], ...]: from game frame `frame` on, the keys `mask` are held
   (the page's own bit layout) until the next entry; a page without it is replayed without input.
+The hooks may return promises (awaited). With the engine in a worker, done() waits for the frames the clock permitted
+and state() is the fingerprint of exactly that frame; prepare() returns only once the game runs from verified disks.
 
     arek web replay http://127.0.0.1:8920/scene-demo.html --hz 50,60,120,144 --frames 300 --route 1:120,2:60,0:120
 

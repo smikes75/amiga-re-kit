@@ -1,5 +1,6 @@
 """The C renderer (arek_display.h) against arek.display (Python) on synthetic chip RAM, and the two measured
 rules both carry: the DDFSTRT delay of the first pixel and the sprite slots the bitplanes take."""
+import os
 import struct
 
 import pytest
@@ -125,6 +126,9 @@ def test_package_and_copy(tmp_path):
     assert cli.main(['host', 'copy', str(tmp_path)]) == 0
     for name in host.FILES:
         assert (tmp_path / name).exists()
+    here = os.path.dirname(os.path.abspath(host.__file__))
+    assert 'arek_host_datadisk.h' in host.FILES and 'arek_host_disk.h' in host.FILES and 'arek_host_engine_check.js' in host.FILES   # G55 (Alien Breed II): the list forgot the newest header
+    assert sorted(host.FILES) == sorted(f for f in os.listdir(here) if f.endswith(('.h', '.c', '.js'))) and len(host.FILES) == 10
     import tomllib
     from pathlib import Path
     data = tomllib.loads((Path(__file__).parent.parent / 'pyproject.toml').read_text())['tool']['setuptools']['package-data']

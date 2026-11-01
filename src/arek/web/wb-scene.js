@@ -433,9 +433,10 @@ const WBSCENE = (() => {
          *  band shifted by the fraction (mode 3); the objects, sprites and HUD follow at the view's camera as always. */
         _subpixel(c, fbo, x0, vy, Wd, Hd, ci) {
             const gl = this.gl, u = this.u, sub = c.sub, Wm = Wd + 1, Hm = Hd + 1;
+            gl.activeTexture(gl.TEXTURE5);                   // the texture is made and sized on its own unit, never left on unit 0 under the window (KIT-GAPS 50: a feedback loop on the first draw)
             if (!this.mid) this.mid = { fbo: gl.createFramebuffer(), t: this._tex(), w: 0, h: 0 };
             if (this.mid.w !== Wm || this.mid.h !== Hm) { this.mid.w = Wm; this.mid.h = Hm; gl.bindTexture(gl.TEXTURE_2D, this.mid.t); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, Wm, Hm, 0, gl.RGBA, gl.UNSIGNED_BYTE, null); gl.bindFramebuffer(gl.FRAMEBUFFER, this.mid.fbo); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.mid.t, 0); }
-            gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.bindTexture(gl.TEXTURE_2D, null);             // unit 5 empty while the texture is the target
             gl.bindFramebuffer(gl.FRAMEBUFFER, this.mid.fbo);
             const si = [Math.floor(sub.cam[0]), Math.floor(sub.cam[1])];
             gl.viewport(0, 0, Wm, Hm); gl.uniform2f(u.u_size, Wm, Hm); gl.uniform2i(u.u_cami, si[0], si[1]); gl.uniform2f(u.u_camf, sub.cam[0] - si[0], sub.cam[1] - si[1]); gl.uniform2f(u.u_band, 0, Hm);
