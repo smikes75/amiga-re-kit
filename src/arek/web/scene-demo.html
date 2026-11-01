@@ -69,6 +69,7 @@ const opts = { pairOlder: parseInt(Q.get('pair') || '0', 10) };
 if (Q.get('soft') === '1') opts.softClamp = { tau: 20 };
 if (Q.get('smooth') === '1') opts.smoothY = { tau: 60 };
 if (Q.get('mean') === '1') opts.camMean = { tau: 20 };
+if (Q.get('fine') === '1') opts.subpixel = true;                          // 1.5: the playfield shifted by the fraction of a device pixel
 const UNDER = Q.get('under') === '1';                                     // 1.4: the sprites above the HUD rows; the frog's head reaches into the top HUD
 const screen = document.getElementById('screen'), O = WBOBRAZ;
 const pr = new O.Presenter(screen, { gl: Q.get('gl') === '0' ? 'off' : 'auto' });

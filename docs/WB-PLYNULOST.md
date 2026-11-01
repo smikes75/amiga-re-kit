@@ -221,11 +221,27 @@ columns and rows (the box of the visible pixels moves with the animation and int
 two-sprite player apart); only real sprite occurrences with stable ids belong in `sprites[]`, a diff layer goes
 into `window.over`.
 
+1.5 (kit 0.9.8, from the Codex Superfrog rebuild's renderer): `subpixel = true` moves the playfield by fractions of a
+device pixel. A 50 Hz game on a 60 Hz display at zoom 2 scrolls 1.67 device px per display frame, which whole
+pixels show as 2, 2, 1, 2, 2, 1 (at zoom 1: 1, 1, 1, 1, 1, 0 - a stand-still every sixth frame); the measurement
+does not count that as jitter, the eye may. With the option the playfield (window and map) is drawn one device
+pixel wider and taller at the camera snapped to whole device pixels, then into the band shifted by the remaining
+fraction as a blend of the four neighbouring device pixels - integer weights /256 on both the GPU (a mode-3 pass
+over an own texture) and the reference (`subBlend`), so the 0-mismatch check holds: a magnified-sharp picture
+moved by a fraction, not a bilinear magnification; an edge softens by one device pixel, the interior of a game
+pixel stays flat. Objects, sprites and the HUD keep their whole-device-pixel positions relative to the view's
+camera: a player the camera tracks stands still on the screen (shifting them with the playfield would make it
+wobble by up to half a pixel in a sawtooth), an object standing on the ground may wobble by that much against
+the smoothly moving ground instead - the trade the blind test on Superfrog decides (the games put the option
+behind a Debug switch; `scene.opts.subpixel` can change at run time). On a 50 or 100 Hz display, or when the
+camera lands on the device grid, the picture is identical to the plain drawing.
+
 The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
-the 2D path) runs a generated map, a clean window with decorations the map does not have and holes the map shows
+the 2D path; `?fine=1` the subpixel shift) runs a generated map, a clean window with decorations the map does not have and holes the map shows
 through, three objects on a 25 Hz loop (one blinking), a sprite and HUD rows on the kit's clock; its hooks are
 WBLONGRUN 1.4 and `wbSceneTest.compare()` (the GPU band against the reference). Tests: the pure parts in Node, the
-GPU equality (0 of 114 688 and 458 752 pixels at S = 1 and 2, with and without the options) and `arek web smooth`
+GPU equality (0 of 114 688 and 458 752 pixels at S = 1 and 2, with and without the options, with the subpixel shift
+at S = 2 and 3) and `arek web smooth`
 over the page in Chromium (0 missing passes, camera and object jitter under the limit).
 
 ## H. The display never touches the game (`arek web replay`, kit 0.9.6) - done

@@ -2,7 +2,8 @@
 // after Superfrog's switch - KIT-GAPS 40-43: screen-fixed sprites, the means over the interpolated camera, a layer of
 // drawings without identity, a guard for a pass that never changes, one timebase; 1.2 kit 0.9.2 - KIT-GAPS 44-46: no
 // interpolation across a jump, sprites[].id, camMean for both axes; 1.3 kit 0.9.3 - objects[].ox/oy, the drawing's offset
-// from the logical position; 1.4 kit 0.9.4 - hud.under: the sprites above the HUD rows as the hardware draws them).
+// from the logical position; 1.4 kit 0.9.4 - hud.under: the sprites above the HUD rows as the hardware draws them; 1.5 kit
+// 0.9.8 - subpixel: the playfield shifted by the fraction of a device pixel, the motion even on a 60 / 144 Hz display).
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -54,7 +55,11 @@
 // smoothY { tau } (the terrain's vertical camera as a triangle-weighted mean over the last tau ms, sampled every 5 ms;
 // sprites keep their screen position as in the original), pairOlder (a blinking sprite / object paired with up to n older
 // frames), fixedAxis { axis, value } (a level whose camera axis is fixed: black outside), passMax (1.1, default 100 ms: when
-// no new pass came for longer, every frame counts as a pass - an interlude drawn by other code), x17 (12-bit colours * 17).
+// no new pass came for longer, every frame counts as a pass - an interlude drawn by other code), x17 (12-bit colours * 17),
+// subpixel (1.5: the playfield is drawn at the camera snapped to whole device pixels and shifted by the remaining fraction
+// as a blend of the four neighbouring device pixels - integer weights /256, the GPU and the reference bit for bit; a 50 Hz
+// game on a 60 Hz display then scrolls 1.67 device px every frame instead of 2, 2, 1; an edge softens by one device pixel.
+// Objects, sprites and the HUD stay on whole device pixels relative to the view's camera, so a tracked player stands still).
 // One timebase: ts of the drawer and rec.t must come from the same clock (the page's requestAnimationFrame timestamps and
 // wb-takt's stamps are performance.now() based; a worker's absolute times must be converted) - the module warns once when
 // the newest frame is more than 500 ms behind ts.
@@ -65,7 +70,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '1.4';
+    const VERSION = '1.5';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -201,7 +206,13 @@ const WBSCENE = (() => {
             return { s: pr.to, x: from ? lerp(from[0], tw[0], pr.f) : tw[0], y: from ? lerp(from[1], tw[1], pr.f) : tw[1] };
         });
         return { A, B, f, OA, OB, of, cam: vcam, spriteCam, gcam, win, map: B.map || null, limits: lim, objs, sprs, hud: B.hud || null,
-                 W: win.w + 2 * ext.x, H: win.h + 2 * ext.y, S: view.S || 1, ext, fixed: o.fixedAxis || null, n: B.n };
+                 W: win.w + 2 * ext.x, H: win.h + 2 * ext.y, S: view.S || 1, ext, fixed: o.fixedAxis || null, n: B.n, sub: subOf(vcam, view.S || 1, o) };
+    }
+    /** 1.5: the playfield's camera snapped to whole device pixels and the remaining fraction as weights /256 (x, y). */
+    function subOf(cam, S, o) {
+        if (!o.subpixel) return null;
+        const d = [cam[0] * S, cam[1] * S], i = [Math.floor(d[0]), Math.floor(d[1])];
+        return { cam: [i[0] / S, i[1] / S], w: [Math.round((d[0] - i[0]) * 256), Math.round((d[1] - i[1]) * 256)] };
     }
     function frameCam(frames, item, fallback) { for (const fr of frames) if (fr.sprites && fr.sprites.indexOf(item) >= 0) return fr.cam; return fallback.cam; }
     /** The pair around time t without wb-takt: the two frames around t, f in [0, 1] (or > 1 past the newest). */
@@ -216,12 +227,43 @@ const WBSCENE = (() => {
     /** The reference: the composition drawn on the CPU at S device pixels per game pixel, RGBA rows top-down, W*S x H*S
      *  (the playfield band only). The same rules as the shader: a device pixel shows the game pixel floor(px / S + cam);
      *  the window's clean picture where it has an index, the map's tile elsewhere, black outside; then the objects at
-     *  round((x - cam) * S) (255 transparent, the palette row of the window row under it), then the sprites, lower k on top. */
+     *  round((x - cam) * S) (255 transparent, the palette row of the window row under it), then the sprites, lower k on top.
+     *  With c.sub (1.5) the playfield is drawn one device pixel wider and taller at the snapped camera and blended by the
+     *  weights; the objects and sprites go on top at the view's camera as before. */
     function reference(c) {
-        const S = c.S, W = c.W, H = c.H, Wd = W * S, Hd = H * S, out = new Uint8Array(Wd * Hd * 4);
+        const S = c.S, Wd = c.W * S, Hd = c.H * S, win = c.win, winY = c.B.cam[1], fr32 = Math.fround;
+        const out = c.sub ? subBlend(playfield(c, c.sub.cam, Wd + 1, Hd + 1), Wd, Hd, c.sub.w) : playfield(c, c.cam, Wd, Hd);
+        const camI = Math.floor(c.cam[1]), camF = fr32(c.cam[1] - camI), gameY = (dy) => Math.floor(fr32(fr32(dy / S) + camF)) + camI;
+        const palRow = (wy) => Math.min(Math.max(wy - winY, 0), win.h - 1);
+        const put = (dx, dy, idx, row) => { const p = (dy * Wd + dx) * 4, q = (row * 32 + idx) * 4; out[p] = win.pal[q]; out[p + 1] = win.pal[q + 1]; out[p + 2] = win.pal[q + 2]; out[p + 3] = 255; };
+        const blit = (idx, w, h, x, y) => {
+            const dx0 = Math.round((x - c.cam[0]) * S), dy0 = Math.round((y - c.cam[1]) * S);
+            for (let j = 0; j < h * S; j++) { const dy = dy0 + j; if (dy < 0 || dy >= Hd) continue;
+                for (let i = 0; i < w * S; i++) { const dx = dx0 + i; if (dx < 0 || dx >= Wd) continue;
+                    const v = idx[Math.floor(j / S) * w + Math.floor(i / S)]; if (v === 255) continue;
+                    put(dx, dy, v, palRow(gameY(dy))); } }
+        };
+        for (const ob of c.objs) blit(ob.o.idx, ob.o.w, ob.o.h, ob.x + (ob.o.ox || 0), ob.y + (ob.o.oy || 0));   // 1.3: the drawing's offset from the logical position
+        const sprs = c.sprs.slice().sort((p, q) => q.s.k - p.s.k);
+        for (const sp of sprs) { const dx = sp.screen ? 0 : c.cam[0] - c.spriteCam[0], dy = sp.screen ? 0 : c.cam[1] - c.spriteCam[1]; blit(sp.s.idx, 16, sp.s.h, sp.x + dx, sp.y + dy); }
+        return out;
+    }
+    /** 1.5: out(x, y) = the four device pixels around (x + wx/256, y + wy/256) of mid (Wd + 1 wide), integer arithmetic. */
+    function subBlend(mid, Wd, Hd, w) {
+        const out = new Uint8Array(Wd * Hd * 4), Wm = Wd + 1, wx = w[0], wy = w[1];
+        for (let y = 0; y < Hd; y++) for (let x = 0; x < Wd; x++) {
+            const p = (y * Wd + x) * 4, a = (y * Wm + x) * 4, b = a + 4, cc = a + Wm * 4, d = cc + 4;
+            for (let k = 0; k < 3; k++) { const top = (256 - wx) * mid[a + k] + wx * mid[b + k], bot = (256 - wx) * mid[cc + k] + wx * mid[d + k]; out[p + k] = ((256 - wy) * top + wy * bot + 32768) >> 16; }
+            out[p + 3] = 255;
+        }
+        return out;
+    }
+    /** The playfield alone (the window's clean picture, the map, black outside) at camera cam, Wd x Hd device pixels. */
+    function playfield(c, cam, Wd, Hd) {
+        const S = c.S, out = new Uint8Array(Wd * Hd * 4);
         const win = c.win, winX = c.B.cam[0], winY = c.B.cam[1], map = c.map;
         const fixed = c.fixed, lim = c.limits, fr32 = Math.fround;
-        const camI = [Math.floor(c.cam[0]), Math.floor(c.cam[1])], camF = [fr32(c.cam[0] - camI[0]), fr32(c.cam[1] - camI[1])];
+        const camI = [Math.floor(cam[0]), Math.floor(cam[1])], camF = [fr32(cam[0] - camI[0]), fr32(cam[1] - camI[1])];
         const gameX = (dx) => Math.floor(fr32(fr32(dx / S) + camF[0])) + camI[0], gameY = (dy) => Math.floor(fr32(fr32(dy / S) + camF[1])) + camI[1];   // as the shader (float32)
         const palRow = (wy) => Math.min(Math.max(wy - winY, 0), win.h - 1);
         const put = (dx, dy, idx, row) => { const p = (dy * Wd + dx) * 4, q = (row * 32 + idx) * 4; out[p] = win.pal[q]; out[p + 1] = win.pal[q + 1]; out[p + 2] = win.pal[q + 2]; out[p + 3] = 255; };
@@ -242,16 +284,6 @@ const WBSCENE = (() => {
             }
             if (idx >= 0) put(dx, dy, idx, palRow(wy)); else { const p = (dy * Wd + dx) * 4; out[p + 3] = 255; }
         }
-        const blit = (idx, w, h, x, y, k) => {
-            const dx0 = Math.round((x - c.cam[0]) * S), dy0 = Math.round((y - c.cam[1]) * S);
-            for (let j = 0; j < h * S; j++) { const dy = dy0 + j; if (dy < 0 || dy >= Hd) continue;
-                for (let i = 0; i < w * S; i++) { const dx = dx0 + i; if (dx < 0 || dx >= Wd) continue;
-                    const v = idx[Math.floor(j / S) * w + Math.floor(i / S)]; if (v === 255) continue;
-                    put(dx, dy, v, palRow(gameY(dy))); } }
-        };
-        for (const ob of c.objs) blit(ob.o.idx, ob.o.w, ob.o.h, ob.x + (ob.o.ox || 0), ob.y + (ob.o.oy || 0));   // 1.3: the drawing's offset from the logical position
-        const sprs = c.sprs.slice().sort((p, q) => q.s.k - p.s.k);
-        for (const sp of sprs) { const dx = sp.screen ? 0 : c.cam[0] - c.spriteCam[0], dy = sp.screen ? 0 : c.cam[1] - c.spriteCam[1]; blit(sp.s.idx, 16, sp.s.h, sp.x + dx, sp.y + dy); }
         return out;
     }
 
@@ -264,9 +296,19 @@ const WBSCENE = (() => {
     in vec2 v_uv; out vec4 o;
     uniform sampler2D u_tex; uniform sampler2D u_pal; uniform int u_mode; uniform float u_S; uniform ivec2 u_cami; uniform vec2 u_camf; uniform vec2 u_band;
     uniform ivec2 u_winpos; uniform ivec2 u_winsize; uniform highp usampler2D u_grid; uniform sampler2D u_atlas; uniform ivec4 u_map; uniform ivec4 u_fixed; uniform sampler2D u_over; uniform int u_hasover;
+    uniform sampler2D u_mid; uniform ivec2 u_w; uniform int u_midh;
     int ix8(sampler2D t, ivec2 p) { return int(texelFetch(t, p, 0).r * 255.0 + 0.5); }
+    ivec4 px8(ivec2 p) { return ivec4(texelFetch(u_mid, p, 0) * 255.0 + 0.5); }
     void main() {
       if (u_mode == 0) { o = texture(u_tex, v_uv); return; }
+      if (u_mode == 3) {                                      // 1.5: the playfield drawn at the snapped camera (u_mid, one px wider and taller), shifted by u_w / 256
+        ivec2 d = ivec2(int(gl_FragCoord.x - 0.5 - u_band.x), int(u_band.y - gl_FragCoord.y - 0.5));
+        ivec2 t = ivec2(d.x, u_midh - d.y);                   // u_mid's rows run bottom-up: row u_midh is the band's top row
+        ivec4 a = px8(t), b = px8(t + ivec2(1, 0)), c = px8(t - ivec2(0, 1)), e = px8(t + ivec2(1, -1));
+        ivec4 top = (256 - u_w.x) * a + u_w.x * b, bot = (256 - u_w.x) * c + u_w.x * e;
+        ivec4 v = ((256 - u_w.y) * top + u_w.y * bot + 32768) >> 16;
+        o = vec4(vec3(v.rgb) / 255.0, 1.0); return;
+      }
       // the game pixel under this device pixel (its top-left corner; gl_FragCoord is the centre): floor(px / S + cam),
       // the camera as an integer part and a float32 fraction so that the CPU reference computes the same floor
       vec2 g = vec2((gl_FragCoord.x - 0.5 - u_band.x) / u_S + u_camf.x, (u_band.y - gl_FragCoord.y - 0.5) / u_S + u_camf.y);
@@ -321,7 +363,7 @@ const WBSCENE = (() => {
                 const prog = this.prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog);
                 if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
                 gl.useProgram(prog); this.u = {};
-                for (const n of ['u_size', 'u_tex', 'u_pal', 'u_mode', 'u_S', 'u_cami', 'u_camf', 'u_band', 'u_winpos', 'u_winsize', 'u_grid', 'u_atlas', 'u_map', 'u_fixed', 'u_over', 'u_hasover']) this.u[n] = gl.getUniformLocation(prog, n);
+                for (const n of ['u_size', 'u_tex', 'u_pal', 'u_mode', 'u_S', 'u_cami', 'u_camf', 'u_band', 'u_winpos', 'u_winsize', 'u_grid', 'u_atlas', 'u_map', 'u_fixed', 'u_over', 'u_hasover', 'u_mid', 'u_w', 'u_midh']) this.u[n] = gl.getUniformLocation(prog, n);
                 this.vao = gl.createVertexArray(); gl.bindVertexArray(this.vao); this.vbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
                 const aPos = gl.getAttribLocation(prog, 'a_pos'), aUv = gl.getAttribLocation(prog, 'a_uv');
                 gl.enableVertexAttribArray(aPos); gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0); gl.enableVertexAttribArray(aUv); gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
@@ -359,7 +401,7 @@ const WBSCENE = (() => {
             gl.viewport(x0, vy, Wd, Hd); gl.uniform2f(u.u_size, Wd, Hd); gl.uniform1f(u.u_S, S); gl.uniform2i(u.u_cami, ci[0], ci[1]); gl.uniform2f(u.u_camf, c.cam[0] - ci[0], c.cam[1] - ci[1]); gl.uniform2f(u.u_band, x0, vy + Hd);
             gl.uniform2i(u.u_winpos, c.B.cam[0], c.B.cam[1]); gl.uniform2i(u.u_winsize, win.w, win.h);
             const fx = c.fixed; gl.uniform4i(u.u_fixed, fx ? (fx.axis === 'y' ? 1 : 2) : 0, fx ? (fx.axis === 'y' ? c.limits.y0 : c.limits.x0) : 0, fx ? (fx.axis === 'y' ? c.limits.y1 + win.h : c.limits.x1 + win.w) : 0, 0);
-            gl.uniform1i(u.u_tex, 0); gl.uniform1i(u.u_pal, 1); gl.uniform1i(u.u_grid, 2); gl.uniform1i(u.u_atlas, 3); gl.uniform1i(u.u_over, 4);
+            gl.uniform1i(u.u_tex, 0); gl.uniform1i(u.u_pal, 1); gl.uniform1i(u.u_grid, 2); gl.uniform1i(u.u_atlas, 3); gl.uniform1i(u.u_over, 4); gl.uniform1i(u.u_mid, 5);
             gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, this.texOver);
             if (win.over) gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, win.w, win.h, 0, gl.RED, gl.UNSIGNED_BYTE, win.over);
             gl.uniform1i(u.u_hasover, win.over ? 1 : 0);
@@ -374,7 +416,7 @@ const WBSCENE = (() => {
                 gl.uniform4i(u.u_map, map.origin[0], map.origin[1], map.cols, map.rows);
             } else gl.uniform4i(u.u_map, 0, 0, 0, 0);
             gl.activeTexture(gl.TEXTURE0); this._r8(this.texWin, win.w, win.h, win.idx);
-            gl.uniform1i(u.u_mode, 2); this._quad(0, 0, Wd, Hd);
+            if (c.sub) this._subpixel(c, fbo, x0, vy, Wd, Hd, ci); else { gl.uniform1i(u.u_mode, 2); this._quad(0, 0, Wd, Hd); }
             const under = !!(c.hud && c.hud.under), topD = under && c.hud.top ? c.hud.top.h * S : 0, botD = under && c.hud.bottom ? c.hud.bottom.h * S : 0;
             if (under) { this._hud(c, view, d, x0, y0); gl.viewport(x0, vy, Wd, Hd); gl.uniform2f(u.u_size, Wd, Hd); gl.activeTexture(gl.TEXTURE0); }   // 1.4: the HUD first, the sprites over it
             gl.uniform1i(u.u_mode, 1); let objs = 0, sprs = 0;
@@ -386,6 +428,23 @@ const WBSCENE = (() => {
             if (c.hud && !under) this._hud(c, view, d, x0, y0);
             gl.bindVertexArray(null); this.stats.objs = objs; this.stats.sprs = sprs; this.stats.ms = performance.now() - t0;
             return true;
+        }
+        /** 1.5: the playfield into an own texture one device pixel wider and taller at the snapped camera, then into the
+         *  band shifted by the fraction (mode 3); the objects, sprites and HUD follow at the view's camera as always. */
+        _subpixel(c, fbo, x0, vy, Wd, Hd, ci) {
+            const gl = this.gl, u = this.u, sub = c.sub, Wm = Wd + 1, Hm = Hd + 1;
+            if (!this.mid) this.mid = { fbo: gl.createFramebuffer(), t: this._tex(), w: 0, h: 0 };
+            if (this.mid.w !== Wm || this.mid.h !== Hm) { this.mid.w = Wm; this.mid.h = Hm; gl.bindTexture(gl.TEXTURE_2D, this.mid.t); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, Wm, Hm, 0, gl.RGBA, gl.UNSIGNED_BYTE, null); gl.bindFramebuffer(gl.FRAMEBUFFER, this.mid.fbo); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.mid.t, 0); }
+            gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, this.mid.fbo);
+            const si = [Math.floor(sub.cam[0]), Math.floor(sub.cam[1])];
+            gl.viewport(0, 0, Wm, Hm); gl.uniform2f(u.u_size, Wm, Hm); gl.uniform2i(u.u_cami, si[0], si[1]); gl.uniform2f(u.u_camf, sub.cam[0] - si[0], sub.cam[1] - si[1]); gl.uniform2f(u.u_band, 0, Hm);
+            gl.uniform1i(u.u_mode, 2); this._quad(0, 0, Wm, Hm);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo); gl.bindTexture(gl.TEXTURE_2D, this.mid.t);
+            gl.viewport(x0, vy, Wd, Hd); gl.uniform2f(u.u_size, Wd, Hd); gl.uniform2i(u.u_cami, ci[0], ci[1]); gl.uniform2f(u.u_camf, c.cam[0] - ci[0], c.cam[1] - ci[1]); gl.uniform2f(u.u_band, x0, vy + Hd);
+            gl.uniform2i(u.u_w, sub.w[0], sub.w[1]); gl.uniform1i(u.u_midh, Hd);
+            gl.uniform1i(u.u_mode, 3); this._quad(0, 0, Wd, Hd);
+            gl.bindTexture(gl.TEXTURE_2D, null); gl.activeTexture(gl.TEXTURE0);
         }
         _slot(map, sl) { this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, (sl % 32) * 16, ((sl / 32) | 0) * 16, 16, 16, this.gl.RED, this.gl.UNSIGNED_BYTE, map.atlas.subarray(sl * 256, sl * 256 + 256)); }
         _hud(c, view, d, x0, y0) {

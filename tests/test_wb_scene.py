@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '1.4' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '1.5' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -138,6 +138,25 @@ def test_jumps_sprite_ids_and_the_symmetric_mean():
     assert r[3] < 30 and r[4] == 30                                                         # at a turn the terrain's camera rounds the corner, the sprites keep the game's
 
 
+def test_subpixel_shift_of_the_playfield():
+    """1.5: with subpixel the composition carries the snapped camera and the weights; the reference blends the playfield's
+    device pixels by them (x, y and both), objects and sprites stay where the plain drawing puts them; on a whole device
+    pixel the two drawings are identical."""
+    body = """(() => { const a = mk(1, 0, [0, 0], 50), b = mk(2, 20, [1, %s], 50); const c = S.compose([a, b], %s, { S: 2 }, { subpixel: true }, null); const px = S.reference(c);
+        const d = S.compose([a, b], %s, { S: 2 }, {}, null), py = S.reference(d); let same = px.length === py.length; for (let i = 0; same && i < px.length; i++) same = px[i] === py[i];
+        const R = (x, y) => px[(y * c.W * 2 + x) * 4], G = (x, y) => px[(y * c.W * 2 + x) * 4 + 1];
+        return { sub: c.sub, dsub: d.sub, cam: c.cam, same, obj: c.objs[0].x, r0: [0, 1, 2, 3, 4, 5, 6, 7].map((x) => R(x, 0)), r2: [0, 1, 2, 3, 4, 5, 6, 7].map((x) => R(x, 2)), r3: [R(3, 3), R(7, 2), G(1, 1), G(1, 3)] }; })()"""
+    r = js(with_mk(body % (0, 5, 5)))                                                   # camera x 0.25 game px = 0.5 device px: wx = 128
+    assert r['sub'] == {'cam': [0, 0], 'w': [128, 0]} and r['dsub'] is None and r['cam'] == [0.25, 0] and r['obj'] == 50 and r['same'] is False
+    assert r['r0'] == [20, 15, 10, 15, 40, 40, 10, 10] and r['r2'] == [20, 15, 10, 10, 10, 10, 10, 10]   # the window's edges (it sits at B's camera, x 1) halfway between the colours; the sprite on top at 4, 5
+    r = js(with_mk(body % (1, 5, 5)))                                                   # camera (0.25, 0.25): both weights 128, four taps
+    assert r['sub'] == {'cam': [0, 0], 'w': [128, 128]} and r['r0'][:4] == [20, 20, 20, 20] and r['r3'] == [13, 10, 0, 1]   # (10 + 20 + 10 + 10 + 2) / 4; the palette row blends too
+    r = js(with_mk(body % (1, 0, 0)))                                                   # on the device grid: the same picture as without the option
+    assert r['sub'] == {'cam': [0, 0], 'w': [0, 0]} and r['same'] is True
+    r = js(with_mk(body % (1, 20, 20)))
+    assert r['sub'] == {'cam': [1, 1], 'w': [0, 0]} and r['same'] is True
+
+
 def test_object_drawing_offset():
     """1.3: objects[].ox/oy place the drawing relative to the object's logical position, which is what interpolates."""
     r = js(with_mk("""(() => { const a = mk(1, 0, [0, 0], 0), b = mk(2, 20, [0, 0], 2); a.objects[0].ox = 1; b.objects[0].ox = 1; a.sprites[0].x = 3; b.sprites[0].x = 3;
@@ -181,7 +200,7 @@ def _run_page(url_tail, fn):
         srv.shutdown()
 
 
-@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2&soft=1&smooth=1', '?s=2&pair=2&mean=1'])
+@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2&soft=1&smooth=1', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1'])
 def test_gpu_equals_the_reference(tail):
     """The GPU band against the CPU reference of the same composition, pixel for pixel, while the camera moves and the
     objects interpolate (as Alien Breed II checked its WebGL path: 0 of 60 M pixels)."""
