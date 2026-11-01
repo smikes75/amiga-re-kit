@@ -241,6 +241,30 @@ at the four rates and the same fingerprint as without it. KIT-GAPS 50 (0.9.9): t
 unit 0 under the window's, so the page's first draw into it formed a feedback loop (GL_INVALID_OPERATION once, 1 of
 14 974 calls); it is now made and sized on its own unit; the synthetic page's `compare()` reports `glErr`.
 
+1.6 (kit 0.9.10, from the Alien Breed SE92 rebuild's comparison with the kit): under `subpixel` the objects are
+drawn into the shifted picture, so an object standing on the ground moves with it as the game drew it, its edges
+blending like the ground's; an object the camera tracks - a player that is a blitter object, Alien Breed II -
+is marked `objects[].steady` and stays on whole device pixels relative to the view's camera, as all objects did
+in 1.5 (shifted with the ground it would wobble by up to half a pixel in a sawtooth as the fraction crosses the
+rounding). Sprites (hardware sprites: Superfrog's frog, Alien Breed SE92's player) and the HUD stay on whole
+pixels. `WBSCENE.unexplained(rec, gameIdx)` is Alien Breed SE92's check of the model against the game's own
+picture as a pure function: the clean window, the map through its holes and the record's objects at their
+positions against what the game really drew (win.w x win.h indices) -> `{ over, count, model }`; `over` is
+`window.over` (the game's pixels where the model differs, drawn over the window and moving with the camera, so
+nothing the model does not know is lost), `count` how well the model knows the game (Alien Breed SE92: under
+10 px per frame). The project passes the objects the game had drawn when it captured the picture; hardware
+sprites are not in it.
+
+The mode transition (planned for the scene module, 1.6; the Codex Superfrog rebuild's recipe: one presentational
+state - the viewport's size, the scale, the CRT, the display's latency - interpolated by smoothstep over 450 ms,
+a real intermediate viewport drawn every display frame, the latency blended so the picture does not jerk at the
+end, the CRT dimmed to 40 % with its pattern switched once in the middle). Superfrog built the CRT part into
+its own transition first (6ff23f6) and measured two rules the kit's module must keep: the pattern's pitch comes
+from the whole-number scale of a mode, never from `Math.round` of the intermediate scale (it re-tuned in the
+first half and made moire); the pattern is the source mode's in the first half and the target mode's in the
+second - exactly two patterns per transition, and the end of the transition is the settled pattern (taking the
+detail from the wrong side made the CRT jump at the end); a mode without CRT keeps the other's pattern all along.
+
 The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
 the 2D path; `?fine=1` the subpixel shift) runs a generated map, a clean window with decorations the map does not have and holes the map shows
 through, three objects on a 25 Hz loop (one blinking), a sprite and HUD rows on the kit's clock; its hooks are
@@ -271,7 +295,13 @@ the worker runs past N and the fingerprints differ by rate. `prepare()` must ret
 verified set of disks: Superfrog's first DIFFERS was one byte, the game had started before the page verified its
 last disk, and a click on a still-disabled button hung the next context. Measured: Superfrog Original and Enhanced,
 300 frames with a route, EQUAL at the four rates; Enhanced on the scene module EQUAL over 1000; without the route
-a different fingerprint, so the inputs take. The synthetic scene page implements all three; the kit's test replays
+a different fingerprint, so the inputs take. Alien Breed II (kit 0.9.8, f668692): 300 frames with a route, EQUAL at
+the four rates in Chromium (300 / 360 / 719 / 863 display frames) and the same fingerprint in WebKit; no route and
+another route give other fingerprints. Its hooks: under the virtual clock the page grants the game at most one
+frame per rAF round (ahead 1, so exactly N frames at every rate, never N + 1); the keys come from the schedule by
+game frame instead of the keyboard; `prepare()` jumps to level 1 ticking the virtual clock itself at a fixed 20 ms,
+so every rate starts from the same point, and `done()` counts from the end of the jump; `state()` is FNV-1a 32 over
+chip RAM and slow RAM plus the frame number; the coroutine engine suffices. The synthetic scene page implements all three; the kit's test replays
 it with a route at the four rates (equal state, more display frames at the higher rates) and checks that the route
 changes the state.
 

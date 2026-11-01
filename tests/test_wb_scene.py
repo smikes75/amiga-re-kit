@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '1.5' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '1.6' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -157,6 +157,31 @@ def test_subpixel_shift_of_the_playfield():
     assert r['sub'] == {'cam': [1, 1], 'w': [0, 0]} and r['same'] is True
 
 
+def test_objects_move_with_the_ground_under_subpixel():
+    """1.6: under subpixel an object is drawn into the shifted picture (its edge blends like the ground's), an object marked
+    steady is drawn after the shift on whole device pixels relative to the view's camera."""
+    body = """(() => { const a = mk(1, 0, [0, 0], 0), b = mk(2, 20, [1, 0], 0); if (%s) { a.objects[0].steady = true; b.objects[0].steady = true; }
+        const c = S.compose([a, b], 5, { S: 2 }, { subpixel: true }, null); const px = S.reference(c); const R = (x, y) => px[(y * c.W * 2 + x) * 4];
+        return { r0: [0, 1, 2, 3, 4, 5, 6, 7].map((x) => R(x, 0)), r2: [0, 1, 2].map((x) => R(x, 2)), obj: [c.objs[0].x, !!c.objs[0].o.steady] }; })()"""
+    r = js(with_mk(body % 'false'))
+    assert r['r0'] == [30, 20, 10, 15, 40, 40, 10, 10] and r['r2'] == [20, 15, 10] and r['obj'] == [0, False]   # the object's right edge halfway (30 -> 10) like the ground
+    r = js(with_mk(body % 'true'))
+    assert r['r0'] == [30, 30, 10, 15, 40, 40, 10, 10] and r['obj'] == [0, True]                                 # steady: sharp on whole pixels at round((0 - 0.25) * 2) = 0
+
+
+def test_unexplained_pixels_of_the_window():
+    """1.6: the model of the window (clean picture, map through the holes, the record's objects) against what the game drew:
+    equal -> nothing; extra pixels -> over carries them; an object the game drew elsewhere -> both places differ."""
+    r = js(with_mk("""(() => { const rec = mk(1, 0, [0, 0], 1); const game = new Uint8Array([1, 3, 1, 1, 1, 1, 1, 1]);
+        const same = S.unexplained(rec, game), more = S.unexplained(rec, new Uint8Array([1, 3, 1, 5, 1, 1, 9, 1]));
+        const moved = S.unexplained(mk(1, 0, [0, 0], 2), game), noMap = S.unexplained(Object.assign({}, rec, { map: null }), game);
+        return [Array.from(same.model), same.count, Array.from(same.over), more.count, Array.from(more.over), moved.count, Array.from(moved.over), noMap.count, Array.from(noMap.model)]; })()"""))
+    assert r[0] == [1, 3, 1, 1, 1, 1, 1, 1] and r[1] == 0 and r[2] == [255] * 8
+    assert r[3] == 2 and r[4] == [255, 255, 255, 5, 255, 255, 9, 255]
+    assert r[5] == 2 and r[6] == [255, 3, 1, 255, 255, 255, 255, 255]                 # the model has the object at 2 (over the hole's map at 1 it shows 2): the game's 3 at 1 and 1 at 2 are unexplained
+    assert r[7] == 0 and r[8] == [1, 3, 1, 1, 1, 1, 1, 1]                            # without a map the hole would stay 255, but the object covers it at x 1
+
+
 def test_object_drawing_offset():
     """1.3: objects[].ox/oy place the drawing relative to the object's logical position, which is what interpolates."""
     r = js(with_mk("""(() => { const a = mk(1, 0, [0, 0], 0), b = mk(2, 20, [0, 0], 2); a.objects[0].ox = 1; b.objects[0].ox = 1; a.sprites[0].x = 3; b.sprites[0].x = 3;
@@ -215,6 +240,7 @@ def test_gpu_equals_the_reference(tail):
         pytest.skip('no WebGL2 in this Chromium')
     for r in res:
         assert r['bad'] == 0 and r['pixels'] > 100000 and r['objs'] >= 2 and r['sprs'] == 2 and r['glErr'] == 0, r   # the frog and the screen-fixed badge; no GL error since the page's first draw (KIT-GAPS 50)
+        assert ('fine' in tail) == (r['glued'] >= 1), r                                                              # 1.6: under the shift the objects (but the steady one) went with the ground
 
 
 def test_sprites_above_the_hud_rows():

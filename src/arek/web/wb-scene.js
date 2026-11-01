@@ -3,7 +3,9 @@
 // drawings without identity, a guard for a pass that never changes, one timebase; 1.2 kit 0.9.2 - KIT-GAPS 44-46: no
 // interpolation across a jump, sprites[].id, camMean for both axes; 1.3 kit 0.9.3 - objects[].ox/oy, the drawing's offset
 // from the logical position; 1.4 kit 0.9.4 - hud.under: the sprites above the HUD rows as the hardware draws them; 1.5 kit
-// 0.9.8 - subpixel: the playfield shifted by the fraction of a device pixel, the motion even on a 60 / 144 Hz display).
+// 0.9.8 - subpixel: the playfield shifted by the fraction of a device pixel, the motion even on a 60 / 144 Hz display;
+// 1.6 kit 0.9.10 - under subpixel the objects move with the playfield unless objects[].steady, unexplained() - the window's
+// pixels the model does not explain, for window.over).
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -59,7 +61,10 @@
 // subpixel (1.5: the playfield is drawn at the camera snapped to whole device pixels and shifted by the remaining fraction
 // as a blend of the four neighbouring device pixels - integer weights /256, the GPU and the reference bit for bit; a 50 Hz
 // game on a 60 Hz display then scrolls 1.67 device px every frame instead of 2, 2, 1; an edge softens by one device pixel.
-// Objects, sprites and the HUD stay on whole device pixels relative to the view's camera, so a tracked player stands still).
+// 1.6: the objects are drawn into the shifted picture, so they sit on the ground as the game drew them (Alien Breed SE92's
+// finding); an object the camera tracks - a player that is a blitter object, Alien Breed II - is marked objects[].steady and
+// stays on whole device pixels relative to the view's camera (shifted with the ground it would wobble by up to half a pixel
+// in a sawtooth); sprites and the HUD stay on whole pixels).
 // One timebase: ts of the drawer and rec.t must come from the same clock (the page's requestAnimationFrame timestamps and
 // wb-takt's stamps are performance.now() based; a worker's absolute times must be converted) - the module warns once when
 // the newest frame is more than 500 ms behind ts.
@@ -70,7 +75,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '1.5';
+    const VERSION = '1.6';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -231,22 +236,60 @@ const WBSCENE = (() => {
      *  With c.sub (1.5) the playfield is drawn one device pixel wider and taller at the snapped camera and blended by the
      *  weights; the objects and sprites go on top at the view's camera as before. */
     function reference(c) {
-        const S = c.S, Wd = c.W * S, Hd = c.H * S, win = c.win, winY = c.B.cam[1], fr32 = Math.fround;
-        const out = c.sub ? subBlend(playfield(c, c.sub.cam, Wd + 1, Hd + 1), Wd, Hd, c.sub.w) : playfield(c, c.cam, Wd, Hd);
-        const camI = Math.floor(c.cam[1]), camF = fr32(c.cam[1] - camI), gameY = (dy) => Math.floor(fr32(fr32(dy / S) + camF)) + camI;
+        const S = c.S, Wd = c.W * S, Hd = c.H * S;
+        const obXY = (ob) => [ob.x + (ob.o.ox || 0), ob.y + (ob.o.oy || 0)];        // 1.3: the drawing's offset from the logical position
+        let out;
+        if (c.sub) {                                                                 // 1.6: the objects into the shifted picture, the steady ones after it
+            const Wm = Wd + 1, Hm = Hd + 1, mid = playfield(c, c.sub.cam, Wm, Hm), b = blitter(c, mid, c.sub.cam, Wm, Hm);
+            for (const ob of c.objs) if (!ob.o.steady) b(ob.o.idx, ob.o.w, ob.o.h, ...obXY(ob));
+            out = subBlend(mid, Wd, Hd, c.sub.w);
+        } else out = playfield(c, c.cam, Wd, Hd);
+        const blit = blitter(c, out, c.cam, Wd, Hd);
+        for (const ob of c.objs) if (!c.sub || ob.o.steady) blit(ob.o.idx, ob.o.w, ob.o.h, ...obXY(ob));
+        const sprs = c.sprs.slice().sort((p, q) => q.s.k - p.s.k);
+        for (const sp of sprs) { const dx = sp.screen ? 0 : c.cam[0] - c.spriteCam[0], dy = sp.screen ? 0 : c.cam[1] - c.spriteCam[1]; blit(sp.s.idx, 16, sp.s.h, sp.x + dx, sp.y + dy); }
+        return out;
+    }
+    /** blit(idx, w, h, x, y) into out (Wd x Hd at camera cam): the image at round((x - cam) * S) (255 transparent), the
+     *  palette row of the window row under the device row - as the shader's mode 1. */
+    function blitter(c, out, cam, Wd, Hd) {
+        const S = c.S, win = c.win, winY = c.B.cam[1], fr32 = Math.fround;
+        const camI = Math.floor(cam[1]), camF = fr32(cam[1] - camI), gameY = (dy) => Math.floor(fr32(fr32(dy / S) + camF)) + camI;
         const palRow = (wy) => Math.min(Math.max(wy - winY, 0), win.h - 1);
         const put = (dx, dy, idx, row) => { const p = (dy * Wd + dx) * 4, q = (row * 32 + idx) * 4; out[p] = win.pal[q]; out[p + 1] = win.pal[q + 1]; out[p + 2] = win.pal[q + 2]; out[p + 3] = 255; };
-        const blit = (idx, w, h, x, y) => {
-            const dx0 = Math.round((x - c.cam[0]) * S), dy0 = Math.round((y - c.cam[1]) * S);
+        return (idx, w, h, x, y) => {
+            const dx0 = Math.round((x - cam[0]) * S), dy0 = Math.round((y - cam[1]) * S);
             for (let j = 0; j < h * S; j++) { const dy = dy0 + j; if (dy < 0 || dy >= Hd) continue;
                 for (let i = 0; i < w * S; i++) { const dx = dx0 + i; if (dx < 0 || dx >= Wd) continue;
                     const v = idx[Math.floor(j / S) * w + Math.floor(i / S)]; if (v === 255) continue;
                     put(dx, dy, v, palRow(gameY(dy))); } }
         };
-        for (const ob of c.objs) blit(ob.o.idx, ob.o.w, ob.o.h, ob.x + (ob.o.ox || 0), ob.y + (ob.o.oy || 0));   // 1.3: the drawing's offset from the logical position
-        const sprs = c.sprs.slice().sort((p, q) => q.s.k - p.s.k);
-        for (const sp of sprs) { const dx = sp.screen ? 0 : c.cam[0] - c.spriteCam[0], dy = sp.screen ? 0 : c.cam[1] - c.spriteCam[1]; blit(sp.s.idx, 16, sp.s.h, sp.x + dx, sp.y + dy); }
-        return out;
+    }
+    /** 1.6: the window's pixels the model does not explain (Alien Breed SE92's check of its model against the game's own
+     *  picture). The model of the window: the clean picture where it has an index, the map through the holes, then the
+     *  record's objects at round(x - cam) (what the game blitted into this picture; the project passes the objects the
+     *  game had drawn when it captured gameIdx); hardware sprites are not in the picture. gameIdx: win.w x win.h indices
+     *  of what the game really drew. Returns { over, count, model }: over for window.over (255 where the model explains
+     *  the pixel, the game's index elsewhere - drawn over the window, moving with the camera), count the number of
+     *  such pixels (a diagnostic: how well the model knows the game). */
+    function unexplained(rec, gameIdx) {
+        const win = rec.window, map = rec.map, cam = rec.cam, W = win.w, H = win.h, model = new Uint8Array(W * H);
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+            let v = win.idx[y * W + x];
+            if (v === 255 && map) {
+                const wx = cam[0] + x - map.origin[0], wy = cam[1] + y - map.origin[1], cx = Math.floor(wx / 16), cy = Math.floor(wy / 16);
+                if (cx >= 0 && cy >= 0 && cx < map.cols && cy < map.rows) { const sl = map.cells[cy * map.cols + cx]; if (sl !== 0xffff) v = map.atlas[sl * 256 + (wy & 15) * 16 + (wx & 15)]; }
+            }
+            model[y * W + x] = v;
+        }
+        for (const ob of rec.objects || []) {
+            const x0 = Math.round(ob.x + (ob.ox || 0) - cam[0]), y0 = Math.round(ob.y + (ob.oy || 0) - cam[1]);
+            for (let j = 0; j < ob.h; j++) for (let i = 0; i < ob.w; i++) { const v = ob.idx[j * ob.w + i]; if (v === 255) continue;
+                const x = x0 + i, y = y0 + j; if (x >= 0 && x < W && y >= 0 && y < H) model[y * W + x] = v; }
+        }
+        const over = new Uint8Array(W * H).fill(255); let count = 0;
+        for (let i = 0; i < W * H; i++) if (gameIdx[i] !== model[i]) { over[i] = gameIdx[i]; count++; }
+        return { over, count, model };
     }
     /** 1.5: out(x, y) = the four device pixels around (x + wx/256, y + wy/256) of mid (Wd + 1 wide), integer arithmetic. */
     function subBlend(mid, Wd, Hd, w) {
@@ -420,7 +463,8 @@ const WBSCENE = (() => {
             const under = !!(c.hud && c.hud.under), topD = under && c.hud.top ? c.hud.top.h * S : 0, botD = under && c.hud.bottom ? c.hud.bottom.h * S : 0;
             if (under) { this._hud(c, view, d, x0, y0); gl.viewport(x0, vy, Wd, Hd); gl.uniform2f(u.u_size, Wd, Hd); gl.activeTexture(gl.TEXTURE0); }   // 1.4: the HUD first, the sprites over it
             gl.uniform1i(u.u_mode, 1); let objs = 0, sprs = 0;
-            for (const ob of c.objs) { const e = this._objTex(ob.o); gl.bindTexture(gl.TEXTURE_2D, e.t); this._quad(Math.round((ob.x + (ob.o.ox || 0) - c.cam[0]) * S), Math.round((ob.y + (ob.o.oy || 0) - c.cam[1]) * S), e.w * S, e.h * S); objs++; }
+            for (const ob of c.objs) { if (c.sub && !ob.o.steady) continue;   // 1.6: drawn with the playfield in _subpixel
+                const e = this._objTex(ob.o); gl.bindTexture(gl.TEXTURE_2D, e.t); this._quad(Math.round((ob.x + (ob.o.ox || 0) - c.cam[0]) * S), Math.round((ob.y + (ob.o.oy || 0) - c.cam[1]) * S), e.w * S, e.h * S); objs++; }
             const sorted = c.sprs.slice().sort((p, q) => q.s.k - p.s.k), dx = c.cam[0] - c.spriteCam[0], dy = c.cam[1] - c.spriteCam[1];
             if (under) { gl.viewport(x0, vy - botD, Wd, Hd + topD + botD); gl.uniform2f(u.u_size, Wd, Hd + topD + botD); }   // the sprites may reach into the HUD rows
             for (const sp of sorted) { if (!this.pool[sprs]) this.pool[sprs] = this._tex(); this._r8(this.pool[sprs], 16, sp.s.h, sp.s.idx);
@@ -432,7 +476,7 @@ const WBSCENE = (() => {
         /** 1.5: the playfield into an own texture one device pixel wider and taller at the snapped camera, then into the
          *  band shifted by the fraction (mode 3); the objects, sprites and HUD follow at the view's camera as always. */
         _subpixel(c, fbo, x0, vy, Wd, Hd, ci) {
-            const gl = this.gl, u = this.u, sub = c.sub, Wm = Wd + 1, Hm = Hd + 1;
+            const gl = this.gl, u = this.u, sub = c.sub, Wm = Wd + 1, Hm = Hd + 1, S = c.S;
             gl.activeTexture(gl.TEXTURE5);                   // the texture is made and sized on its own unit, never left on unit 0 under the window (KIT-GAPS 50: a feedback loop on the first draw)
             if (!this.mid) this.mid = { fbo: gl.createFramebuffer(), t: this._tex(), w: 0, h: 0 };
             if (this.mid.w !== Wm || this.mid.h !== Hm) { this.mid.w = Wm; this.mid.h = Hm; gl.bindTexture(gl.TEXTURE_2D, this.mid.t); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, Wm, Hm, 0, gl.RGBA, gl.UNSIGNED_BYTE, null); gl.bindFramebuffer(gl.FRAMEBUFFER, this.mid.fbo); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.mid.t, 0); }
@@ -441,7 +485,10 @@ const WBSCENE = (() => {
             const si = [Math.floor(sub.cam[0]), Math.floor(sub.cam[1])];
             gl.viewport(0, 0, Wm, Hm); gl.uniform2f(u.u_size, Wm, Hm); gl.uniform2i(u.u_cami, si[0], si[1]); gl.uniform2f(u.u_camf, sub.cam[0] - si[0], sub.cam[1] - si[1]); gl.uniform2f(u.u_band, 0, Hm);
             gl.uniform1i(u.u_mode, 2); this._quad(0, 0, Wm, Hm);
-            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo); gl.bindTexture(gl.TEXTURE_2D, this.mid.t);
+            gl.uniform1i(u.u_mode, 1); gl.activeTexture(gl.TEXTURE0); let glued = 0;   // 1.6: the objects on the ground go with it
+            for (const ob of c.objs) if (!ob.o.steady) { const e = this._objTex(ob.o); gl.bindTexture(gl.TEXTURE_2D, e.t); this._quad(Math.round((ob.x + (ob.o.ox || 0) - sub.cam[0]) * S), Math.round((ob.y + (ob.o.oy || 0) - sub.cam[1]) * S), e.w * S, e.h * S); glued++; }
+            this.stats.glued = glued;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo); gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, this.mid.t);
             gl.viewport(x0, vy, Wd, Hd); gl.uniform2f(u.u_size, Wd, Hd); gl.uniform2i(u.u_cami, ci[0], ci[1]); gl.uniform2f(u.u_camf, c.cam[0] - ci[0], c.cam[1] - ci[1]); gl.uniform2f(u.u_band, x0, vy + Hd);
             gl.uniform2i(u.u_w, sub.w[0], sub.w[1]); gl.uniform1i(u.u_midh, Hd);
             gl.uniform1i(u.u_mode, 3); this._quad(0, 0, Wd, Hd);
@@ -476,7 +523,7 @@ const WBSCENE = (() => {
             return { pixels: out, w, h, composition: c };
         }
     }
-    return { VERSION, lerp, clampCam, valueAt, windowMean, pairById, pairOf, fnv1a, x17, widenColumns, compose, reference, Scene };
+    return { VERSION, lerp, clampCam, valueAt, windowMean, pairById, pairOf, fnv1a, x17, widenColumns, compose, reference, unexplained, Scene };
 })();
 if (typeof globalThis !== 'undefined') globalThis.WBSCENE = WBSCENE;
 if (typeof module !== 'undefined') module.exports = WBSCENE;
