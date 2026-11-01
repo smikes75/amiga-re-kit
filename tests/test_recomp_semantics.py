@@ -9,6 +9,7 @@ import subprocess
 
 import pytest
 
+from arek import cli
 from arek.m68k import recomp
 from arek.m68k.decoder import Flow, JumpTable, jtab_targets
 
@@ -234,6 +235,21 @@ def test_external_routine_and_exit_point(tmp_path):
     assert mem[0x4000:0x4002].hex() == '5555'
     assert mem[0x4002:0x4004].hex() == '0000'             # the exit point ended the run before
     assert 'exit 1030' in logs[0]
+
+
+def test_fall_through_and_branch_into_an_external_routine(tmp_path):
+    """G54 (Alien Breed II): a routine that falls through into an --extern routine, and one that branches to it, got a
+    goto to a label the translation no longer has. Both become the host call with the caller's return."""
+    # A: moveq #1,d0 (falls into B)   B: moveq #2,d1 ; rts   C: moveq #3,d2 ; bra.s B
+    prog = '7001' '7202' '4e75' '7403' '60f8'
+    a, b, c = BASE, BASE + 2, BASE + 6
+    src, _, _ = recomp.generate(bytes.fromhex(prog + '4e75'), BASE, auto=[a, b, c], flow=Flow(externs={b: 'ext_b'}))
+    assert 'goto L%06x' % b not in src and src.count('ext_b(m); return;') == 2
+    ext = '\nvoid ext_b(M68 *m) { m->d[1] = 0x5555; m->a[7] += 4; }\n'           # behaves like B incl. its rts
+    d, *_ = run(tmp_path, prog, {}, auto=[a, b, c], flow=Flow(externs={b: 'ext_b'}), extra_c=ext)
+    assert d[0] == 1 and d[1] == 0x5555                                          # A ran, fell into the host's B, returned to the driver
+    p = cli.build_parser().parse_args(['recomp', 'x.bin', '--base', '0', '-o', 'x.c', '--extern', '1=a', '--extern', '2=b', '3=c'])
+    assert p.extern == ['1=a', '2=b', '3=c']                                     # repeated --extern accumulates
 
 
 def test_stop_keeps_the_walk_out_of_data():

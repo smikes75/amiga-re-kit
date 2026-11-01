@@ -228,6 +228,25 @@ WBLONGRUN 1.4 and `wbSceneTest.compare()` (the GPU band against the reference). 
 GPU equality (0 of 114 688 and 458 752 pixels at S = 1 and 2, with and without the options) and `arek web smooth`
 over the page in Chromium (0 missing passes, camera and object jitter under the limit).
 
+## H. The display never touches the game (`arek web replay`, kit 0.9.6) - done
+
+A page replayed under a virtual clock: `requestAnimationFrame` and `performance.now` are replaced before the page's
+scripts run, the tool ticks the clock at 50, 60, 120 and 144 Hz (any list) with the same inputs scheduled by GAME
+frame, and reads the page's own fingerprint of the game state after N game frames. Equal fingerprints across the
+rates prove that the number of display frames drawn between two game frames - the interpolation, a mode transition,
+a sub-pixel shift, any presentation option - changes nothing in the game; a difference names the rate. The run
+needs no display and is as fast as the page computes (the Codex Superfrog rebuild verified its renderer this way:
+500-tick replays at four controlled rates with one hash of the final state).
+
+    arek web replay http://127.0.0.1:8920/scene-demo.html --hz 50,60,120,144 --frames 300 --route 1:120,2:60,0:120
+
+The page's hooks (`WBLONGRUN` 1.5, beside those of F): `done()` the game frames computed so far; `state()` a string
+fingerprint of the game's state (a hash of its RAM, or of what moves: the camera and the objects); `inputs([[frame,
+mask], ...])` (optional) holds the keys `mask` from game frame `frame` on - a page without it is replayed without
+input. A page whose engine runs in a worker must let `done()` reflect the frames really computed. The synthetic
+scene page implements all three; the kit's test replays it with a route at the four rates (equal state, more display
+frames at the higher rates) and checks that the route changes the state.
+
 ## A. The numbers (kit 0.8.1, the kit's synthetic page, headless)
 
 `arek web smooth` over `smooth-demo.html` (wb-obraz 1.5 WebGL path, wb-takt 1.0, wb-zvuk-worklet over shared memory

@@ -853,7 +853,11 @@ class Gen:
                 self.emit('    ' + line)
             nxt = [] if self.inline_target(i) is not None else successors(i)
             if i.end in nxt and (k + 1 >= len(order) or order[k + 1] != i.end):
-                self.emit('    goto L%06x;' % i.end)
+                fl = self.flow
+                if i.end in fl.externs or i.end in fl.stops or i.end in fl.rets or i.end in fl.exits:
+                    self.emit('    ' + self.br(i.end, None, None, ins))   # a fall-through into an --extern / stop / ret / exit: no label there (G54)
+                else:
+                    self.emit('    goto L%06x;' % i.end)
         self.emit('    return;')
         self.emit('}')
         self.emit()

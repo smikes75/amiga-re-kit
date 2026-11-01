@@ -24,7 +24,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
   verified, an original retail disk is not yet; AGA is not supported).
   Original and Enhanced modes, one or two players.
 - **Superfrog** (Team17, 1993): in verification, not playable yet.
-- **The kit:** version 0.9.5 on PyPI, 2482 tests. Extracted from five game
+- **The kit:** version 0.9.6 on PyPI, 2486 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -44,7 +44,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2482 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2485 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -130,6 +130,8 @@ arek web longrun http://127.0.0.1:8930/ --minutes 3     # smoothness over a long
 arek web smooth http://127.0.0.1:8920/smooth-demo.html  # the canon's limits in Chromium and WebKit: dropped frames, camera and object steps, missing passes, key latency, sound under stalls (docs/WB-PLYNULOST.md; --no-interp for an original mode)
 #    wb-scene.js (0.9.0): the wider, smoother view composed on the GPU from one record per game frame (clean window, map, objects, sprites, HUD),
 #    with a CPU reference for a 0-mismatch check; scene-demo.html shows it (docs/WB-PLYNULOST.md G)
+arek web replay http://127.0.0.1:8920/scene-demo.html --hz 50,60,120,144 --frames 300 --route 1:120,2:60,0:120
+#    the display never touches the game: the page under a virtual clock at four rates, the same inputs by game frame, one state fingerprint (H)
 arek docs WB-PLYNULOST                                   # the kit's documents ship with it (arek docs: the list; --path: the file)
 arek shots cap/shots/o build/shots/h --align 8          # the pictures of two runs paired by frame, each pair aligned for a screen shake
 arek web test http://localhost:8911/?test=1            # ... and §6: the menu and the sound contract, when the page has the hooks

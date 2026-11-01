@@ -136,6 +136,11 @@ AHD_EXTERN(game_read, m->d[4] == 0x123111u ? 0 : 1, (int16_t)m->d[1], (uint16_t)
 /* = void game_read(M68 *m): the sectors to A0, D0 = 0 (or -1 when the image is missing), rts */
 ```
 
+The replacement stands for the whole routine, however the game reaches it: a `bsr`/`jsr` calls it, and
+a `bra`/`bcc` or a fall-through from the routine above it (code with no `rts` between) becomes the same
+call followed by the caller's return - `{ name(m); return; }` - so the replacement must leave the
+registers and the stack as the routine's own `rts` would. `--extern` may be repeated.
+
 `ahd_set(n, bytes, len)` keeps image n (`AHD_DISKS`, 4), `ahd_set_file` natively; `AHD_READS`,
 `AHD_FAIL`, `AHD_LAST_*` for the page's diagnostics; `AHD_LOG=1` prints every read (native).
 

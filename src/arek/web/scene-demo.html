@@ -64,6 +64,7 @@ const hudRow = (h) => { const a = new Uint8Array(W0 * h * 4); for (let y = 0; y 
 const HUDT = hudRow(HUD), HUDB = hudRow(HUD);
 // the game: camera by the keys, objects on a 25 Hz loop (every other frame), the sprite at the window's centre
 let cam = [96, 40], keys = 0, done = 0, objs = OBJ.map((o) => ({ id: o.id, x: 160 + 90 * o.id, y: 100 + 40 * o.id }));
+let schedule = null;                                                       // 1.5 (arek web replay): [[frame, mask], ...] - the keys by game frame
 const opts = { pairOlder: parseInt(Q.get('pair') || '0', 10) };
 if (Q.get('soft') === '1') opts.softClamp = { tau: 20 };
 if (Q.get('smooth') === '1') opts.smoothY = { tau: 60 };
@@ -77,6 +78,7 @@ const glOn = pr.gl && scene.attach(pr);
 let drawn = 0, lastTs = 0;
 function step() {
   done++;
+  if (schedule) for (const [n, mask] of schedule) if (done >= n) keys = mask;
   const dx = (keys & 2 ? -2 : 0) + (keys & 1 ? 2 : 0), dy = (keys & 4 ? -1 : 0) + (keys & 8 ? 1 : 0);
   cam = [Math.min(Math.max(cam[0] + dx, limits.x0), limits.x1), Math.min(Math.max(cam[1] + dy, limits.y0), limits.y1)];
   const t = takt.stamp(done), pass = done & 1 ? t : null;               // the 25 Hz loop moves the objects on odd frames
@@ -116,6 +118,11 @@ globalThis.WBLONGRUN = {
   interp: () => true,
   audio: () => ({ reserve: 30, dropouts: 0, latency: 0, simulated: true }),
   status: () => 'frames ' + done + ' drawn ' + drawn + ' ' + (glOn ? 'webgl' : '2d') + ' display ' + takt.stats().hz + ' Hz',
+  // 1.5 (arek web replay): the game's frames so far, its state as a fingerprint, the inputs by game frame
+  done: () => done,
+  state: () => { let h = 0x811c9dc5; const mix = (v) => { const b = new Uint8Array(new Float64Array([v]).buffer); for (const x of b) { h ^= x; h = Math.imul(h, 0x01000193) >>> 0; } };
+    mix(done); mix(cam[0]); mix(cam[1]); for (const o of objs) { mix(o.x); mix(o.y); } for (const d of OBJ) { mix(d.vx); mix(d.vy); } return ('00000000' + h.toString(16)).slice(-8); },
+  inputs: (s) => { schedule = s; },
 };
 // the test hooks: the GPU's band against the CPU reference of the same composition (0 mismatches), the options in force
 globalThis.wbSceneTest = {

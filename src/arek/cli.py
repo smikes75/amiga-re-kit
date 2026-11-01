@@ -615,6 +615,15 @@ def cmd_web(a):
             raise ValueError('web longrun URL [--minutes M] [--interval S] [--sample S]')
         for row in webmod.longrun(a.target, a.minutes, a.interval, a.sample):
             print(webmod.format_longrun(row), flush=True)
+    elif a.what == 'replay':
+        from . import webreplay
+        if not a.target:
+            raise ValueError('web replay URL [--hz 50,60,120,144] [--frames N] [--route mask:frames,...] [--json]')
+        hz = tuple(int(h) for h in a.hz.split(',')) if a.hz else webreplay.HZ_DEFAULT
+        res = webreplay.run(a.target, hz, a.frames, a.route, log=(lambda *x: None) if a.json else print)
+        if a.json:
+            print(json.dumps(res, indent=1))
+        return 0 if res['equal'] else 1
     elif a.what == 'smooth':
         from . import websmooth
         if not a.target:
@@ -961,7 +970,7 @@ def build_parser():
                    help='possible targets of jsr/jmp (An), or of a jmp abs the program rewrites')
     s.add_argument('--stop', nargs='*', metavar='ADDR', help='never translate (a branch into data)')
     s.add_argument('--exitat', nargs='*', metavar='ADDR', help='calling it ends the run (exit_point)')
-    s.add_argument('--extern', nargs='*', metavar='ADDR=NAME', help='replace a routine by C NAME(M68 *m)')
+    s.add_argument('--extern', nargs='*', action='extend', metavar='ADDR=NAME', help='replace a routine by C NAME(M68 *m); repeatable')
     s.add_argument('--ret', nargs='*', metavar='ADDR', help='translation returns here (a loop body as a function)')
     s.add_argument('--prefix', metavar='NAME:LO:HI', help='functions in [LO, HI) are f_NAME<addr> (overlay module)')
     s.add_argument('--lib', action='store_true', help='functions only, sharing the runtime of another translation')
@@ -1177,7 +1186,7 @@ def build_parser():
     s.set_defaults(fn=cmd_profile)
 
     s = sp.add_parser('web', help='display contract: reference wb-obraz.js, demo page, Chromium tests (WB-OBRAZ-CRT.md)')
-    s.add_argument('what', choices=['copy', 'demo', 'test', 'seal', 'check', 'payload', 'serve', 'strip', 'longrun', 'smooth'])
+    s.add_argument('what', choices=['copy', 'demo', 'test', 'seal', 'check', 'payload', 'serve', 'strip', 'longrun', 'smooth', 'replay'])
     s.add_argument('target', nargs='?', help='copy: destination folder (writes wb-obraz.js, wb-seal.js, wb-nastaveni.js, '
                    'wb-zvuk.js, wb-atn.js, wb-content.js, wb-touch.js, wb-takt.js, wb-zvuk-out.js, wb-zvuk-worklet.js, wb-scene.js); serve: the bundle folder (default .); demo: nothing - it serves the package\'s demo.html on http://127.0.0.1:PORT/demo.html '
                    '(the file itself is arek/web/demo.html in the installed package); test: URL of a page with window.wbObrazTest; '
@@ -1194,6 +1203,9 @@ def build_parser():
     s.add_argument('--stalls', type=int, default=10, help='smooth: artificial stalls of the main thread (default 10)')
     s.add_argument('--stall-ms', type=int, default=150, help='smooth: length of a stall (default 150 ms)')
     s.add_argument('--gpu', action='store_true', help='smooth: Chromium on the GPU (macOS: ANGLE on Metal) instead of headless SwiftShader')
+    s.add_argument('--hz', help='replay: the display rates to replay at (default 50,60,120,144)')
+    s.add_argument('--frames', type=int, default=300, help='replay: game frames to compute at every rate (default 300)')
+    s.add_argument('--route', help='replay: inputs by game frame as mask:frames pairs, e.g. 1:120,2:60,0:120 (the page\'s key bits)')
     s.add_argument('--no-interp', action='store_true', help="smooth: the page draws the game's frames without interpolation (an original "
                    "mode): the camera's and the objects' jitter and the missing passes are reported, not judged (else WBLONGRUN.interp())")
     s.add_argument('--json', action='store_true', help='smooth: the metrics as JSON')
