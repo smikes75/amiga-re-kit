@@ -5,7 +5,10 @@
 // from the logical position; 1.4 kit 0.9.4 - hud.under: the sprites above the HUD rows as the hardware draws them; 1.5 kit
 // 0.9.8 - subpixel: the playfield shifted by the fraction of a device pixel, the motion even on a 60 / 144 Hz display;
 // 1.6 kit 0.9.10 - under subpixel the objects move with the playfield unless objects[].steady, unexplained() - the window's
-// pixels the model does not explain, for window.over).
+// pixels the model does not explain, for window.over; 1.6.1 kit 0.9.11 - the atlas slots of every frame since the last
+// draw are uploaded, not only B's (Alien Breed II G56); 1.7 kit 0.9.12 - extrapolateObjects (the objects past the last
+// pass, so latO can stay fixed - Alien Breed II's engine did it), the widened HUD cached, a narrow map centred on a
+// whole game pixel, softClamp / smoothY deprecated).
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -48,7 +51,10 @@
 //                                        HUD rows shows above them as the hardware draws it (Superfrog's frog at a level entry)
 // The view: { W, H, S, extX, extY, x0, y0 } - the wider window (W = window.w + 2 extX, H = window.h + 2 extY), S device pixels
 // per game pixel, x0 / y0 = where the view's top-left lands in the presenter's framebuffer (device px from the top).
-// Options (all measured in Superfrog, off unless set): jumpMax (1.2, default 40 game px: a camera, object or sprite that
+// Options (all measured in Superfrog, off unless set): extrapolate (frames the camera may run past the newest pair when
+// the next frame is missing, default 0), extrapolateObjects (1.7: passes the objects may run past the last pass, default
+// = extrapolate; with 1 the objects keep moving when the next 25 Hz pass has not come, so the objects' latency can stay
+// a fixed 40 ms instead of adapting up to 120 - a wrong guess is at most one pass and jumpMax still guards), jumpMax (1.2, default 40 game px: a camera, object or sprite that
 // moves farther than that between two frames is not interpolated - a teleport after a death crossed the map), camMean
 // { tau, shape } (1.2: the terrain's camera as the mean of the clamped camera over t +- tau on both axes, always, sampled
 // every 5 ms - Superfrog's best measured smoothing, symmetric so without lag; it replaces softClamp and smoothY when set;
@@ -75,7 +81,8 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '1.6';
+    const VERSION = '1.7';
+    let deprecated = false;
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -85,8 +92,8 @@ const WBSCENE = (() => {
         const W = win.w + 2 * ext.x, H = win.h + 2 * ext.y;
         const mapW = lim.x1 - lim.x0 + win.w, mapH = lim.y1 - lim.y0 + win.h;
         let vx = cx - ext.x, vy = cy - ext.y;
-        if (mapW <= W) vx = lim.x0 - (W - mapW) / 2; else vx = Math.min(Math.max(vx, lim.x0), lim.x0 + mapW - W);
-        if (mapH <= H) vy = lim.y0 - (H - mapH) / 2; else vy = Math.min(Math.max(vy, lim.y0), lim.y0 + mapH - H);
+        if (mapW <= W) vx = lim.x0 - Math.floor((W - mapW) / 2); else vx = Math.min(Math.max(vx, lim.x0), lim.x0 + mapW - W);   // 1.7: a narrow map centred on a whole game pixel (as Alien Breed II's engine)
+        if (mapH <= H) vy = lim.y0 - Math.floor((H - mapH) / 2); else vy = Math.min(Math.max(vy, lim.y0), lim.y0 + mapH - H);
         return [vx, vy];
     }
     /** The mean of pick(frame) over the frames within tau ms of t; past the newest frame the newest value continues
@@ -124,14 +131,15 @@ const WBSCENE = (() => {
     /** The pairs for the interpolation of things with an identity: for every item of b (by id) the same id in a, or in
      *  up to `older` frames before a (a blinking player drawn every other frame - Superfrog: paired 86 % -> 99.6 %).
      *  frames = [..., a2, a1, a] newest last. Returns [{ to, from, f }]: from = null when nothing pairs (drawn at `to`). */
-    function pairById(a, b, f, items, older, history) {
+    function pairById(a, b, f, items, older, history, fmax) {
+        const top = fmax === undefined ? 1 : fmax;                                       // 1.7: past 1 when extrapolating
         const out = [];
         const byId = (list) => { const m = new Map(); for (const o of list || []) m.set(o.id, o); return m; };
         const ma = byId(a ? items(a) : []), olds = (older > 0 ? (history || []).slice(-older) : []).reverse().map((fr) => ({ fr, m: byId(items(fr)) }));
         for (const o of items(b)) {
             let from = ma.get(o.id), ff = f;
             if (!from) for (const h of olds) { const p = h.m.get(o.id); if (p) { from = p; ff = b.t > h.fr.t ? (lerp(a ? a.t : b.t, b.t, f) - h.fr.t) / (b.t - h.fr.t) : f; break; } }
-            out.push({ to: o, from: from || null, f: from ? Math.min(Math.max(ff, 0), 1) : 1 });
+            out.push({ to: o, from: from || null, f: from ? Math.min(Math.max(ff, 0), top) : 1 });
         }
         return out;
     }
@@ -167,15 +175,17 @@ const WBSCENE = (() => {
         for (const fr of frames) { const ps = fr.pass === undefined ? fr.t : fr.pass; if (ps !== lastPass) { passes.push(fr); lastPass = ps; } }
         const passMax = o.passMax === undefined ? 100 : o.passMax;
         if (frames.length && passMax > 0 && frames[frames.length - 1].t - passes[passes.length - 1].t > passMax) passes = frames;   // 1.1: no new pass for a while: every frame is one
-        if (takt) { const v = takt.view(ts); tv = v.tv; tvO = v.tvO; p = takt.pair(frames, tv); q = takt.pair(passes, tvO); }
+        if ((o.softClamp || o.smoothY) && !deprecated) { deprecated = true; if (typeof console !== 'undefined') console.warn('wb-scene: softClamp and smoothY are deprecated (camMean replaces them) and go away in 1.0'); }
+        const extC = o.extrapolate || 0, extO = o.extrapolateObjects !== undefined ? o.extrapolateObjects : extC;   // 1.7
+        if (takt) { const v = takt.view(ts); tv = v.tv; tvO = v.tvO; p = takt.pair(frames, tv, extC > 0 ? true : undefined); q = takt.pair(passes, tvO, extO > 0 ? true : undefined); }
         else { p = pairOf(frames, tv); q = pairOf(passes, tvO); }
         if (!p) return null;
         const jumpMax = o.jumpMax === undefined ? 40 : o.jumpMax;
         const jumped = (u, v) => jumpMax > 0 && (Math.abs(u[0] - v[0]) > jumpMax || Math.abs(u[1] - v[1]) > jumpMax);
         const A = p.a, B = p.b || p.a;
-        let f = Math.min(Math.max(p.f, 0), p.b ? 1 + (o.extrapolate || 0) : 0);
+        let f = Math.min(Math.max(p.f, 0), p.b ? 1 + extC : 0);
         if (p.b && jumped(A.cam, B.cam)) f = 1;                                   // 1.2 (KIT-GAPS 44): a jump is shown, not crossed
-        const OA = q ? q.a : A, OB = q ? (q.b || q.a) : B, of = q ? Math.min(Math.max(q.f, 0), 1) : 0;
+        const OA = q ? q.a : A, OB = q ? (q.b || q.a) : B, of = q ? Math.min(Math.max(q.f, 0), q.b ? 1 + extO : 0) : 0;
         const win = B.window, lim = B.limits;
         // the game's camera between the frames, the view's camera clamped; soft clamp and vertical smoothing as means over frames
         const gcam = [lerp(A.cam[0], B.cam[0], f), lerp(A.cam[1], B.cam[1], f)];
@@ -199,11 +209,11 @@ const WBSCENE = (() => {
             spriteCam[0] = cl[0]; spriteCam[1] = cl[1];                             // the sprites: the original's screen position plus the hard stop at an edge
         }
         const history = passes.filter((fr) => fr.t < (OA ? OA.t : 0));
-        const objs = pairById(OA, OB, of, (fr) => fr.objects || [], o.pairOlder || 0, history).map((pr) => {
+        const objs = pairById(OA, OB, of, (fr) => fr.objects || [], o.pairOlder || 0, history, 1 + extO).map((pr) => {
             const from = pr.from && !jumped([pr.from.x, pr.from.y], [pr.to.x, pr.to.y]) ? pr.from : null;
             return { o: pr.to, x: from ? lerp(from.x, pr.to.x, pr.f) : pr.to.x, y: from ? lerp(from.y, pr.to.y, pr.f) : pr.to.y }; });
         const shist = frames.filter((fr) => fr.t < A.t);
-        const sprs = pairById(A, B, f, (fr) => (fr.sprites || []).map((s) => Object.assign({ id: s.id !== undefined ? s.id : s.k }, s)), o.pairOlder || 0, shist).map((pr) => {
+        const sprs = pairById(A, B, f, (fr) => (fr.sprites || []).map((s) => Object.assign({ id: s.id !== undefined ? s.id : s.k }, s)), o.pairOlder || 0, shist, 1 + extC).map((pr) => {
             if (pr.to.screen) return { s: pr.to, x: vcam[0] + ext.x + pr.to.x, y: vcam[1] + ext.y + pr.to.y, screen: true };   // 1.1: fixed on the screen
             // screen px relative to the window -> world (window of its own frame) -> the view; a jump is not crossed (1.2)
             const fc = pr.from ? frameCam(frames, pr.from, A) : null, fw = fc ? [pr.from.x + fc[0], pr.from.y + fc[1]] : null, tw = [pr.to.x + B.cam[0], pr.to.y + B.cam[1]];
@@ -383,14 +393,24 @@ const WBSCENE = (() => {
         constructor(opts) {
             this.opts = opts || {}; this.takt = this.opts.takt || null; this.frames = []; this.ring = this.opts.ring || 32;
             this.gl = null; this.cache = new Map(); this.pool = []; this.stats = { objs: 0, sprs: 0, uploads: 0, ms: 0, frames: 0 };
-            this.atlasGen = -1; this.own = null; this.last = null;
+            this.atlasGen = -1; this.own = null; this.last = null; this.dirty = new Set();   // 1.6.1: the atlas slots changed by frames not yet drawn (G56)
         }
         /** A game frame record (see the header); keeps the last `ring` frames in time order. */
         frame(rec) {
             if (rec.objects) for (const ob of rec.objects) if (ob.key === undefined) ob.key = fnv1a(ob.idx, (ob.w << 16) ^ ob.h);
+            if (rec.map && rec.map.dirty) for (let i = 0; i < rec.map.dirty.length; i++) this.dirty.add(rec.map.dirty[i]);   // G56: a frame that is never B still changed the atlas
             this.frames.push(rec); if (this.frames.length > this.ring) this.frames.shift(); this.stats.frames++;
         }
-        reset() { this.frames.length = 0; this.last = null; }
+        reset() { this.frames.length = 0; this.last = null; this.atlasGen = -1; this.dirty.clear(); }
+        /** The map's atlas on the GPU: the whole of it at a new generation, otherwise every slot any frame since the last
+         *  draw marked dirty (G56: only B's own dirty list was uploaded, a frame skipped between two display frames left
+         *  its slots stale). */
+        _uploadMap(map) {
+            if (map.gen !== this.atlasGen) { this.atlasGen = map.gen; this._atlasAll(map); }
+            else { if (map.dirty) for (let i = 0; i < map.dirty.length; i++) this.dirty.add(map.dirty[i]); for (const sl of this.dirty) this._slot(map, sl); }
+            this.dirty.clear();
+        }
+        _atlasAll(map) { this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.R8, 512, 512, 0, this.gl.RED, this.gl.UNSIGNED_BYTE, null); for (let sl = 0; sl < map.nslots; sl++) this._slot(map, sl); }
         compose(ts, view) {
             const c = compose(this.frames, ts, view, this.opts, this.takt);
             if (c && ts - c.B.t > 500) { this.stats.stale = (this.stats.stale || 0) + 1; if (!this.warned) { this.warned = true; console.warn('wb-scene: the newest frame is ' + Math.round(ts - c.B.t) + ' ms behind ts - rec.t and the drawer\'s ts must share one clock (performance.now() based)'); } }
@@ -452,8 +472,7 @@ const WBSCENE = (() => {
             const map = c.map;
             if (map) {
                 gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, this.texAtlas);
-                if (map.gen !== this.atlasGen) { this.atlasGen = map.gen; gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 512, 512, 0, gl.RED, gl.UNSIGNED_BYTE, null); for (let sl = 0; sl < map.nslots; sl++) this._slot(map, sl); }
-                else if (map.dirty) for (let i = 0; i < map.dirty.length; i++) this._slot(map, map.dirty[i]);
+                this._uploadMap(map);
                 gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.texGrid);
                 gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, map.cols, map.rows, 0, gl.RED_INTEGER, gl.UNSIGNED_SHORT, map.cells);
                 gl.uniform4i(u.u_map, map.origin[0], map.origin[1], map.cols, map.rows);
@@ -500,11 +519,17 @@ const WBSCENE = (() => {
             gl.uniform1i(u.u_mode, 0);
             [['top', -1], ['bottom', 1]].forEach(([k, side], i) => {
                 const h = c.hud[k]; if (!h) return;
-                const w0 = h.rgba.length / 4 / h.h, cols = widenColumns(w0, c.W, h.split), rgba = new Uint8Array(c.W * h.h * 4);
-                for (let y = 0; y < h.h; y++) for (let x = 0; x < c.W; x++) { const s = (y * w0 + cols[x]) * 4, t = (y * c.W + x) * 4; rgba[t] = h.rgba[s]; rgba[t + 1] = h.rgba[s + 1]; rgba[t + 2] = h.rgba[s + 2]; rgba[t + 3] = 255; }
+                let wide = h._wide;                                  // 1.7: the widened rows cached on the HUD object (the same rgba, split and width -> the same picture)
+                if (!wide || wide.W !== c.W || wide.src !== h.rgba || wide.split !== h.split) {
+                    const w0 = h.rgba.length / 4 / h.h, cols = widenColumns(w0, c.W, h.split), rgba = new Uint8Array(c.W * h.h * 4);
+                    for (let y = 0; y < h.h; y++) for (let x = 0; x < c.W; x++) { const s = (y * w0 + cols[x]) * 4, t = (y * c.W + x) * 4; rgba[t] = h.rgba[s]; rgba[t + 1] = h.rgba[s + 1]; rgba[t + 2] = h.rgba[s + 2]; rgba[t + 3] = 255; }
+                    wide = h._wide = { W: c.W, src: h.rgba, split: h.split, rgba }; this.stats.hudWidened = (this.stats.hudWidened || 0) + 1;
+                }
                 const ty = side < 0 ? y0 - h.h * S : y0 + c.H * S, vy = d.h - ty - h.h * S;
                 gl.viewport(x0, vy, Wd, h.h * S); gl.uniform2f(u.u_size, Wd, h.h * S);
-                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.texHud[i]); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, c.W, h.h, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.texHud[i]);
+                if (!this.hudUp) this.hudUp = [null, null];
+                if (this.hudUp[i] !== wide) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, c.W, h.h, 0, gl.RGBA, gl.UNSIGNED_BYTE, wide.rgba); this.hudUp[i] = wide; }
                 this._quad(0, 0, Wd, h.h * S);
             });
         }

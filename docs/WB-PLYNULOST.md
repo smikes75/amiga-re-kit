@@ -109,8 +109,10 @@ gives `allow(n)`, the module gives the permits, the times and the pairs:
 - `takt.stamp(n)`: the time of game frame n (its permit's nominal time; a frame made without a permit gets the
   previous + one frame; never earlier than the previous);
 - `takt.view(ts)`: the display times `tv` (camera, sprites: `latC` 30 ms behind the game, 20 with an engine in a
-  thread, one frame less 2 ms under the lock) and `tvO` (objects: `latO` 60 ms, adaptive to the longest of the last
-  16 drawing passes - the game's lead + 8 ms, up to 120; fed by `takt.pass(t)`);
+  thread, one frame less 2 ms under the lock) and `tvO` (objects: `latO` 40 ms; 1.3, kit 0.9.12: fixed - the
+  inventory found the games running fixed 40-48 ms and nobody the adaptive latency; `latOMax` above `latO` turns the
+  adaptation on: the longest of the last 16 drawing passes - the game's lead + 8 ms, up to latOMax, fed by
+  `takt.pass(t)`; with wb-scene 1.7 `extrapolateObjects` the objects run one pass past the last one instead);
 - `takt.pass(t)` (1.2): a record of an older drawing pass after a newer one (once in ~1500 frames in a browser,
   Alien Breed II) is not taken - a small step back is ignored, a big one (over 1 s: a new level) starts the axis anew;
 - `takt.pair(list, t)`: the two frames around t and the fraction; without the next one the previous pair
@@ -254,6 +256,29 @@ positions against what the game really drew (win.w x win.h indices) -> `{ over, 
 nothing the model does not know is lost), `count` how well the model knows the game (Alien Breed SE92: under
 10 px per frame). The project passes the objects the game had drawn when it captured the picture; hardware
 sprites are not in it.
+Superfrog on 1.6 (ce085bf, no code change - the frog is a hardware sprite, no object is tracked): 0 differing
+pixels of 1.09-1.27 M in pause and, with a real fraction under a virtual 144 Hz clock (S = 3, dpr 2, weights up
+to 229/256), 0 of 1 629 936 in each of 7 checks; 0 GL errors of 40 044 draws; replay with the shift EQUAL over
+1000 frames with the fingerprint of before. The "newest frame is N ms behind ts" warning fires once when the
+page pauses the game while the display clock runs on - expected there, not a fault.
+
+Alien Breed II on 1.6 (its move to the scene module, the old path behind a Debug switch): the engine's scene record
+composed as `reference()` at the record's camera equals its own composition at 0 mismatches in 11 levels (about
+2000 frames a level, 300-450 M pixels) once its one addition - the muzzle flash moved with the player - is done on
+the page after `compose()` and handed to `draw(..., comp)` as a steady object; in Chromium `read()` against the
+reference 0 of 19 checks walking the map with the shift on; a record costs about 0.13 ms a game frame; its players
+are hardware sprites, so no object is marked steady. G56 (1.6.1, kit 0.9.11): `draw()` uploaded only B's
+`map.dirty`, so a frame with dirty slots that was never B (two game frames between two display frames) left those
+slots stale in the atlas texture; `frame()` now collects every frame's dirty slots and `draw()` uploads the union.
+
+1.7 (kit 0.9.12, the inventory's clean-up): `extrapolateObjects` (passes the objects may run past the last pass when
+the next 25 Hz pass has not come; default = `extrapolate`, which stays for the camera) - Alien Breed II's engine
+did this, so its objects' latency could stay a fixed 40 ms where the kit adapted 60-120; now the kit does the same
+and wb-takt 1.3 is fixed by default; `jumpMax` still guards a wrong guess. The widened HUD rows are cached on the
+HUD object (the same rgba, split and width give the same picture; uploaded once) - they were rebuilt and uploaded
+every draw. A map narrower than the view is centred on a whole game pixel (floor), as Alien Breed II's engine
+does (the half pixel made one column of difference). `softClamp` and `smoothY` warn once as deprecated - `camMean`
+replaced them in 1.2 and no game sets them; they go away in 1.0.
 
 The mode transition (planned for the scene module, 1.6; the Codex Superfrog rebuild's recipe: one presentational
 state - the viewport's size, the scale, the CRT, the display's latency - interpolated by smoothstep over 450 ms,

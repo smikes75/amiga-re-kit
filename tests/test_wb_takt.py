@@ -21,7 +21,7 @@ def js(expr):
 
 
 def test_lock_and_rate():
-    assert js('T.VERSION') == '1.2' and 'wb-takt.js' in web.FILES
+    assert js('T.VERSION') == '1.3' and 'wb-takt.js' in web.FILES
     assert js('[60, 100.3, 49.9, 150, 144, 200.5, 0].map((h) => T.lockOf(h, 50))') == [0, 2, 1, 3, 0, 4, 0]
     assert js('T.medianHz(Array(59).fill(16.7))') == 0 and abs(js('T.medianHz(Array(60).fill(16.667))') - 60) < 0.01
 
@@ -43,7 +43,7 @@ def test_permits_timeline_and_pairs():
 
 
 def test_view_lag_adapts_and_lock_changes_it():
-    r = js("""(() => { const t = T.create({ latC: 30, latO: 60 }); const v0 = t.view(1000, 1000);
+    r = js("""(() => { const t = T.create({ latC: 30, latO: 60, latOMax: 120 }); const v0 = t.view(1000, 1000);
         for (const x of [1000, 1080, 1160, 1240]) t.pass(x);                         // passes 80 ms apart: latO climbs 1 ms a frame towards 88 - lead + 8
         const steps = []; for (let i = 0; i < 40; i++) steps.push(t.view(1240 + i * 16, 1240 + i * 16).latO);
         t.hz = 100; t.k = 2; const locked = t.view(5000, 5000);
@@ -59,6 +59,29 @@ def test_view_lag_adapts_and_lock_changes_it():
         const g = t.tick(5000, 30, false).granted; const t31 = t.stamp(31);
         return [back, g, t31]; })()""")
     assert r[0] == 30 and r[1] == 32 and r[2] == 5000
+
+
+def test_fixed_latency_by_default_and_the_clock_under_skips_pauses_and_overruns():
+    """1.3: latO is fixed (40) unless latOMax is above it; two game frames in one slow display frame get permit times a frame
+    apart; a lock switch restarts the clock with the locked interval; after a pause the clock starts from now; when the
+    game ran past the permits the clock continues behind it."""
+    r = js("""(() => { const t = T.create({}); for (const x of [1000, 1080, 1160, 1240]) t.pass(x); const v = []; for (let i = 0; i < 10; i++) v.push(t.view(1240 + i * 16, 1240 + i * 16).latO);
+        return [t.LATO, t.latOMax, v[0], v[9]]; })()""")
+    assert r == [40, 40, 40, 40]
+    r = js("""(() => { const t = T.create({}); let done = 0; const g = t.tick(1000, 0, false).granted; const s = []; while (done < g) { done++; s.push(t.stamp(done)); }
+        const slow = t.tick(1000 + 50, done, false).granted; const s2 = []; while (done < slow) { done++; s2.push(t.stamp(done)); }
+        return [g, s, slow, s2]; })()""")
+    assert r[0] == 2 and r[1] == [1000, 1020] and r[2] == 4 and r[3] == [1040, 1060]              # 50 ms later: two frames, a frame apart on the grid
+    r = js("""(() => { const t = T.create({}); let ts = 1000; for (let i = 0; i < 90; i++) { t.tick(ts, 0, true); ts += 10; } const a = [t.hz, t.k, t.fm(), t.clock];
+        for (let i = 0; i < 150; i++) { t.tick(ts, 0, true); ts += 16.667; } return [a, [Math.round(t.hz), t.k, t.fm()]]; })()""")
+    assert r[0] == [100, 2, 20, 0] and r[1] == [60, 0, 20]                                         # 100 Hz: locked k = 2, the clock restarted; 60 Hz: unlocked
+    r = js("""(() => { const t = T.create({}); let done = 0; const g = t.tick(1000, 0, false).granted; while (done < g) { done++; t.stamp(done); }
+        t.tick(1016, done, true); const g2 = t.tick(5000, done, false).granted; const s3 = t.stamp(done + 1); return [g, g2, s3]; })()""")
+    assert r == [2, 4, 5000]                                                                       # after the pause the next frame's time is now, not the old timeline
+    r = js("""(() => { const t = T.create({ ahead: 2 }); let done = 0; const g = t.tick(1000, 0, false).granted; while (done < g) { done++; t.stamp(done); }
+        const free = [t.stamp(3), t.stamp(4), t.stamp(5)]; done = 5;                           // three frames made without a permit (the sound's reserve)
+        const g2 = t.tick(1016, done, false).granted; const s6 = t.stamp(6); return [free, g2, s6, t.clock]; })()""")
+    assert r[0] == [1040, 1060, 1080] and r[1] == 5 and r[2] == 1100 and r[3] == 1100            # the game is ahead of the display: no new permit yet, the clock continues behind it (frame 6 at 1100)
 
 
 def test_keyboard_changes_bits_at_the_event():

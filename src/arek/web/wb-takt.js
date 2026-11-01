@@ -1,4 +1,4 @@
-// wb-takt.js 1.2 - the clock of a rebuild's page (amiga-re-kit, docs/WB-PLYNULOST.md, module C). Extracted from
+// wb-takt.js 1.3 - the clock of a rebuild's page (amiga-re-kit, docs/WB-PLYNULOST.md, module C). Extracted from
 // the Alien Breed II page (tools/web/main.js: PACE, pump, loopIn) and Superfrog's (web/main.js, web/worker.js):
 //   - the game's clock comes from requestAnimationFrame: frames of the game are allowed up to "now + one frame", at
 //     most `ahead` beyond what the engine has done; on a display of k x 50 Hz (within 0.6 Hz) exactly one game frame
@@ -7,18 +7,20 @@
 //     scene makes several in one run, a thread runs ahead for the sound) gets the previous time + one frame and the
 //     clock continues behind it (the old time from a ring was Alien Breed II's stutter);
 //   - the picture is drawn behind the game: the camera and the sprites by latC (30 ms; 20 with an engine in a thread),
-//     the objects by latO (60 ms, adaptive up to 120 after the lengths of the drawing passes) so the next frame / pass
-//     for the interpolation is there; without it the pair's fraction runs past 1 from the previous pair (extrapolation);
+//     the objects by latO (40 ms; 1.3: fixed - the games run fixed 40-48 ms; set latOMax above latO for the adaptive
+//     latency up to latOMax after the lengths of the drawing passes) so the next frame / pass for the interpolation is
+//     there; without it the pair's fraction runs past 1 from the previous pair (extrapolation; wb-scene 1.7
+//     extrapolateObjects lets the objects run one pass past the last one, so a fixed latO suffices);
 //   - the keys reach the game at the event, not at the next display frame (keyboard()).
 // The page owns the engine: it gives allow(n) (let the game run to frame n) and reads the frames it made; the module
 // gives the permits, the times and the pairs for the interpolation. No game data.
-//   const takt = WBTAKT.create({ fps: 50, ahead: 2, latC: 30, latO: 60, lock: 'auto', allow: (n) => engine.allow(n) });
+//   const takt = WBTAKT.create({ fps: 50, ahead: 2, latC: 30, latO: 40, lock: 'auto', allow: (n) => engine.allow(n) });
 //   rAF loop: takt.tick(ts, engine.done(), paused); for every new frame n: f.t = takt.stamp(n); takt.pass(t) when a
 //   drawing pass completes; const { tv, tvO } = takt.view(ts); const p = takt.pair(frames, tv); camera = lerp(p.a, p.b, p.f)
 //   takt.stats() -> { hz, k, fm, granted, ahead, missing, latC, latO } for the page's WBLONGRUN hooks.
 'use strict';
 const WBTAKT = (() => {
-    const VERSION = '1.2';
+    const VERSION = '1.3';
     const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
     /** The display's rate from the last intervals: the median (Hz), 0 before 60 samples. */
     function medianHz(dts) {
@@ -36,7 +38,7 @@ const WBTAKT = (() => {
         constructor(o) {
             o = o || {};
             this.fps = o.fps || 50; this.ahead = o.ahead || 2; this.LATC = o.latC != null ? o.latC : 30;
-            this.LATO = o.latO != null ? o.latO : 60; this.latOMax = o.latOMax || 120; this.lock = o.lock || 'auto';
+            this.LATO = o.latO != null ? o.latO : 40; this.latOMax = o.latOMax != null ? Math.max(o.latOMax, this.LATO) : this.LATO; this.lock = o.lock || 'auto';   // 1.3: fixed unless latOMax > latO
             this.allow = o.allow || (() => {}); this.extrap = !!o.extrapolate;
             this.dts = []; this.last = 0; this.cnt = 0; this.hz = 0; this.k = 0;
             this.clock = 0; this.granted = 0; this.tg = new Float64Array(256); this.tgN = new Int32Array(256).fill(-1); this.lastT = 0;
@@ -91,7 +93,7 @@ const WBTAKT = (() => {
          *  display frame; fixed when the engine extrapolates); under the lock the camera is one frame less 2 ms behind. */
         view(ts, newest) {
             const FM = this.fm();
-            if (!this.extrap && this.lens.length) {
+            if (!this.extrap && this.lens.length && this.latOMax > this.LATO) {
                 const nw = newest != null ? newest : (this.lastT || ts);
                 const target = Math.min(this.latOMax, Math.max(this.LATO, Math.max(...this.lens) - (nw - ts) + 8)), d = target - this.latO;
                 this.latO += d > 0 ? Math.min(1, d) : Math.max(-0.1, d);

@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '1.6' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '1.7' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -180,6 +180,33 @@ def test_unexplained_pixels_of_the_window():
     assert r[3] == 2 and r[4] == [255, 255, 255, 5, 255, 255, 9, 255]
     assert r[5] == 2 and r[6] == [255, 3, 1, 255, 255, 255, 255, 255]                 # the model has the object at 2 (over the hole's map at 1 it shows 2): the game's 3 at 1 and 1 at 2 are unexplained
     assert r[7] == 0 and r[8] == [1, 3, 1, 1, 1, 1, 1, 1]                            # without a map the hole would stay 255, but the object covers it at x 1
+
+
+def test_dirty_atlas_slots_of_skipped_frames_are_uploaded():
+    """G56 (Alien Breed II): a frame with map.dirty that is never B (two game frames between two display frames) still gets
+    its slots uploaded - frame() collects them, _uploadMap() sends the union and clears it; a new generation uploads all."""
+    r = js("""(() => { const sc = new S.Scene({}); const calls = []; sc._slot = (m, sl) => calls.push(sl); sc._atlasAll = (m) => calls.push('all');
+        const map = (gen, dirty) => ({ gen, dirty, nslots: 3, atlas: null, cells: null, cols: 1, rows: 1, origin: [0, 0] });
+        sc.frame({ n: 1, t: 0, cam: [0, 0], map: map(1, [5]) }); sc.frame({ n: 2, t: 20, cam: [0, 0], map: map(1, null) });
+        const pending = Array.from(sc.dirty); sc.atlasGen = 1; sc._uploadMap(map(1, [7])); const first = calls.slice(); calls.length = 0;
+        sc._uploadMap(map(1, null)); const second = calls.slice(); calls.length = 0;
+        sc.frame({ n: 3, t: 40, cam: [0, 0], map: map(2, [1]) }); sc._uploadMap(map(2, null)); const third = calls.slice(); calls.length = 0;
+        sc.frame({ n: 4, t: 60, cam: [0, 0], map: map(2, [2]) }); sc.reset(); return [pending, first, second, third, sc.atlasGen, Array.from(sc.dirty)]; })()""")
+    assert r[0] == [5] and sorted(r[1]) == [5, 7] and r[2] == [] and r[3] == ['all'] and r[4] == -1 and r[5] == []
+
+
+def test_objects_extrapolated_past_the_last_pass():
+    """1.7: with extrapolateObjects the objects keep moving past the last pass (f > 1 from the previous pair), the camera
+    stays clamped at the newest frame unless extrapolate says otherwise; jumpMax still guards."""
+    body = """(() => { const a = mk(1, 0, [0, 0], 10), b = mk(2, 20, [4, 0], 14); const c = S.compose([a, b], 30, { S: 1 }, { %s }, null);
+        return [c.f, c.of, c.cam, c.objs[0].x]; })()"""
+    assert js(with_mk(body % '')) == [1, 1, [4, 0], 14]                                            # past the newest: clamped
+    assert js(with_mk(body % 'extrapolateObjects: 1')) == [1, 1.5, [4, 0], 16]                     # the object runs on half a pass, the camera not
+    assert js(with_mk(body % 'extrapolate: 1')) == [1.5, 1.5, [6, 0], 16]                          # both
+    assert js(with_mk(body % 'extrapolate: 1, extrapolateObjects: 0')) == [1.5, 1, [6, 0], 14]     # the camera only
+    r = js(with_mk("""(() => { const a = mk(1, 0, [0, 0], 10), b = mk(2, 20, [4, 0], 90); const c = S.compose([a, b], 30, { S: 1 }, { extrapolateObjects: 1 }, null); return c.objs[0].x; })()"""))
+    assert r == 90                                                                                # a jump over jumpMax is not extrapolated
+    assert js('S.clampCam(0, 0, {x0: 0, x1: 0, y0: 0, y1: 0}, {w: 4, h: 2}, {x: 1, y: 1})') == [-1, -1]   # 1.7: (6 - 4) / 2 = 1, (4 - 2) / 2 = 1; an odd gap floors
 
 
 def test_object_drawing_offset():
