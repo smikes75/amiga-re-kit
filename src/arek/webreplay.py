@@ -63,7 +63,7 @@ def replay_one(page, hz, frames, schedule, settle_ms=0):
     for name in ('done', 'state'):
         if not page.evaluate('typeof globalThis.WBLONGRUN.%s === "function"' % name):
             raise ValueError('the page has no WBLONGRUN.%s() hook (replay needs done() and state(), 1.5)' % name)
-    ticks, drawn0 = 0, None
+    ticks = 0
     while True:
         done = page.evaluate('globalThis.WBLONGRUN.done()')
         if done >= frames:
@@ -72,7 +72,10 @@ def replay_one(page, hz, frames, schedule, settle_ms=0):
         ticks += 1
         if ticks > frames * 10 + 1000:
             raise RuntimeError('%d Hz: the page made only %d of %d game frames after %d display frames (does the engine run on the page\'s clock?)' % (hz, done, frames, ticks))
-    return {'hz': hz, 'ticks': ticks, 'done': page.evaluate('globalThis.WBLONGRUN.done()'), 'state': str(page.evaluate('globalThis.WBLONGRUN.state()')),
+    # done and state in one call: the fingerprint belongs to the frame done() reports (Superfrog KIT-GAPS 51: a worker a frame
+    # ahead answered 1001 to a second done() and the states differed by rate)
+    done, state = page.evaluate('async () => [await globalThis.WBLONGRUN.done(), String(await globalThis.WBLONGRUN.state())]')
+    return {'hz': hz, 'ticks': ticks, 'done': done, 'state': state,
             'inputs': bool(schedule and has_inputs), 'status': page.evaluate('globalThis.WBLONGRUN.status ? String(WBLONGRUN.status()) : ""')}
 
 
@@ -99,4 +102,6 @@ def run(url, hz_list=HZ_DEFAULT, frames=300, route=None, log=print, browser='chr
     states = {r['state'] for r in runs}
     equal = len(states) == 1 and all(not r['errors'] for r in runs)
     log('state %s across %s Hz' % ('EQUAL' if equal else 'DIFFERS', ', '.join(str(h) for h in hz_list)) + ('' if equal else ': ' + ', '.join('%d Hz %s' % (r['hz'], r['state'][:16]) for r in runs)))
+    if not equal and len({r['done'] for r in runs}) > 1:
+        log('the page ran past %d frames differently (%s): hold the game at the frame done() reports, or make state() the fingerprint of exactly that frame' % (frames, ', '.join('%d Hz %d' % (r['hz'], r['done']) for r in runs)))
     return {'runs': runs, 'equal': equal, 'reference': runs[0]['state'] if runs else None}

@@ -21,7 +21,7 @@ def js(expr):
 
 
 def test_lock_and_rate():
-    assert js('T.VERSION') == '1.3' and 'wb-takt.js' in web.FILES
+    assert js('T.VERSION') == '1.4' and 'wb-takt.js' in web.FILES
     assert js('[60, 100.3, 49.9, 150, 144, 200.5, 0].map((h) => T.lockOf(h, 50))') == [0, 2, 1, 3, 0, 4, 0]
     assert js('T.medianHz(Array(59).fill(16.7))') == 0 and abs(js('T.medianHz(Array(60).fill(16.667))') - 60) < 0.01
 
@@ -82,6 +82,11 @@ def test_fixed_latency_by_default_and_the_clock_under_skips_pauses_and_overruns(
         const free = [t.stamp(3), t.stamp(4), t.stamp(5)]; done = 5;                           // three frames made without a permit (the sound's reserve)
         const g2 = t.tick(1016, done, false).granted; const s6 = t.stamp(6); return [free, g2, s6, t.clock]; })()""")
     assert r[0] == [1040, 1060, 1080] and r[1] == 5 and r[2] == 1100 and r[3] == 1100            # the game is ahead of the display: no new permit yet, the clock continues behind it (frame 6 at 1100)
+    r = js("""(() => { const t = T.create({}); const g = t.tick(1000, 0, false).granted; const a = [t.timeOf(1), t.timeOf(2), t.timeOf(3), t.lastT]; t.stamp(1); return [g, a, t.timeOf(1), t.lastT]; })()""")
+    assert r == [2, [1000, 1020, None, 0], 1000, 1000]                                            # 1.3.1: timeOf reads the permit's time without moving the timeline
+    r = js("""(() => { const out = []; for (const h of ['display', 'game', 12]) { const t = T.create({ horizon: h }); t.hz = 144; out.push([t.tick(1000, 0, false).granted, +t.horizonMs().toFixed(2)]); }
+        const u = T.create({}); out.push([u.tick(1000, 0, false).granted, u.horizonMs()]); return out; })()""")
+    assert r == [[1, 8.94], [2, 20], [1, 12], [2, 20]]                                          # 1.4 (G57): at 144 Hz a frame is granted a display frame + 2 ms ahead, not a game frame; unmeasured display = a game frame
 
 
 def test_keyboard_changes_bits_at_the_event():

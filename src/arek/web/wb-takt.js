@@ -1,8 +1,11 @@
-// wb-takt.js 1.3 - the clock of a rebuild's page (amiga-re-kit, docs/WB-PLYNULOST.md, module C). Extracted from
+// wb-takt.js 1.4 - the clock of a rebuild's page (amiga-re-kit, docs/WB-PLYNULOST.md, module C). Extracted from
 // the Alien Breed II page (tools/web/main.js: PACE, pump, loopIn) and Superfrog's (web/main.js, web/worker.js):
-//   - the game's clock comes from requestAnimationFrame: frames of the game are allowed up to "now + one frame", at
-//     most `ahead` beyond what the engine has done; on a display of k x 50 Hz (within 0.6 Hz) exactly one game frame
-//     per k display frames (the lock), otherwise the game's own 50 Hz with interpolation between frames;
+//   - the game's clock comes from requestAnimationFrame: frames of the game are allowed up to "now + the horizon", at
+//     most `ahead` beyond what the engine has done; the horizon (1.4, Alien Breed II G57) is one DISPLAY frame + 2 ms
+//     by default ('display': the game computes a frame in the last display frame before its time and reads the freshest
+//     input - at 144 Hz 10 ms fresher than one game frame), 'game' = one game frame (the 1.0-1.3 behaviour, also before
+//     the display's rate is measured), or a number of ms; on a display of k x 50 Hz (within 0.6 Hz) exactly one game
+//     frame per k display frames (the lock), otherwise the game's own 50 Hz with interpolation between frames;
 //   - the timeline: every game frame gets a time (the permit's nominal time); a frame made without a permit (a busy
 //     scene makes several in one run, a thread runs ahead for the sound) gets the previous time + one frame and the
 //     clock continues behind it (the old time from a ring was Alien Breed II's stutter);
@@ -18,9 +21,11 @@
 //   rAF loop: takt.tick(ts, engine.done(), paused); for every new frame n: f.t = takt.stamp(n); takt.pass(t) when a
 //   drawing pass completes; const { tv, tvO } = takt.view(ts); const p = takt.pair(frames, tv); camera = lerp(p.a, p.b, p.f)
 //   takt.stats() -> { hz, k, fm, granted, ahead, missing, latC, latO } for the page's WBLONGRUN hooks.
+//   takt.timeOf(n) -> the permit's time of frame n, or null when n was not granted (1.3.1, Superfrog KIT-GAPS 51: an
+//   engine in a worker stamps its scene packet inside allow(g), before the page calls stamp(n)); no side effect.
 'use strict';
 const WBTAKT = (() => {
-    const VERSION = '1.3';
+    const VERSION = '1.4';
     const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
     /** The display's rate from the last intervals: the median (Hz), 0 before 60 samples. */
     function medianHz(dts) {
@@ -39,14 +44,16 @@ const WBTAKT = (() => {
             o = o || {};
             this.fps = o.fps || 50; this.ahead = o.ahead || 2; this.LATC = o.latC != null ? o.latC : 30;
             this.LATO = o.latO != null ? o.latO : 40; this.latOMax = o.latOMax != null ? Math.max(o.latOMax, this.LATO) : this.LATO; this.lock = o.lock || 'auto';   // 1.3: fixed unless latOMax > latO
-            this.allow = o.allow || (() => {}); this.extrap = !!o.extrapolate;
+            this.allow = o.allow || (() => {}); this.extrap = !!o.extrapolate; this.horizon = o.horizon != null ? o.horizon : 'display';
             this.dts = []; this.last = 0; this.cnt = 0; this.hz = 0; this.k = 0;
             this.clock = 0; this.granted = 0; this.tg = new Float64Array(256); this.tgN = new Int32Array(256).fill(-1); this.lastT = 0;
             this.latO = this.LATO; this.lens = []; this.lastPass = -1; this.missing = 0; this.granting = 0;
         }
         /** The display's interval (ms) of one game frame: locked k / hz, else 1000 / fps. */
         fm() { return this.k ? 1000 * this.k / this.hz : 1000 / this.fps; }
-        /** Every display frame: measure the display, then (unless paused) grant frames up to now + one frame. */
+        /** How far ahead of now a frame is granted (1.4): a display frame + 2 ms, a game frame, or the given ms. */
+        horizonMs() { const h = this.horizon; return typeof h === 'number' ? h : h === 'game' || !this.hz ? this.fm() : 1000 / this.hz + 2; }
+        /** Every display frame: measure the display, then (unless paused) grant frames up to now + the horizon. */
         tick(ts, done, paused) {
             if (this.last) { const d = ts - this.last; if (d > 3 && d < 45) { this.dts.push(d); if (this.dts.length > 120) this.dts.shift(); } }
             this.last = ts; this.cnt++;
@@ -60,13 +67,16 @@ const WBTAKT = (() => {
             if (!this.clock || ts - this.clock > 5 * FM) this.clock = ts;              // start, after a pause, a slow machine: from now
             let g = Math.max(this.granted, done);
             if (done > this.granted && this.lastT + FM > this.clock) this.clock = this.lastT + FM;   // the game ran past the permits: continue behind it
-            while (this.clock <= ts + FM) {
+            const H = this.horizonMs();
+            while (this.clock <= ts + H) {
                 if (g < done + this.ahead) { g++; this.tg[g & 255] = this.clock; this.tgN[g & 255] = g; }
                 this.clock += FM;
             }
             if (g > this.granted) { this.granted = g; this.granting++; this.allow(g); }
             return { granted: this.granted, fm: FM, k: this.k };
         }
+        /** The permit's time of frame n, or null when it has none (a read without side effects, 1.3.1). */
+        timeOf(n) { const ix = n & 255; return this.tgN[ix] === n ? this.tg[ix] : null; }
         /** The time (ms) of game frame n as the page takes it from the engine: its permit's time, or the previous
          *  frame's + one frame when it was made without a permit; never earlier than the previous. */
         stamp(n) {

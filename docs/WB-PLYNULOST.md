@@ -118,10 +118,34 @@ gives `allow(n)`, the module gives the permits, the times and the pairs:
 - `takt.pair(list, t)`: the two frames around t and the fraction; without the next one the previous pair
   extrapolates (`f` up to 2) when allowed, else the last frame alone and `missing` counts it;
 - `WBTAKT.keyboard(target, {code: bit}, onchange)`: the keys as bits changed at the event;
+- `horizon` (1.4, Alien Breed II G57): how far ahead of now a frame is granted - `'display'` (default) one display
+  frame + 2 ms, so the game computes its frame in the last display frame before its time and reads the freshest
+  input (at 120 / 144 Hz 10-11 ms fresher than a game frame; 1.3 ms at 60 Hz), `'game'` one game frame (the
+  behaviour up to 1.3, and before the display's rate is measured), or a number of ms;
+- `takt.timeOf(n)` (1.3.1, Superfrog KIT-GAPS 51): the permit's time of frame n without side effects, for an engine
+  in a worker that stamps its scene packet inside `allow(g)` before the page calls `stamp(n)`;
 - `takt.reset(done)` for a restart, a jump or the end of frames allowed outside the clock (1.1, Alien Breed II: a
   jump to a level allows `done + 24`): it takes the permit back (`allow(done)`) and the page skips the frames it has
   not shown, otherwise they get times now + n frames and the timeline stays ahead for good (140-172 ms, the keys that
   much later); `takt.stats()` for the hooks (`hz`, `k`, `fm`, `ahead`, `missing`).
+
+Superfrog on wb-takt (4a7244e, kit 0.9.10: fps 50, ahead 2, latC 28, latO 48 fixed, lock auto; its worker computes
+a frame without a permit under 15 ms of sound reserve, up to 12 past the permit, never under replay): `arek web
+smooth --gpu`, 30 s, 10 stalls of 150 ms on a loaded machine (load 4-15), two runs each - 0 dropped frames; camera
+jitter 0.042 / 0.029 px against its own clock's 0.086 / 0.060; missing passes 2.5 / 2.3 % against 2.4 (a case for
+wb-scene 1.7 `extrapolateObjects`); key -> camera 7-13 ms; sound dropouts 0 / 0 (66 / 70 frames without a permit)
+against 10 / 10. WebKit under load 5-14: 9 dropped, jitter 0.057, 1 dropout against 0 dropped, 0.014, 18 dropouts.
+Replay EQUAL at the four rates with the same fingerprint under both clocks; GPU against the reference 0.
+
+Alien Breed II on wb-takt (M42, kit 0.9.12: fps 49.92, ahead 2 - replay 1, latC 20 thread / 30 coroutine, latO 40
+fixed, lock from its menu; `reset(done)` at a jump; the original mode without interpolation moves tv to ts + 2; its
+PACE behind a Debug switch for one release; wb-scene 1.7 with `extrapolateObjects: 1`, its own adaptive latency and
+the G56 workaround gone, the HUD shared between records): replay EQUAL in Chromium and WebKit with the same
+fingerprints as under PACE, GPU against the reference 0 in both browsers with the thread and the coroutine, `arek web
+test` 284 / 0; `arek web smooth` on a loaded machine (SwiftShader, load 7-10) inconclusive - dropped frames 27-82
+against 1-128, key -> camera 37-101 against 35-57 ms, missing 0 %, sound 0 dropouts. It found G57: the kit granted a
+frame one GAME frame ahead where PACE granted one DISPLAY frame + 2 ms ahead (the frame is computed in the last
+display frame before its time and reads fresher input: 1.3 ms at 60 Hz, 10-11 ms at 120 / 144 Hz) - `horizon` in 1.4.
 
 ## D. The sound (`wb-zvuk-worklet.js` + `wb-zvuk-out.js` 1.0, kit 0.8.1) - done
 
@@ -326,7 +350,10 @@ another route give other fingerprints. Its hooks: under the virtual clock the pa
 frame per rAF round (ahead 1, so exactly N frames at every rate, never N + 1); the keys come from the schedule by
 game frame instead of the keyboard; `prepare()` jumps to level 1 ticking the virtual clock itself at a fixed 20 ms,
 so every rate starts from the same point, and `done()` counts from the end of the jump; `state()` is FNV-1a 32 over
-chip RAM and slow RAM plus the frame number; the coroutine engine suffices. The synthetic scene page implements all three; the kit's test replays
+chip RAM and slow RAM plus the frame number; the coroutine engine suffices. The tool reads `done()` and `state()` in
+one call (kit 0.9.13): the fingerprint belongs to the frame `done()` reports - Superfrog's worker, a frame ahead under
+`ahead`, answered 1001 to a second `done()` and the fingerprints differed by rate; a page keeps the two consistent
+within one display frame, and the tool names the overshoot when the counts differ. The synthetic scene page implements all three; the kit's test replays
 it with a route at the four rates (equal state, more display frames at the higher rates) and checks that the route
 changes the state.
 
