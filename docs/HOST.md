@@ -144,6 +144,35 @@ registers and the stack as the routine's own `rts` would. `--extern` may be repe
 `ahd_set(n, bytes, len)` keeps image n (`AHD_DISKS`, 4), `ahd_set_file` natively; `AHD_READS`,
 `AHD_FAIL`, `AHD_LAST_*` for the page's diagnostics; `AHD_LOG=1` prints every read (native).
 
+## A data disk the game writes (`arek_host_datadisk.h`, `wb-datadisk.js`)
+
+Team17's games save the high-score table by hand: OPTIONS -> HISCORE SAVE / LOAD -> "please insert your
+custom datadisk into internal drive and press fire" -> one sector of a disk in DF0 through the game's own
+disk routine (unit, sector, count, mode and buffer in registers). A rebuild has no drive, so the original
+answers DISK ERROR. The header is the disk: `AHDD_SECTORS` sectors (default 1) in the host, behind the
+game's routine replaced with `--extern`; the registers and the result are the project's:
+
+```c
+#define AHDD_SECTORS 1
+#include "arek_host_datadisk.h"
+AHDD_EXTERN(game_dsk_io, m->d[0] & 3, (uint16_t)m->d[1], (uint16_t)m->d[2], m->d[3] & 1, m->a[0])
+/* = void game_dsk_io(M68 *m): D0 = 0 when the sectors moved, AHDD_FAIL (30, TDERR_SeekError) otherwise, rts */
+```
+
+A game whose one routine also reads its own disks (Superfrog) writes the extern itself: when the data disk
+is in the drive (`ahdd_in()`; the project calls `ahdd_insert(1 / 0)` around the game's prompt, or leaves it
+in for good, the default) and the unit is 0, `ahdd_io(sector, count, write, addr)`, otherwise `ahd_read()`
+of `arek_host_disk.h`. An empty drive reads as zeros and still takes a write - what a blank disk does; the
+game decides what a sector without its marker means (its own DISK ERROR on LOAD, a plain SAVE).
+
+The page keeps the sectors in localStorage with `wb-datadisk.js`: the header exports `ahdd_buf`,
+`ahdd_size`, `ahdd_set`, `ahdd_gen` (EMSCRIPTEN_KEEPALIVE on their own, no EXPORTED_FUNCTIONS entry needed),
+`WBDATADISK.host(M)` maps them, `open({ key, host, label, log })` gives `load()` (after the engine's init,
+before the game runs), `poll()` (once per frame: the game wrote, the write is saved) and `clear()`, plus a
+two-click clear button. Natively `ahdd_sync(path)` once per frame keeps a file equal to the disk. What the
+game does with the table beyond SAVE / LOAD - an automatic save after a name is entered, the table's address
+and format - is the project's (Alien Breed II has it in its engine).
+
 ## The engine of a web page (`arek_host_engine.c`)
 
 The translated game on the host, driven frame by frame by the page, which reads every frame's
