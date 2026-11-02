@@ -1,4 +1,11 @@
-# WB-PLYNULOST - the canon of a smooth picture and sound in the browser (kit 0.8.x)
+# WB-PLYNULOST - the canon of a smooth picture and sound in the browser (kit 0.8.x - 1.0)
+
+**Frozen at kit 1.0 (2026-11-02):** the display layer's contract is wb-takt 1.4, wb-obraz 1.6, wb-scene 2.0, wb-zvuk
+1.1 / wb-zvuk-out 1.0, WBLONGRUN 1.5 and `arek web test / smooth / replay` as they stand. From here it changes only for
+a gap a game measures (KIT-GAPS), never for a new idea - those wait after 1.0 (run-ahead, a per-sprite shift). What a
+game writes is on one page: `WB-RECIPE.md`; this file stays the reasons and the measurements. 2.0 of the scene removed
+`softClamp` and `smoothY` (camMean replaced them in 1.2, no game set them); the adaptive objects' latency stays an
+opt-in (`latOMax` above `latO`).
 
 The rebuilds of the kit (Superfrog, Alien Breed, Turrican II, Alien Breed II) show a game whose logic runs at 50 Hz on
 displays of 60, 120 or 144 Hz, in Chromium and in Safari, on weaker machines too. The canon says which layer does

@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '1.9' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.0' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -271,18 +271,17 @@ def test_object_drawing_offset():
     assert r[0] == 1 and r[1] == 10 and r[2] == 20 and r[3] == 30 and r[4] == 40            # logical x 1 (half way 0 -> 2), the drawing at x 2; x 1 shows the map through the hole, the sprite at x 3
 
 
-def test_options_fixed_axis_soft_clamp_and_smoothing():
+def test_options_fixed_axis_and_the_symmetric_mean():
+    """2.0: softClamp and smoothY are gone (camMean replaced them); the symmetric mean has no lag on linear motion, keeps
+    the sprites at the game's clamped camera, and fixedAxis pins an axis."""
     r = js(with_mk("""(() => { const fr = [mk(1, 0, [0, 0], 0), mk(2, 20, [0, 10], 0), mk(3, 40, [0, 20], 0)];
         const fixed = S.compose(fr, 20, { S: 1 }, { fixedAxis: { axis: 'y', value: 3 } }, null);
-        const smooth = S.compose(fr, 40, { S: 1 }, { smoothY: { tau: 20 } }, null);
-        const plain = S.compose(fr, 40, { S: 1 }, {}, null);
-        return [fixed.cam, smooth.cam, smooth.spriteCam, plain.cam]; })()"""))
-    assert r[0] == [0, 3] and r[3] == [0, 20]
-    assert abs(r[1][1] - 17.5) < 1e-9 and r[2][1] == 20                                # the terrain's camera a past triangle over tau, the sprites keep the game's
-    r = js(with_mk("""(() => { const fr = [mk(1, 0, [-30, 0], 0), mk(2, 20, [-10, 0], 0), mk(3, 40, [0, 0], 0)];
-        const soft = S.compose(fr, 50, { S: 1, extX: 0 }, { softClamp: { tau: 20 } }, null), hard = S.compose(fr, 50, { S: 1, extX: 0 }, {}, null);
-        return [hard.cam, soft.cam]; })()"""))
-    assert r[0] == [0, 0] and r[1] == [0, 0]                                           # all clamped frames are 0: the mean is 0 too (no overshoot)
+        const mean = S.compose(fr, 30, { S: 1 }, { camMean: { tau: 20 } }, null);
+        const plain = S.compose(fr, 30, { S: 1 }, {}, null);
+        const old = S.compose(fr, 30, { S: 1 }, { softClamp: { tau: 20 }, smoothY: { tau: 20 } }, null);
+        return [fixed.cam, mean.cam, mean.spriteCam, plain.cam, old.cam]; })()"""))
+    assert r[0] == [0, 3] and r[3] == [0, 15] and r[4] == [0, 15]                       # the removed options are plain nothing
+    assert abs(r[1][1] - 15) < 1e-9 and r[2][1] == 15                                  # the symmetric mean over linear motion is the motion itself: no lag
 
 
 def _run_page(url_tail, fn):
@@ -307,7 +306,7 @@ def _run_page(url_tail, fn):
         srv.shutdown()
 
 
-@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2&soft=1&smooth=1', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&fresh=1'])
+@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&fresh=1'])
 def test_gpu_equals_the_reference(tail):
     """The GPU band against the CPU reference of the same composition, pixel for pixel, while the camera moves and the
     objects interpolate (as Alien Breed II checked its WebGL path: 0 of 60 M pixels)."""

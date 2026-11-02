@@ -107,8 +107,10 @@ objektů o průchod (3.3), pevná zpoždění ve wb-takt (latO 40, adaptace jen 
 map, zastarání softClamp/smoothY, testy hodin. 0.9.13-14: hodiny v obou hrách (horizon, timeOf), vrstva CRT nad plátnem + web test §5.5. 0.9.15: přechod
 režimů z kitu (wb-scene 1.8 transition, libovolné měřítko, pravidlo „jedno plátno“ v kánonu A a §5.5). 0.9.16:
 odezva - freshSprites (hráč bez zpoždění, na syntetické stránce klávesa → hráč 44 → 28,5 ms) + sonda klávesa → hráč v
-měření; „pod zámkem hned“ nejde s enginem ve vlákně (snímek je hotový až příští tep), zůstává FM − 2. Zbývá: hry
-porovnají přechod a smažou staré cesty, recept, zmrazení 1.0; run-ahead po 1.0.
+měření; „pod zámkem hned“ nejde s enginem ve vlákně (snímek je hotový až příští tep), zůstává FM − 2. Kit 1.0.0 (2026-11-02):
+recept docs/WB-RECIPE.md, kontrakt zmrazen (wb-scene 2.0 bez softClamp/smoothY). Zbývá u her: porovnat přechod a
+hráče bez zpoždění, smazat staré cesty (SF scene.js + druhý presenter + vlastní takt + layoutTransition; ABR II
+view_render/gl.js + PACE). Po 1.0: run-ahead jako experiment.
 
 ## Příloha A – odpověď Alien Breed II (relace abrii-ab, 2026-11-01)
 

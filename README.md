@@ -24,7 +24,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
   verified, an original retail disk is not yet; AGA is not supported).
   Original and Enhanced modes, one or two players.
 - **Superfrog** (Team17, 1993): in verification, not playable yet.
-- **The kit:** version 0.9.16 on PyPI, 2503 tests. Extracted from five game
+- **The kit:** version 1.0.0 on PyPI, 2504 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -137,7 +137,7 @@ arek web smooth http://127.0.0.1:8920/smooth-demo.html  # the canon's limits in 
 #    1.8: WBSCENE.transition() - the mode transition from the kit (the real intermediate viewport composed at every frame at any
 #    scale, the display latencies blended, the CRT by the measured rules), the GPU equal to the reference at a fractional scale;
 #    1.9: freshSprites - the sprites from the newest game frame (a tracked player answers a key one display delay sooner); arek web smooth
-#    reports key -> player when the page gives player()
+#    reports key -> player when the page gives player(); 2.0 (kit 1.0): the contract frozen - docs/WB-RECIPE.md is the one page a game writes from
 arek web replay http://127.0.0.1:8920/scene-demo.html --hz 50,60,120,144 --frames 300 --route 1:120,2:60,0:120
 #    the display never touches the game: the page under a virtual clock at four rates, the same inputs by game frame, one state fingerprint (H)
 arek docs WB-PLYNULOST                                   # the kit's documents ship with it (arek docs: the list; --path: the file)

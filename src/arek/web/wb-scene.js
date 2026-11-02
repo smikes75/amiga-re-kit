@@ -11,7 +11,7 @@
 // whole game pixel, softClamp / smoothY deprecated; 1.8 kit 0.9.15 - any scale S (the device sizes rounded, the
 // sampling by a float32 multiply on both paths), transition() between two views, view.latC / latO for the drawer; 1.9 kit
 // 0.9.16 - freshSprites: the hardware sprites from the newest game frame at their screen position, no display latency
-// for a tracked player - Turrican II's way).
+// for a tracked player - Turrican II's way; 2.0 kit 1.0 - the contract frozen, softClamp / smoothY removed).
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -61,10 +61,8 @@
 // moves farther than that between two frames is not interpolated - a teleport after a death crossed the map), camMean
 // { tau, shape } (1.2: the terrain's camera as the mean of the clamped camera over t +- tau on both axes, always, sampled
 // every 5 ms - Superfrog's best measured smoothing, symmetric so without lag; it replaces softClamp and smoothY when set;
-// the sprites keep their screen position as in the original, shifted only by the stop at a map edge), softClamp { tau } (the stopped camera at a map edge as the mean of
-// the interpolated clamped camera over t +- tau ms, sampled every 5 ms, extrapolated past the newest frame by at most tau),
-// smoothY { tau } (the terrain's vertical camera as a triangle-weighted mean over the last tau ms, sampled every 5 ms;
-// sprites keep their screen position as in the original), pairOlder (a blinking sprite / object paired with up to n older
+// the sprites keep their screen position as in the original, shifted only by the stop at a map edge; 2.0: softClamp and
+// smoothY of 1.0 are gone - camMean replaced them in 1.2 and no game set them), pairOlder (a blinking sprite / object paired with up to n older
 // frames), freshSprites (1.9: the sprites of the newest game frame not later than the display time, at the screen position
 // the hardware gave them, instead of the pair at the delayed display time - a player the camera tracks stands on the screen
 // anyway and answers a key 20-48 ms sooner; it leads its ground by the camera's motion over the display delay while
@@ -82,14 +80,13 @@
 // wb-takt's stamps are performance.now() based; a worker's absolute times must be converted) - the module warns once when
 // the newest frame is more than 500 ms behind ts.
 //
-//   const scene = new WBSCENE.Scene({ takt, softClamp: { tau: 20 }, pairOlder: 2 });
+//   const scene = new WBSCENE.Scene({ takt, camMean: { tau: 20 }, pairOlder: 2, extrapolateObjects: 1 });
 //   scene.attach(presenter);   per game frame: scene.frame(rec);   per display frame: presenter.present({ draw: scene.drawer(ts, view) })
 //   scene.compose(ts, view) -> the composition the GPU draws, also as a CPU reference (WBSCENE.reference(c)) for a 0-mismatch test.
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '1.9';
-    let deprecated = false;
+    const VERSION = '2.0';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -182,7 +179,6 @@ const WBSCENE = (() => {
         for (const fr of frames) { const ps = fr.pass === undefined ? fr.t : fr.pass; if (ps !== lastPass) { passes.push(fr); lastPass = ps; } }
         const passMax = o.passMax === undefined ? 100 : o.passMax;
         if (frames.length && passMax > 0 && frames[frames.length - 1].t - passes[passes.length - 1].t > passMax) passes = frames;   // 1.1: no new pass for a while: every frame is one
-        if ((o.softClamp || o.smoothY) && !deprecated) { deprecated = true; if (typeof console !== 'undefined') console.warn('wb-scene: softClamp and smoothY are deprecated (camMean replaces them) and go away in 1.0'); }
         const extC = o.extrapolate || 0, extO = o.extrapolateObjects !== undefined ? o.extrapolateObjects : extC;   // 1.7
         if (takt) { const v = takt.view(ts); tv = v.tv; tvO = v.tvO; }
         if (view.latC !== undefined) { tv = ts - view.latC; tvO = ts - (view.latO !== undefined ? view.latO : view.latC); }   // 1.8: the view's own latencies (a transition blends them)
@@ -202,15 +198,6 @@ const WBSCENE = (() => {
         if (o.fixedAxis) { if (o.fixedAxis.axis === 'y') vcam[1] = o.fixedAxis.value; else vcam[0] = o.fixedAxis.value; }
         const spriteCam = vcam.slice();
         const clampedOf = (fr, i) => clampCam(fr.cam[0], fr.cam[1], fr.limits, fr.window, ext)[i];
-        if (o.softClamp && o.softClamp.tau > 0) {
-            const stopped = vcam[0] !== gcam[0] - ext.x || vcam[1] !== gcam[1] - ext.y;
-            if (stopped) { const mx = windowMean(frames, tv, o.softClamp.tau, (fr) => clampedOf(fr, 0)), my = windowMean(frames, tv, o.softClamp.tau, (fr) => clampedOf(fr, 1));
-                if (mx !== null) vcam = [mx, my]; }
-            spriteCam[0] = vcam[0]; spriteCam[1] = vcam[1];
-        }
-        if (o.smoothY && o.smoothY.tau > 0 && !(o.fixedAxis && o.fixedAxis.axis === 'y')) {
-            const my = windowMean(frames, tv, o.smoothY.tau, (fr) => clampedOf(fr, 1), { shape: 'past' }); if (my !== null) vcam[1] = my;   // sprites keep spriteCam
-        }
         if (o.camMean && o.camMean.tau > 0) {                                       // 1.2 (KIT-GAPS 46): the symmetric mean on both axes, always
             const sh = { shape: o.camMean.shape || 'box' }, cl = clampCam(gcam[0], gcam[1], lim, win, ext);
             const mx = windowMean(frames, tv, o.camMean.tau, (fr) => clampedOf(fr, 0), sh), my = windowMean(frames, tv, o.camMean.tau, (fr) => clampedOf(fr, 1), sh);

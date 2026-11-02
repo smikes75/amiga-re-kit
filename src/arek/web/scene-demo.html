@@ -67,8 +67,6 @@ let cam = [96, 40], keys = 0, done = 0, objs = OBJ.map((o) => ({ id: o.id, x: 16
 let lean = 0;                                                              // 1.9: the frog leans up to 8 px into a held key (a player answering on the screen)
 let schedule = null;                                                       // 1.5 (arek web replay): [[frame, mask], ...] - the keys by game frame
 const opts = { pairOlder: parseInt(Q.get('pair') || '0', 10) };
-if (Q.get('soft') === '1') opts.softClamp = { tau: 20 };
-if (Q.get('smooth') === '1') opts.smoothY = { tau: 60 };
 if (Q.get('mean') === '1') opts.camMean = { tau: 20 };
 if (Q.get('fine') === '1') opts.subpixel = true;                          // 1.5: the playfield shifted by the fraction of a device pixel
 if (Q.get('fresh') === '1') opts.freshSprites = true;                     // 1.9: the frog from the newest frame, no display latency
