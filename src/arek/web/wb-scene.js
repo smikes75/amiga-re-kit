@@ -1,4 +1,4 @@
-// wb-scene.js 2.1 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
+// wb-scene.js 2.1.1 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
 // after Superfrog's switch - KIT-GAPS 40-43: screen-fixed sprites, the means over the interpolated camera, a layer of
 // drawings without identity, a guard for a pass that never changes, one timebase; 1.2 kit 0.9.2 - KIT-GAPS 44-46: no
 // interpolation across a jump, sprites[].id, camMean for both axes; 1.3 kit 0.9.3 - objects[].ox/oy, the drawing's offset
@@ -14,7 +14,8 @@
 // whole numbers only on both paths - no float on the GPU (Alien Breed II G59: WebKit differed at S = 702 / 352); 2.1 kit 1.0.2 -
 // transition() (0.9.15) and freshSprites (0.9.16) removed: the author found both counterproductive in every game (G60) - a
 // mode transition keeps one scale and crops in device pixels (the presenter's), a player drawn ahead of its ground sinks
-// into walls).
+// into walls); 2.1.1 kit 1.0.3 - view.hudY: where the HUD rows go in device px when the view is cut out fractionally
+// (a game's own transition at one scale - Alien Breed SE92).
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -86,7 +87,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '2.1';
+    const VERSION = '2.1.1';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -546,7 +547,7 @@ const WBSCENE = (() => {
                     for (let y = 0; y < h.h; y++) for (let x = 0; x < c.W; x++) { const s = (y * w0 + cols[x]) * 4, t = (y * c.W + x) * 4; rgba[t] = h.rgba[s]; rgba[t + 1] = h.rgba[s + 1]; rgba[t + 2] = h.rgba[s + 2]; rgba[t + 3] = 255; }
                     wide = h._wide = { W: c.W, src: h.rgba, split: h.split, rgba }; this.stats.hudWidened = (this.stats.hudWidened || 0) + 1;
                 }
-                const hd = Math.round(h.h * S), ty = side < 0 ? y0 - hd : y0 + Hd, vy = d.h - ty - hd;
+                const hd = Math.round(h.h * S), ty = view.hudY ? view.hudY[i] : (side < 0 ? y0 - hd : y0 + Hd), vy = d.h - ty - hd;   // 2.1.1: view.hudY = [top, bottom] device px of the HUD rows' top-left (a transition's fractional cut-out - Alien Breed SE92)
                 gl.viewport(x0, vy, Wd, hd); gl.uniform2f(u.u_size, Wd, hd);
                 gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.texHud[i]);
                 if (!this.hudUp) this.hudUp = [null, null];

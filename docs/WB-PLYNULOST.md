@@ -1,6 +1,6 @@
 # WB-PLYNULOST - the canon of a smooth picture and sound in the browser (kit 0.8.x - 1.0)
 
-**Frozen at kit 1.0 (2026-11-02):** the display layer's contract is wb-takt 1.4, wb-obraz 1.6, wb-scene 2.1, wb-zvuk
+**Frozen at kit 1.0 (2026-11-02):** the display layer's contract is wb-takt 1.4, wb-obraz 1.7, wb-scene 2.1, wb-zvuk
 1.1 / wb-zvuk-out 1.0, WBLONGRUN 1.5 and `arek web test / smooth / replay` as they stand. From here it changes only for
 a gap a game measures (KIT-GAPS), never for a new idea - those wait after 1.0 (run-ahead, a per-sprite shift). What a
 game writes is on one page: `WB-RECIPE.md`; this file stays the reasons and the measurements. 2.0 of the scene removed
@@ -35,6 +35,20 @@ player drawn from a newer frame than its ground leads the ground by the camera's
 stop and turn and sinks into a wall; the gain was 10-15 ms (Chromium 61.4 -> 49.5, WebKit 61.3 -> 44.9 ms key ->
 player), under one 60 Hz frame - not a fault of the module but of the idea: the sprite and its ground move together.
 The whole-number sampling (2.0.1) and `player()` stay. The frozen contract is now wb-scene 2.1.
+Of Alien Breed SE92's three gaps the author took G3 (kit 1.0.3, wb-obraz 1.7): `present({ source | pixels + size,
+rect, smooth })` draws a source of any size into a rectangle of the content on both paths (whole-number nearest or
+linear; a page test holds the WebGL and the 2D path to the same pixels) - a hires title, an interlude or a terminal
+no longer needs the page's own program; G1 (a transparent object) and G2 (a HUD at another scale) stay the page's.
+Alien Breed SE92 on 1.0.2 (a237315) with its own transition back - one S = max of both modes for the whole 450 ms, the
+presenter sized once to the larger view, the scene drawing ceil(ext) and black cropping the fractional cut-out in device
+pixels, CSS blending the size - measured GPU against the reference 0 (Chromium and WebKit, S 1-4 incl. fractional, with
+and without the shift, 4 x 29 checks), replay EQUAL, web test 286 / 0, smooth with the shift: camera 0.006 / 0.000 px,
+key -> camera 23.5 / 28 ms, key -> player 47 / 46 ms. Its one note: the scene drew the HUD rows at the whole-number
+view's edges, so a fractional cut-out clipped half a row of text - `view.hudY` (2.1.1) puts the rows where the page says.
+Superfrog on 1.0.2 (7af6f45): the kit's transition and freshSprites gone from the page, its own transition stays,
+`player()` gives the frog's sprite indices as the image; replay unchanged, key -> player 12-14 ms median; the camera's
+jitter moves with the machine's load (0.029-0.099 around the 0.05 limit) and is the same for wb-scene 2.1 and 1.9 run
+in pairs (0.056 / 0.056, 0.029 / 0.029) - the whole-number sampling changed nothing in the motion.
 Alien Breed SE92 confirmed G59 and its fix on 1.0.1 (83f5a70): 29 checks of 24.4 M pixels each at S 1, 1.5, 702/352, 2,
 2.37, 2.5, 3, 3.1415 and 4, with and without the shift - 0 mismatches in Chromium and WebKit with 2.0.1, where 2.0
 had given WebKit 2 146 differing pixels with the shift (Chromium 0); replay and the contract unchanged.

@@ -24,7 +24,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
   verified, an original retail disk is not yet; AGA is not supported).
   Original and Enhanced modes, one or two players.
 - **Superfrog** (Team17, 1993): in verification, not playable yet.
-- **The kit:** version 1.0.2 on PyPI, 2502 tests. Extracted from five game
+- **The kit:** version 1.0.3 on PyPI, 2504 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -44,7 +44,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2502 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2504 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -136,7 +136,8 @@ arek web smooth http://127.0.0.1:8920/smooth-demo.html  # the canon's limits in 
 #    1.7: extrapolateObjects (the objects past the last pass, a fixed objects' latency), the HUD cached; wb-takt 1.3 fixed latencies;
 #    1.8: the GPU equal to the reference at any scale (whole-number sampling since 2.0.1); arek web smooth reports key -> player when
 #    the page gives player(); 2.0 (kit 1.0): the contract frozen - docs/WB-RECIPE.md is the one page a game writes from; 2.1 (kit 1.0.2):
-#    the 0.9.15 transition and 0.9.16 freshSprites removed - counterproductive in every game (G60), the presenter's transition stays
+#    the 0.9.15 transition and 0.9.16 freshSprites removed - counterproductive in every game (G60), the presenter's transition stays;
+#    wb-obraz 1.7 (kit 1.0.3): present({source | pixels + size, rect, smooth}) - a source of any size into a rectangle of the content (a hires title, an interlude)
 arek web replay http://127.0.0.1:8920/scene-demo.html --hz 50,60,120,144 --frames 300 --route 1:120,2:60,0:120
 #    the display never touches the game: the page under a virtual clock at four rates, the same inputs by game frame, one state fingerprint (H)
 arek docs WB-PLYNULOST                                   # the kit's documents ship with it (arek docs: the list; --path: the file)

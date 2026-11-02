@@ -15,6 +15,8 @@
 // canvas shows the last picture again at once (a page drawing only on a new game frame blinked at a mode change in Safari).
 // 1.5.2: the CRT layer is kept above the game canvas (a canvas appended after .crt-layer hid the CRT - Superfrog).
 // 1.6: a fractional S (a mode transition, wb-scene 1.8): the framebuffer and the content are round(W * S) x round(H * S).
+// 1.7 (kit 1.0.3, Alien Breed SE92 G3): present({ source | pixels + size, rect: [x, y, w, h] game px, smooth }) - a source of
+// any size (a hires title, an interlude, a terminal) into a rectangle of the content, nearest by whole numbers or linear.
 // No game data. Works as a <script> (global WBOBRAZ, also globalThis.WBOBRAZ - an ES module that imports
 // nothing can read it there), as CommonJS (require) and in Node for tests.
 // Projects copy this file (`arek web copy DIR`) and keep its sha256 in their docs.
@@ -30,7 +32,7 @@
 // arek web test needs `pip install amiga-re-kit[web]` and `python -m playwright install chromium`.
 'use strict';
 const WBOBRAZ = (() => {
-    const VERSION = '1.6';
+    const VERSION = '1.7';
     const CRT_DETAILS = ['fine', 'standard', 'strong'];
     const CRT_SHAPES = ['lines', 'grid'];
     // 1.3 values (Alien Breed / Turrican II, 2026-10-22: larger steps between the levels)
@@ -190,6 +192,11 @@ const WBOBRAZ = (() => {
                '  for (int k = -r; k <= r; k++) { float w = exp(-float(k * k) / (2.0 * sigma * sigma));\n' +
                '    acc += w * texture(tex, (gl_FragCoord.xy + vec2(float(k), 0.0)) / size).rgb; wsum += w; }\n' +
                '  o = vec4(acc / wsum, 1.0); }',
+        rect: '#version 300 es\nprecision highp float; uniform sampler2D tex; uniform ivec4 rect; uniform ivec2 src; uniform int lin; uniform int fh; out vec4 o;\n' +
+              'void main() { ivec2 d = ivec2(gl_FragCoord.xy); int x = d.x - rect.x, y = (fh - 1 - d.y) - rect.y;\n' +
+              '  if (x < 0 || y < 0 || x >= rect.z || y >= rect.w) discard;\n' +
+              '  if (lin == 1) { o = vec4(texture(tex, vec2((float(x) + 0.5) / float(rect.z), (float(y) + 0.5) / float(rect.w))).rgb, 1.0); return; }\n' +
+              '  o = vec4(texelFetch(tex, ivec2((x * src.x) / rect.z, (y * src.y) / rect.w), 0).rgb, 1.0); }',
         final: '#version 300 es\nprecision highp float; uniform sampler2D tex; uniform vec2 size; uniform vec2 content; uniform float pad;\n' +
                'uniform float par; uniform float sigma; uniform vec4 look; out vec4 o;\n' +
                'vec3 fetch(float x, float y) { vec2 uv = vec2((x + 0.5) / par, floor(y) + 0.5) / size;\n' +
@@ -251,13 +258,13 @@ const WBOBRAZ = (() => {
         _glInit(gl) {
             this.g = gl;
             this.vao = gl.createVertexArray();
-            this.pScale = this._program(gl, GLSL.scale); this.pBlur = this._program(gl, GLSL.blurh); this.pFinal = this._program(gl, GLSL.final);
-            this.tFrame = this._tex(gl); this.tFbo = this._tex(gl); this.tBlur = this._tex(gl);
+            this.pScale = this._program(gl, GLSL.scale); this.pBlur = this._program(gl, GLSL.blurh); this.pFinal = this._program(gl, GLSL.final); this.pRect = this._program(gl, GLSL.rect);
+            this.tFrame = this._tex(gl); this.tFbo = this._tex(gl); this.tBlur = this._tex(gl); this.tRect = this._tex(gl);
             this.fbo = gl.createFramebuffer(); this.fboBlur = gl.createFramebuffer();
             this.u = {};
-            for (const [name, pr] of [['scale', this.pScale], ['blur', this.pBlur], ['final', this.pFinal]]) {
+            for (const [name, pr] of [['scale', this.pScale], ['blur', this.pBlur], ['final', this.pFinal], ['rect', this.pRect]]) {
                 this.u[name] = {};
-                for (const n of ['tex', 'geo', 'sigma', 'size', 'content', 'pad', 'par', 'look']) this.u[name][n] = gl.getUniformLocation(pr, n);
+                for (const n of ['tex', 'geo', 'sigma', 'size', 'content', 'pad', 'par', 'look', 'rect', 'src', 'lin', 'fh']) this.u[name][n] = gl.getUniformLocation(pr, n);
             }
             this.fboSize = [0, 0]; this.frameSize = [0, 0]; this.copy = null;
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -352,6 +359,7 @@ const WBOBRAZ = (() => {
             content = content || {};
             const W = this.W, H = this.H, S = this.S;
             if (!W || !H) return false;
+            if (content.rect && (content.source || content.pixels)) return this._rect(content);
             if (!this.g) {
                 if (content.draw && !content.pixels && !content.source) return false;
                 const g = this.ctx, [bw, bh] = this.backing;
@@ -373,6 +381,47 @@ const WBOBRAZ = (() => {
             if (content.draw) { gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo); gl.viewport(0, 0, fw, fh); content.draw(gl, this.fbo, { w: fw, h: fh }); }
             this._finish();
             this.last = { kind: (content.pixels || content.source) && !content.draw ? 'frame' : 'fbo' };
+            return true;
+        }
+        /** 1.7 (Alien Breed SE92 G3): a source of ANY size (a canvas / image / bitmap, or pixels with size [w, h]) into a
+         *  rectangle rect = [x, y, w, h] of the W x H content, in game pixels: a hires title, an interlude, a terminal
+         *  screen. The device pixel shows source pixel (i * sw) div dw (whole numbers), or the texture's linear sample
+         *  with smooth: true. The rest of the content is black; draw (if any) comes on top; look and the aspect apply as
+         *  always. The last picture is not kept for a resize - present again after size(). */
+        _rect(content) {
+            const S = this.S, [rx, ry, rw, rh] = content.rect, sz = content.size || [content.source.width, content.source.height];
+            const dr = [Math.round(rx * S), Math.round(ry * S), Math.round(rw * S), Math.round(rh * S)];
+            if (!this.g) {
+                const g = this.ctx, [bw, bh] = this.backing, par = this.par;
+                let src = content.source;
+                if (content.pixels) {
+                    if (!this.rectFrame) this.rectFrame = document.createElement('canvas');
+                    if (this.rectFrame.width !== sz[0] || this.rectFrame.height !== sz[1]) { this.rectFrame.width = sz[0]; this.rectFrame.height = sz[1]; }
+                    const p = content.pixels.data || content.pixels;
+                    this.rectFrame.getContext('2d').putImageData(content.pixels.data ? content.pixels : new ImageData(new Uint8ClampedArray(p.buffer, p.byteOffset, sz[0] * sz[1] * 4), sz[0], sz[1]), 0, 0); src = this.rectFrame;
+                }
+                g.fillStyle = '#000'; g.fillRect(0, 0, bw, bh);
+                g.imageSmoothingEnabled = !!content.smooth; if (content.smooth) g.imageSmoothingQuality = 'high';
+                g.drawImage(src, 0, 0, sz[0], sz[1], Math.round(rx * S * par), dr[1], Math.round(rw * S * par), dr[3]);
+                this.last = null;
+                return true;
+            }
+            const gl = this.g, [fw, fh] = this.fboSize;
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.tRect);
+            if (content.pixels) {
+                let p = content.pixels.data || content.pixels;
+                if (isShared(p)) { if (!this.copy || this.copy.length !== p.length) this.copy = new Uint8Array(p.length); this.copy.set(p); p = this.copy; }
+                if (!(p instanceof Uint8Array)) p = new Uint8Array(p.buffer, p.byteOffset, p.byteLength);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, sz[0], sz[1], 0, gl.RGBA, gl.UNSIGNED_BYTE, p);
+            } else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, content.source);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo); gl.viewport(0, 0, fw, fh); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+            this._pass(this.pRect, this.fbo, fw, fh, this.tRect);
+            gl.uniform1i(this.u.rect.tex, 0); gl.uniform4i(this.u.rect.rect, dr[0], dr[1], dr[2], dr[3]); gl.uniform2i(this.u.rect.src, sz[0], sz[1]);
+            gl.uniform1i(this.u.rect.lin, content.smooth ? 1 : 0); gl.uniform1i(this.u.rect.fh, fh);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+            if (content.draw) { gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo); gl.viewport(0, 0, fw, fh); content.draw(gl, this.fbo, { w: fw, h: fh }); }
+            this._finish();
+            this.last = { kind: 'fbo' };
             return true;
         }
         fill(kind) {

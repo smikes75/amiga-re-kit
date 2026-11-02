@@ -22,7 +22,7 @@ def js(expr):
 
 
 def test_version_and_scale():
-    assert js('O.VERSION') == '1.6'
+    assert js('O.VERSION') == '1.7'
     assert js('O.deviceScale(2, 320, 320, 1.25, 10)') == 3          # round(2 * 1.25)
     assert js('O.deviceScale(2, 336, 448, 2, 10)') == 3             # wider window: zoom counts in W0
     assert js('O.deviceScale(6, 320, 320, 2, 2.4)') == 4            # limited by the window
@@ -104,7 +104,7 @@ def test_web_copy_and_package_files(tmp_path, capsys):
     assert cli.main(['web', 'copy', str(tmp_path / 'web')]) == 0
     out = capsys.readouterr().out
     data = (tmp_path / 'web' / 'wb-obraz.js').read_bytes()
-    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.6' in out
+    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.7' in out
 
 
 def test_png_decoder_reads_the_kits_png():
@@ -231,3 +231,70 @@ def test_crt_layer_stays_above_the_game_canvas(tmp_path):
     assert len(r['warns']) == 1 and 'moved above it' in r['warns'][0]
     r, order = out['']
     assert r['order'] is True and r['warns'] == [] and order is True
+
+
+def test_present_rect_on_the_2d_path():
+    """1.7 (Alien Breed SE92 G3): a source of another size into a rectangle of the content - the 2D path clears the backing
+    and draws the source into rect * S (* par horizontally), nearest unless smooth."""
+    r = js("""(() => { const calls = []; const g = { fillStyle: '', imageSmoothingEnabled: true, imageSmoothingQuality: '', fillRect(x, y, w, h) { calls.push(['fill', this.fillStyle, x, y, w, h]); },
+        drawImage(src, sx, sy, sw, sh, dx, dy, dw, dh) { calls.push(['draw', src.width, src.height, sx, sy, sw, sh, dx, dy, dw, dh, this.imageSmoothingEnabled]); }, putImageData() {} };
+        const c = { width: 0, height: 0, style: {}, getContext(kind) { return kind === '2d' ? g : null; } };
+        const p = new O.Presenter(c, { gl: 'off' }); p.size(8, 4, 2, 1, 1);
+        const src = { width: 640, height: 256 };
+        const ok = p.present({ source: src, rect: [1, 0, 6, 4] }); const ok2 = p.present({ source: src, rect: [0, 0, 8, 4], smooth: true });
+        return { ok, ok2, calls: calls.filter((k) => k[0] === 'draw'), last: p.last }; })()""")
+    assert r['ok'] is True and r['ok2'] is True and r['last'] is None
+    assert r['calls'][0] == ['draw', 640, 256, 0, 0, 640, 256, 2, 0, 12, 8, False]        # rect [1, 0, 6, 4] at S 2: device (2, 0, 12, 8), nearest
+    assert r['calls'][1] == ['draw', 640, 256, 0, 0, 640, 256, 0, 0, 16, 8, True]
+
+
+RECT_PAGE = """<!doctype html><meta charset="utf-8"><body style="margin:0;background:#000">
+<canvas id="c" style="display:block;image-rendering:pixelated"></canvas><script src="wb-obraz.js"></script><script>
+const GL = new URLSearchParams(location.search).get('gl'), W = 8, H = 4;
+const pr = new WBOBRAZ.Presenter(document.getElementById('c'), { gl: GL === '1' ? 'on' : 'off' });
+pr.size(W, H, 4, 1, 1);
+const src = document.createElement('canvas'); src.width = 2; src.height = 1;
+const g = src.getContext('2d'); g.fillStyle = '#ff0000'; g.fillRect(0, 0, 1, 1); g.fillStyle = '#0000ff'; g.fillRect(1, 0, 1, 1);
+window.show = (smooth, rect) => pr.present({ source: src, rect, smooth });
+window.showPixels = () => pr.present({ pixels: new Uint8Array([0, 255, 0, 255, 255, 255, 0, 255]), size: [2, 1], rect: [2, 1, 4, 2] });
+window.ready = true;
+</script>"""
+
+
+def test_present_rect_on_both_paths(tmp_path):
+    """1.7: a 2 x 1 source (red | blue) into the whole 8 x 4 content at S 4 - the left half red, the right blue on the WebGL
+    path and on the 2D path alike (nearest: a hard edge); with smooth the edge blends; pixels + size into a sub-rectangle
+    leave the rest black."""
+    pytest.importorskip('playwright')
+    import threading
+    from playwright.sync_api import sync_playwright
+    from arek import web
+    shutil.copy(WEB / 'wb-obraz.js', tmp_path / 'wb-obraz.js')
+    (tmp_path / 'q.html').write_text(RECT_PAGE)
+    srv = web.serve(tmp_path, 0)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with sync_playwright() as pw:
+            br = pw.chromium.launch()
+            for gl in (0, 1):
+                page = br.new_page(viewport={'width': 100, 'height': 60})
+                page.goto('http://127.0.0.1:%d/q.html?gl=%d' % (port, gl))
+                page.wait_for_function('window.ready')
+                assert page.evaluate('show(false, [0, 0, 8, 4])') is True
+                page.wait_for_timeout(50)
+                w, h, rows = webtest.png_rgb(page.screenshot())
+                assert rows[8][4] == (255, 0, 0) and rows[8][15] == (255, 0, 0) and rows[8][16] == (0, 0, 255) and rows[8][31] == (0, 0, 255), (gl, rows[8][14:18])
+                assert page.evaluate('show(true, [0, 0, 8, 4])') is True
+                page.wait_for_timeout(50)
+                w, h, rows = webtest.png_rgb(page.screenshot())
+                mid = rows[8][16]
+                assert 0 < mid[0] < 255 and 0 < mid[2] < 255 and rows[8][1] == (255, 0, 0) and rows[8][30] == (0, 0, 255), (gl, mid)
+                assert page.evaluate('showPixels()') is True
+                page.wait_for_timeout(50)
+                w, h, rows = webtest.png_rgb(page.screenshot())
+                assert rows[1][1] == (0, 0, 0) and rows[6][10] == (0, 255, 0) and rows[6][20] == (255, 255, 0) and rows[14][10] == (0, 0, 0), (gl, rows[6][8:24])
+                page.close()
+            br.close()
+    finally:
+        srv.shutdown()

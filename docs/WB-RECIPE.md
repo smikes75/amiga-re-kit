@@ -1,7 +1,7 @@
 # WB-RECIPE - the display layer of the kit for a new game, on one page (kit 1.0)
 
 The canon `WB-PLYNULOST.md` says WHY every piece is as it is, with the measurements behind it. This page says WHAT a
-game writes. The contract is frozen at kit 1.0: wb-takt 1.4, wb-obraz 1.6, wb-scene 2.1 (kit 1.0.2), wb-zvuk
+game writes. The contract is frozen at kit 1.0: wb-takt 1.4, wb-obraz 1.6, wb-scene 2.1 (kit 1.0.2), wb-obraz 1.7 (kit 1.0.3), wb-zvuk
 1.1, WBLONGRUN 1.5; it changes only for a gap a game measures (KIT-GAPS), never for a new idea - those wait after 1.0.
 (Revised with Alien Breed SE92's notes from its migration, R1-R15.)
 
@@ -32,6 +32,7 @@ pr.present({ draw: scene.drawer(ts, view) });                // view = { W, H, S
 //   the top HUD's rows x S (an odd window width stays odd: extX whole); the presenter sized W x (H + HUD rows) at S
 //   without WebGL2 the page composes at S = 1 and gives present({pixels}) the W x H reference (the presenter scales);
 //   the Original mode may instead show the game's exact picture through present({pixels}) - the scene is for the wider view
+//   view.hudY = [top, bottom] (device px of each HUD row's top-left) when a transition cuts the view out fractionally
 ```
 
 The sound: an engine in a thread (`arek host engine --thread`, the page served with COOP / COEP) writes its ring in
@@ -81,9 +82,11 @@ geometry, the CRT, one canvas under the CRT layer).
 
 ## What the kit does not do (yet)
 
-A screen of another size than the game's window (a hires 640-px title, an interlude) goes through the page's own
-drawing or `present({pixels})` of exactly W x H; a transparent object (a fade-in), a HUD drawn at another scale than
-the playfield: gaps a game may open (Alien Breed SE92 G1-G3), decided by the author.
+A screen of another size than the game's window (a hires 640-px title, an interlude, a terminal) goes through
+`pr.present({ source | pixels + size: [w, h], rect: [x, y, w, h] /* game px of the content */, smooth })` (wb-obraz
+1.7, kit 1.0.3: nearest by whole numbers, or linear with `smooth`; the rest black; present again after a `size()`).
+A transparent object (a fade-in) and a HUD at another scale than the playfield stay the page's (Alien Breed SE92's
+G1 and G2 - the author decided against them in the kit).
 
 ## What is not in the kit on purpose
 
