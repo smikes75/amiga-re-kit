@@ -69,6 +69,7 @@ def test_key_to_player_latency_on_the_scene_page():
     assert 'error' not in r, r
     assert r['player_ms'] is not None and r['player_ms'] < 120 and len(r['player_all']) >= 3, r
     assert 'key -> player' in websmooth.format_result('chromium', r)
+    assert 'p[2] !== p0[2]' in websmooth.PLAYER_JS                                        # 1.5.1 (KIT-GAPS 53): a change of the player's image counts too
     r0 = _run(True, page='smooth-demo.html', seconds=2, stalls=1, stall_ms=50)
     assert r0['player_ms'] is None and 'key -> player' not in websmooth.format_result('chromium', r0)
 

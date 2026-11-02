@@ -7,6 +7,22 @@ game writes is on one page: `WB-RECIPE.md`; this file stays the reasons and the 
 `softClamp` and `smoothY` (camMean replaced them in 1.2, no game set them); the adaptive objects' latency stays an
 opt-in (`latOMax` above `latO`).
 
+After 1.0 (gaps only): 1.0.1 - Superfrog on 0.9.16 (7f96dbf: both switches, the kit's transition 0 mismatches in 6
+checks half way at S 3.99-4.01, W 376-478, with freshSprites too) found KIT-GAPS 52: `widenColumns` cropped a HUD
+wider than the view from the right (W < w0 kept the left columns), so the transition's intermediate views lost the
+HUD's right group - now the columns after each split go, as the widening repeats them; and 53: key -> player in a
+game whose camera tracks the player measured the camera, not the player (the sprite does not move on the screen; its
+picture changes first: with freshSprites 8.3 ms sooner, 83.3 -> 75.0 ms under a virtual clock, 18 presses) - `player()`
+may give the sprite's image as a third value and the probe counts its change. Alien Breed II on 1.0.0 (M47) found
+G59: in WebKit one step of the kit's transition (extX 11, extY 5, S = 702 / 352) drew 802 of 346 086 pixels differently
+from the reference while Chromium and every other S gave 0 - WebKit's shader compiler fuses a multiply-add, so a
+float32 product plus the camera's fraction rounds once there and twice on the CPU. The sampling is whole numbers only
+now (2.0.1): the camera in whole device pixels, game x = floor((dx + camd) * W / Wd) with W and Wd whole, an image
+pixel = (i * w) div qw; no float is left in it on either path, so any GPU equals the reference at any scale (the
+kit's test runs the fractional case in Chromium and WebKit). Alien Breed SE92's migration (kit-scena branch) read
+the recipe cold and listed what it lacked (R1-R15, folded into WB-RECIPE.md) and three gaps of its own: a transparent
+object (G1), a HUD at another scale (G2), a source of another size into a rectangle (G3) - the author decides.
+
 The rebuilds of the kit (Superfrog, Alien Breed, Turrican II, Alien Breed II) show a game whose logic runs at 50 Hz on
 displays of 60, 120 or 144 Hz, in Chromium and in Safari, on weaker machines too. The canon says which layer does
 what, which numbers a page must reach and how the kit measures them. Written from the Alien Breed II project's
@@ -79,7 +95,7 @@ The page's hooks (`globalThis.WBLONGRUN` 1.1; `arek web longrun` reads the same 
 | `focus` (optional, 1.1) | a selector or `[x, y]` to click into the game (default the largest canvas; G41: a page's menu at the corner pauses the game) |
 | `prepare()` (optional, 1.1) | brings the page into the game (past an intro and a menu); may return a promise; `ready()` is then awaited (G42) |
 | `route` (optional, 1.1) | `[[key, ms], ...]` held in turn and cycled while sampling (a maze: short free stretches; G42); the latency probes alternate left and right |
-| `player()` (optional, 1.5, kit 0.9.16) | `[x, y]` the player as drawn on the screen in this display frame: a second latency, key -> player, reported beside key -> camera and not judged (a page drawing its player without display latency - wb-scene 1.9 `freshSprites` - answers sooner than its camera) |
+| `player()` (optional, 1.5, kit 0.9.16) | `[x, y]` or `[x, y, image]` (1.5.1, Superfrog KIT-GAPS 53) the player as drawn on the screen in this display frame: a second latency, key -> player, reported beside key -> camera and not judged (a page drawing its player without display latency - wb-scene 1.9 `freshSprites` - answers sooner than its camera; a player the camera tracks does not move on the screen - it changes its picture first, so the image counts as the third value) |
 | `interp()` (optional, 1.4) | false when the page draws the game's frames as they are, without interpolation (an original mode); `--no-interp` says the same for a page without the hook |
 
 1.4 (kit 0.8.5, Superfrog KIT-GAPS 38): without interpolation a 50 Hz game on a 60 Hz display repeats every sixth

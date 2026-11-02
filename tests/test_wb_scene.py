@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.0' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.0.1' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -65,6 +65,8 @@ def test_colours_and_hud_widening():
     assert js('S.x17(0xfff)') == [255, 255, 255, 255] and js('S.x17(0x123)') == [17, 34, 51, 255]
     assert js('Array.from(S.widenColumns(4, 8, [1]))') == [0, 1, 1, 1, 1, 1, 2, 3]   # the cut column repeats
     assert js('Array.from(S.widenColumns(4, 4, [1]))') == [0, 1, 2, 3]
+    assert js('Array.from(S.widenColumns(8, 6, [2]))') == [0, 1, 2, 5, 6, 7]                  # 2.0.1 (KIT-GAPS 52): narrower - the columns after the cut go, the right group stays
+    assert js('Array.from(S.widenColumns(8, 5, [2, 5]))') == [0, 1, 2, 5, 7] and js('Array.from(S.widenColumns(8, 6, []))')[-1] == 7
     assert js('S.fnv1a(new Uint8Array([1, 2, 3]))') == js('S.fnv1a(new Uint8Array([1, 2, 3]))') != js('S.fnv1a(new Uint8Array([1, 2, 4]))')
 
 
@@ -147,14 +149,14 @@ def test_subpixel_shift_of_the_playfield():
         const R = (x, y) => px[(y * c.W * 2 + x) * 4], G = (x, y) => px[(y * c.W * 2 + x) * 4 + 1];
         return { sub: c.sub, dsub: d.sub, cam: c.cam, same, obj: c.objs[0].x, r0: [0, 1, 2, 3, 4, 5, 6, 7].map((x) => R(x, 0)), r2: [0, 1, 2, 3, 4, 5, 6, 7].map((x) => R(x, 2)), r3: [R(3, 3), R(7, 2), G(1, 1), G(1, 3)] }; })()"""
     r = js(with_mk(body % (0, 5, 5)))                                                   # camera x 0.25 game px = 0.5 device px: wx = 128
-    assert r['sub'] == {'cam': [0, 0], 'w': [128, 0]} and r['dsub'] is None and r['cam'] == [0.25, 0] and r['obj'] == 50 and r['same'] is False
+    assert r['sub'] == {'cam': [0, 0], 'd': [0, 0], 'w': [128, 0]} and r['dsub'] is None and r['cam'] == [0.25, 0] and r['obj'] == 50 and r['same'] is False
     assert r['r0'] == [20, 15, 10, 15, 40, 40, 10, 10] and r['r2'] == [20, 15, 10, 10, 10, 10, 10, 10]   # the window's edges (it sits at B's camera, x 1) halfway between the colours; the sprite on top at 4, 5
     r = js(with_mk(body % (1, 5, 5)))                                                   # camera (0.25, 0.25): both weights 128, four taps
-    assert r['sub'] == {'cam': [0, 0], 'w': [128, 128]} and r['r0'][:4] == [20, 20, 20, 20] and r['r3'] == [13, 10, 0, 1]   # (10 + 20 + 10 + 10 + 2) / 4; the palette row blends too
+    assert r['sub'] == {'cam': [0, 0], 'd': [0, 0], 'w': [128, 128]} and r['r0'][:4] == [20, 20, 20, 20] and r['r3'] == [13, 10, 0, 1]   # (10 + 20 + 10 + 10 + 2) / 4; the palette row blends too
     r = js(with_mk(body % (1, 0, 0)))                                                   # on the device grid: the same picture as without the option
-    assert r['sub'] == {'cam': [0, 0], 'w': [0, 0]} and r['same'] is True
+    assert r['sub'] == {'cam': [0, 0], 'd': [0, 0], 'w': [0, 0]} and r['same'] is True
     r = js(with_mk(body % (1, 20, 20)))
-    assert r['sub'] == {'cam': [1, 1], 'w': [0, 0]} and r['same'] is True
+    assert r['sub'] == {'cam': [1, 1], 'd': [2, 2], 'w': [0, 0]} and r['same'] is True
 
 
 def test_objects_move_with_the_ground_under_subpixel():
@@ -233,6 +235,27 @@ def test_transition_views_and_any_scale():
     assert r[0] == 200 and r[1] == [30, 30, 30, 20, 20, 40, 40, 40, 10, 10] and r[2] == r[1] and r[3] == [10, 10, 10, 10] and r[4] == 0 and r[5] == 1
 
 
+@pytest.mark.parametrize('browser', ['chromium', 'webkit'])
+def test_gpu_equals_the_reference_at_a_fractional_scale_in_both_browsers(browser):
+    """2.0.1 (Alien Breed II G59): WebKit's shader compiler fused a multiply-add at S = 702 / 352 and 802 pixels differed; the
+    sampling is whole numbers only now, so any GPU equals the reference at any scale - checked at a fractional S with the
+    shift and the objects glued, in Chromium and WebKit."""
+    def go(p):
+        p.keyboard.down('ArrowRight')
+        p.wait_for_timeout(500)
+        res = [p.evaluate('wbSceneTest.compare()') for _ in range(3)]
+        p.keyboard.up('ArrowRight')
+        return res, p.evaluate('wbSceneTest.gl()')
+    try:
+        res, gl = _run_page('?s=1.9943&fine=1&pair=2', go, browser)
+    except Exception as e:                                    # a browser not installed for playwright
+        pytest.skip('no %s: %s' % (browser, str(e)[:80]))
+    if not gl:
+        pytest.skip('no WebGL2 in this %s' % browser)
+    for r in res:
+        assert r['bad'] == 0 and r['pixels'] > 100000 and r['glErr'] == 0, r
+
+
 def test_gpu_equals_the_reference_during_a_transition():
     """1.8: half way through a mode transition the scale is fractional (2 -> 3 over 450 ms); the GPU band equals the
     reference there too, and at the end the view is the target's."""
@@ -284,7 +307,7 @@ def test_options_fixed_axis_and_the_symmetric_mean():
     assert abs(r[1][1] - 15) < 1e-9 and r[2][1] == 15                                  # the symmetric mean over linear motion is the motion itself: no lag
 
 
-def _run_page(url_tail, fn):
+def _run_page(url_tail, fn, browser='chromium'):
     pytest.importorskip('playwright')
     from playwright.sync_api import sync_playwright
     srv = web.serve(str(WEB), 0, isolated=True)
@@ -292,7 +315,7 @@ def _run_page(url_tail, fn):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         with sync_playwright() as pw:
-            b = pw.chromium.launch()
+            b = getattr(pw, browser).launch()
             p = b.new_page(viewport={'width': 1100, 'height': 700})
             errs = []
             p.on('pageerror', lambda e: errs.append(str(e)))

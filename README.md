@@ -24,7 +24,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
   verified, an original retail disk is not yet; AGA is not supported).
   Original and Enhanced modes, one or two players.
 - **Superfrog** (Team17, 1993): in verification, not playable yet.
-- **The kit:** version 1.0.0 on PyPI, 2504 tests. Extracted from five game
+- **The kit:** version 1.0.1 on PyPI, 2503 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive

@@ -7,7 +7,9 @@ The page provides ``globalThis.WBLONGRUN`` (1.1; ``arek web longrun`` reads the 
   ready() -> bool; cam() -> [x, y] the camera in game pixels in this display frame (fractional when interpolated);
   objs() -> [[id, x, y], ...] the objects on screen with an identity, in the world in game pixels so that
   x - cam()[0] is where the object is drawn on the screen (optional; 1.2, G44: objects are judged on the screen);
-  player() -> [x, y] the player as drawn on the screen (optional; 1.5: key -> player latency, reported, not judged);
+  player() -> [x, y] or [x, y, image] the player as drawn on the screen (optional; 1.5: key -> player latency, reported, not
+  judged; 1.5.1, Superfrog KIT-GAPS 53: a third value names the sprite's image - a player the camera tracks does not move on
+  the screen, it changes its picture first, so a change of the image counts too);
   scale() -> S, device pixels per game pixel, when the page draws on whole device pixels (optional, 1.2: an object's
   steps on the screen are then judged within 1/S);
   missing() -> display frames drawn without the next game frame / pass for the interpolation, so far (optional);
@@ -68,7 +70,7 @@ PLAYER_JS = """([code, maxMs]) => new Promise((res) => { const H = globalThis.WB
     window.dispatchEvent(ev('keydown')); document.dispatchEvent(ev('keydown'));
     const f = () => { const dt = performance.now() - t0, p = H.player();
         if (out()) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(-1); }
-        else if (p && (Math.abs(p[0] - p0[0]) > 0.01 || Math.abs(p[1] - p0[1]) > 0.01)) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(dt); }
+        else if (p && (Math.abs(p[0] - p0[0]) > 0.01 || Math.abs(p[1] - p0[1]) > 0.01 || (p.length > 2 && p[2] !== p0[2]))) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(dt); }
         else if (dt > maxMs) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(null); }
         else requestAnimationFrame(f); };
     requestAnimationFrame(f); })"""

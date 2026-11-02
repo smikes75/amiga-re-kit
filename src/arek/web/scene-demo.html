@@ -28,7 +28,7 @@
 'use strict';
 const Q = new URLSearchParams(location.search);
 const W0 = 320, H0 = 200, EXTX = 64, EXTY = 28, W = W0 + 2 * EXTX, H = H0 + 2 * EXTY, HUD = 12;
-const S = Math.max(1, Math.min(4, parseInt(Q.get('s') || '2', 10)));
+const S = Math.max(1, Math.min(4, parseFloat(Q.get('s') || '2')));   // a fractional S reproduces a transition's step (G59)
 const COLS = 64, ROWS = 32, TILES = 8;
 const limits = { x0: 0, x1: COLS * 16 - W0, y0: 0, y1: ROWS * 16 - H0 };
 // the map: 8 tiles of 16 x 16 indices, cells by a fixed pseudo-random sequence
