@@ -49,9 +49,30 @@ Superfrog on 1.0.2 (7af6f45): the kit's transition and freshSprites gone from th
 `player()` gives the frog's sprite indices as the image; replay unchanged, key -> player 12-14 ms median; the camera's
 jitter moves with the machine's load (0.029-0.099 around the 0.05 limit) and is the same for wb-scene 2.1 and 1.9 run
 in pairs (0.056 / 0.056, 0.029 / 0.029) - the whole-number sampling changed nothing in the motion.
+Alien Breed SE92 on 1.0.3 (6daa8a1): its screens outside a level, the hires ones included, go through
+`present({ source, rect })` and its own GL program is gone - the loading screen at S 2 byte-identical to it in both
+modes (at another S a hires column can differ: the kit takes source pixel (i * sw) div dw, the old program the pixel
+under the device pixel's centre); `view.hudY = [cut-out top, cut-out bottom - 7 S]` keeps both HUD rows whole at the
+fractional edge of its transition and its own HUD blit is gone; GPU against the reference 0 (4 x 29 checks), replay
+EQUAL, web test 286 / 0.
+Its step 4 (f317ae2): the core in its own thread behind a switch - not `arek host engine --thread` (the game has its
+own core with a hardware model) but the existing Asyncify core in a plain Web Worker with Paula and the disk loading,
+shared memory (COOP / COEP) for the permit, done, the inputs by frame in a ring of 64, 16 frame slots of creg + 1 MB
+core memory, the sound through the kit's `WBZVUKOUT.bind` ring; sound dropouts under 10 x 150 ms stalls 10 / 10 ->
+0 / 10 in Chromium and WebKit, key -> camera 27-29 ms, missing 0-0.1 %, replay the same fingerprint as on the main
+thread. A rule for the canon's E from it: a frame computed WITHOUT a permit (the sound's reserve ran low) must take
+the page's LIVE input, not the per-frame ring - the ring's entry for it does not exist yet and the input was lost (on
+the hires title the page could not keep up with the captures, the worker ran ahead on sound, fire never arrived);
+the page writes the live input every display frame (joystick plus a key with a sequence number), unpermitted frames
+read it, permitted ones the ring, so the replay stays deterministic.
 Alien Breed SE92 confirmed G59 and its fix on 1.0.1 (83f5a70): 29 checks of 24.4 M pixels each at S 1, 1.5, 702/352, 2,
 2.37, 2.5, 3, 3.1415 and 4, with and without the shift - 0 mismatches in Chromium and WebKit with 2.0.1, where 2.0
 had given WebKit 2 146 differing pixels with the shift (Chromium 0); replay and the contract unchanged.
+Alien Breed II on 1.0.2 (M49) found G59's other face, in Chromium at S = 1 without the shift: in 2.0 the pieces of a
+door's animation (objects of 16 x 14 to 32 x 16) took the colours of another palette row - the HUD's 238,0,0 and
+255,255,34 - for one pass, which the author saw as a flash at the end of the animation; the GPU agreed with the
+reference, so the fault was in the float32 row (floor(fr32(dy * invS + camF)) landing one row off at a boundary), on
+both paths alike. With 2.0.1's whole-number row the same pieces are grey, as in the native picture.
 
 The rebuilds of the kit (Superfrog, Alien Breed, Turrican II, Alien Breed II) show a game whose logic runs at 50 Hz on
 displays of 60, 120 or 144 Hz, in Chromium and in Safari, on weaker machines too. The canon says which layer does
@@ -275,7 +296,9 @@ ASYNCIFY is needed (a game's build takes minutes instead of tens of them). The p
 The sound: every frame's samples go into the ring with a count written (`engine_aud_written`); the AudioWorklet of
 module D reads the ring from the shared memory and writes the count read (`engine_aud_read`); under
 `engine_aud_low(samples)` (15 ms) the thread computes on without a permit, so a stalled main thread does not
-interrupt the sound. `engine_stop` parks the thread (a longjmp in its own thread), `engine_parked` tells when it
+interrupt the sound. Such a frame takes the page's live input (the keys as held now), not an input scheduled
+by frame - that entry does not exist yet (Alien Breed SE92 lost fire presses that way; the kit's engine reads
+`engine_keys` live). `engine_stop` parks the thread (a longjmp in its own thread), `engine_parked` tells when it
 has, and `engine_run` after a new `engine_init` wakes it (a restart, a saved position). The coroutine build
 (`arek host engine` without `--thread`) stays the fallback for a page without COOP / COEP; interrupt handlers are
 called directly (G37), so both builds sleep in a handler's wait loop.
