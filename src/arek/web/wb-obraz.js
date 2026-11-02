@@ -14,6 +14,7 @@
 // and §3 (brightness, contrast, saturation, blur) runs in the shader on the WebGL path. 1.5.1: size() that resizes the
 // canvas shows the last picture again at once (a page drawing only on a new game frame blinked at a mode change in Safari).
 // 1.5.2: the CRT layer is kept above the game canvas (a canvas appended after .crt-layer hid the CRT - Superfrog).
+// 1.6: a fractional S (a mode transition, wb-scene 1.8): the framebuffer and the content are round(W * S) x round(H * S).
 // No game data. Works as a <script> (global WBOBRAZ, also globalThis.WBOBRAZ - an ES module that imports
 // nothing can read it there), as CommonJS (require) and in Node for tests.
 // Projects copy this file (`arek web copy DIR`) and keep its sha256 in their docs.
@@ -29,7 +30,7 @@
 // arek web test needs `pip install amiga-re-kit[web]` and `python -m playwright install chromium`.
 'use strict';
 const WBOBRAZ = (() => {
-    const VERSION = '1.5';
+    const VERSION = '1.6';
     const CRT_DETAILS = ['fine', 'standard', 'strong'];
     const CRT_SHAPES = ['lines', 'grid'];
     // 1.3 values (Alien Breed / Turrican II, 2026-10-22: larger steps between the levels)
@@ -55,7 +56,7 @@ const WBOBRAZ = (() => {
      *  inside the backing, rows stay S device pixels each. */
     function contentSize(W, H, S, par) {
         par = par > 0 ? par : 1;
-        return [Math.round(W * S * par), H * S];
+        return [Math.round(W * S * par), Math.round(H * S)];                    // 1.6: S may be fractional during a mode transition
     }
     let blitTmp = null;
     /** Draw the W x H game picture `src` (a canvas, image or bitmap) into the backing `c` as its content (1.4): every
@@ -272,7 +273,7 @@ const WBOBRAZ = (() => {
             const gl = this.g;
             let fboChanged = false, frameChanged = false;
             if (gl) {
-                const fw = W * S, fh = H * S;
+                const fw = Math.round(W * S), fh = Math.round(H * S);
                 if (this.fboSize[0] !== fw || this.fboSize[1] !== fh) {
                     fboChanged = true;
                     this.fboSize = [fw, fh];

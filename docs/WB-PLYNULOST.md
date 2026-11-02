@@ -14,7 +14,7 @@ measurements (its `docs/code.md` M10-M13) and its specification for the kit (`do
 | 2 the engine in a thread | the kit's host (module E) | the project adds only "what the scene of this game is": the camera, the sprites, the objects with an identity, the time of a drawing pass, the palette per line |
 | 3 the clock | the kit (module C, `wb-takt.js`) | frames of the game allowed by the display's clock, the timeline, the interpolation, the keys at the event |
 | 4 the sound | the kit (module D; the filters are `wb-zvuk.js`) | an AudioWorklet over shared memory, a 30 ms reserve |
-| 5 the drawing | the kit's presenter (module B, `wb-obraz.js` 1.5) and the scene (module G, `wb-scene.js` 1.0, kit 0.9.0) | the project gives one record per game frame (the window's clean picture, the map, the objects with an identity, the sprites, the HUD); the module composes the wider, smoother view on the GPU |
+| 5 the drawing | the kit's presenter (module B, `wb-obraz.js` 1.5) and the scene (module G, `wb-scene.js` 1.0, kit 0.9.0); ONE canvas - the presenter's: the scene draws into its framebuffer (`scene.attach(presenter)`, `present({draw})`), the filters and the CRT layer above it, no other canvas in the game box (`arek web test` §5.5; an overlay canvas says `data-wb-overlay`) | the project gives one record per game frame (the window's clean picture, the map, the objects with an identity, the sprites, the HUD); the module composes the wider, smoother view on the GPU |
 | 6 the measurement | the kit (module F, `arek web smooth`) | the project provides the hooks |
 
 The limits (checked by F in Chromium and WebKit, 60 Hz, no frame cap):
@@ -159,6 +159,24 @@ tracked sprite. In Alien Breed II (a top-down game scrolling in eight directions
 the scene module WITH the shift. So the option stays in the module, the default is the game's (the author decides
 per game), and a per-sprite shift is not pursued.
 
+1.8 (kit 0.9.15): the mode transition from the kit, and any scale. `WBSCENE.transition(from, to, { ms: 450, t0,
+win })` gives `at(ts)` = the view for the drawer between two modes: e = smoothstep(t); the viewport in whole game
+pixels (`extX`, `extY` rounded), the band in whole device pixels (`Wd` blended and rounded, S = Wd / W - whole only
+at the ends, `Hd` = round(H * S)), the band's origin and the DISPLAY LATENCIES blended (`view.latC` / `latO`, which
+`compose()` takes over the clock's: the Enhanced picture 20-48 ms behind the game and the Original's at the game -
+without the blend the camera jumped at the end of the transition while moving), and the CRT of the source mode in
+the first half, of the target's in the second, its opacity dipped to 40 % (Superfrog's measured rules: the pattern's
+pitch from a mode's whole scale, never from the intermediate one). The ends are the views themselves; a reversal is
+`transition(cur.at(ts), from, { t0: ts })`. The scene composes the real intermediate viewport at every display frame -
+nothing is stretched from a finished picture. For that the module takes any S: the device sizes are round(W * S),
+round(H * S), an image of w game pixels is round(w * S) device pixels whose pixel i shows image pixel floor(i * w /
+qw) (`quadOf`), and the playfield's sampling multiplies by the float32 reciprocal of S instead of dividing (a
+float32 product is correctly rounded on the GPU, a division need not be) - so the GPU equals the reference at any
+scale (the kit's test: 0 mismatches half way through 2 -> 3 on the synthetic page). The presenter (wb-obraz 1.6)
+takes the fractional S too (its framebuffer and content rounded). A game puts the kit's transition behind a Debug
+switch next to its own until the author chooses; the Original mode's view carries latC -2 (no interpolation) and
+the Enhanced one its clock's latencies.
+
 ## D. The sound (`wb-zvuk-worklet.js` + `wb-zvuk-out.js` 1.0, kit 0.8.1) - done
 
 Extracted from Alien Breed II (audio-worklet.js) and Superfrog: an AudioWorkletProcessor (`wb-paula`) over a ring of
@@ -216,7 +234,9 @@ composes: the camera between frames (wb-takt's pairs), the objects between drawi
 every other frame - pairing consecutive frames would hold and jump), the sprites between frames, everything placed
 on whole device pixels. `WBSCENE.reference(composition)` is the CPU reference of the same composition, so a page can
 check its GPU path for 0 mismatches at any time (`scene.read()`), and a page without WebGL2 draws the reference.
-The scene draws into the presenter's canvas, and that canvas must lie UNDER the presenter's `.crt-layer`: Superfrog
+The scene draws into the presenter's canvas - the ONE game canvas of the page (the rule of A, since kit 0.9.15:
+Superfrog had added a second presenter with its own canvas for the module beside its old renderer, Alien Breed II
+attached the scene to the one presenter it had) - and that canvas must lie UNDER the presenter's `.crt-layer`: Superfrog
 appended its own canvas for the module after the layer and the CRT vanished but its vignette (its row contrast 0.42
 against 8.91 with the old drawing; found by the author's eye, fixed by inserting the canvas before the layer,
 dc26710). Since wb-obraz 1.5.2 the Screen moves the layer above a canvas that comes after it and warns; `arek web

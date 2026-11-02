@@ -89,15 +89,23 @@ function step() {
     objects: objs.filter((o) => !(OBJ[o.id - 1].blink && (done & 1))).map((o) => ({ id: o.id, w: OBJ[o.id - 1].w, h: OBJ[o.id - 1].h, idx: OBJ[o.id - 1].idx, x: o.x, y: o.y, steady: o.id === 2 })),   // 1.6: object 2 stays on whole pixels under ?fine=1
     sprites: [{ k: 0, h: 24, idx: SPR, x: 152, y: UNDER ? -EXTY - 6 : 88 }, { k: 1, h: 10, idx: BADGE, x: 4, y: 4, screen: true }], hud: { top: { h: HUD, rgba: HUDT, split: [60, 180, 260] }, bottom: { h: HUD, rgba: HUDB, split: [160] }, under: UNDER } });
 }
-const view = { W, H, S, extX: EXTX, extY: EXTY, x0: 0, y0: HUD * S };
-function layout() { pr.size(W, H + 2 * HUD, S, 1, window.devicePixelRatio || 1); }
+let view = { W, H, S, extX: EXTX, extY: EXTY, x0: 0, y0: HUD * S };
+// 1.8 (?trans=1): E switches between this view and an "original" one (no margins, S + 1, no display latency) through
+// WBSCENE.transition - the viewport, the scale, the band and the latencies blend over 450 ms, the picture composed at every step
+const TRANS = Q.get('trans') === '1', VIEW_A = { extX: EXTX, extY: EXTY, S, x0: 0, y0: HUD * S, latC: 30, latO: 60, crt: { mode: 'enhanced', on: 1 } };
+const VIEW_B = { extX: 0, extY: 0, S: S + 1, x0: 0, y0: HUD * (S + 1), latC: -2, latO: -2, crt: { mode: 'original', on: 1 } };
+let tr = null, atB = false;
+function transit() { tr = WBSCENE.transition(tr ? tr.at(lastTs) : (atB ? VIEW_B : VIEW_A), atB ? VIEW_A : VIEW_B, { ms: 450, t0: lastTs, win: { w: W0, h: H0 } }); atB = !atB; }
+if (TRANS) addEventListener('keydown', (e) => { if (e.code === 'KeyE') transit(); });
+function layout() { pr.size(view.W, view.H + 2 * HUD, view.S, 1, window.devicePixelRatio || 1); }
 function frame(ts) {
   takt.tick(ts, done, document.hidden); lastTs = ts;
+  if (tr) { const v = tr.at(ts); view = { W: v.W, H: v.H, S: v.S, extX: v.extX, extY: v.extY, x0: 0, y0: Math.round(HUD * v.S), latC: v.latC, latO: v.latO, e: v.e }; layout(); if (v.done) tr = null; }
   if (scene.frames.length > 1) {
     if (glOn) pr.present({ draw: scene.drawer(ts, view) });
     else {                                                                   // the 2D path: the CPU reference in game pixels (the presenter scales), the HUD rows widened by their splits
       const c = scene.compose(ts, Object.assign({}, view, { S: 1 }));
-      if (c) { const px = WBSCENE.reference(c), full = new Uint8Array(W * (H + 2 * HUD) * 4); full.set(px, W * HUD * 4);
+      if (c) { const px = WBSCENE.reference(c), full = new Uint8Array(view.W * (view.H + 2 * HUD) * 4); full.set(px, view.W * HUD * 4);
         [['top', 0], ['bottom', HUD + H]].forEach(([k, row]) => { const hd = c.hud && c.hud[k]; if (!hd) return; const cols = WBSCENE.widenColumns(W0, W, hd.split);
           for (let y = 0; y < hd.h; y++) for (let x = 0; x < W; x++) { const q = (y * W0 + cols[x]) * 4, o = ((row + y) * W + x) * 4; full[o] = hd.rgba[q]; full[o + 1] = hd.rgba[q + 1]; full[o + 2] = hd.rgba[q + 2]; full[o + 3] = 255; } });
         pr.present({ pixels: full }); scene.last = c; } }
@@ -127,7 +135,7 @@ globalThis.WBLONGRUN = {
 };
 // the test hooks: the GPU's band against the CPU reference of the same composition (0 mismatches), the options in force
 globalThis.wbSceneTest = {
-  gl: () => glOn, options: () => opts, size: () => ({ W, H, S }),
+  gl: () => glOn, options: () => opts, size: () => ({ W, H, S }), view: () => Object.assign({ active: !!tr }, view), transit,
   compare: () => { if (!glOn) return null; const r = scene.read(lastTs, view); if (!r) return null; const ref = WBSCENE.reference(r.composition); let bad = 0;
     for (let i = 0; i < ref.length; i += 4) if (ref[i] !== r.pixels[i] || ref[i + 1] !== r.pixels[i + 1] || ref[i + 2] !== r.pixels[i + 2]) bad++;
     return { pixels: ref.length / 4, bad, objs: r.composition.objs.length, sprs: r.composition.sprs.length, f: r.composition.f, cam: r.composition.cam, glErr: pr.g.getError(), glued: scene.stats.glued || 0 }; },   // glErr: the first GL error since the last call (0 = none), KIT-GAPS 50

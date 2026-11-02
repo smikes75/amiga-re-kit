@@ -141,6 +141,10 @@ ORDER_JS = """(() => {
     const c = cs.sort((a, b) => b.width * b.height - a.width * a.height)[0];      // the game canvas: the largest
     return !!(c.compareDocumentPosition(l) & Node.DOCUMENT_POSITION_FOLLOWING);  // true: the layer comes after the canvas (above it)
 })()"""
+EXTRA_JS = """(() => {
+    const l = document.querySelector('.crt-layer'); if (!l || !l.parentNode) return 0;
+    return Array.from(l.parentNode.querySelectorAll('canvas')).filter((c) => !c.classList.contains('crt-layer') && !c.hasAttribute('data-wb-overlay')).length;
+})()"""                                      # the game canvases beside the CRT layer: one (the presenter's); an overlay canvas opts out with data-wb-overlay
 
 
 def run(url, quick=False, log=print):
@@ -162,6 +166,10 @@ def run(url, quick=False, log=print):
                     checks += 1
                     if order is False:
                         fails.append('§5.5: the game canvas lies above the CRT layer (keep the canvas before .crt-layer)')
+                    extra = page.evaluate(EXTRA_JS)
+                    checks += 1
+                    if extra > 1:
+                        fails.append('§5.5: %d game canvases beside the CRT layer - one, the presenter\'s (a scene draws through scene.attach(presenter) and present({draw}); an overlay canvas carries data-wb-overlay)' % extra)
                 for mode, detail, zoom, par in itertools.product(MODES, DETAILS, zooms, (1, PAR)):
                     if par != 1 and zoom not in (2, 0):
                         continue

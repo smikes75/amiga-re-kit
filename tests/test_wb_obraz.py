@@ -22,7 +22,7 @@ def js(expr):
 
 
 def test_version_and_scale():
-    assert js('O.VERSION') == '1.5'
+    assert js('O.VERSION') == '1.6'
     assert js('O.deviceScale(2, 320, 320, 1.25, 10)') == 3          # round(2 * 1.25)
     assert js('O.deviceScale(2, 336, 448, 2, 10)') == 3             # wider window: zoom counts in W0
     assert js('O.deviceScale(6, 320, 320, 2, 2.4)') == 4            # limited by the window
@@ -104,7 +104,7 @@ def test_web_copy_and_package_files(tmp_path, capsys):
     assert cli.main(['web', 'copy', str(tmp_path / 'web')]) == 0
     out = capsys.readouterr().out
     data = (tmp_path / 'web' / 'wb-obraz.js').read_bytes()
-    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.5' in out
+    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.6' in out
 
 
 def test_png_decoder_reads_the_kits_png():

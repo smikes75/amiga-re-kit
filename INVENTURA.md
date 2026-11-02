@@ -104,8 +104,9 @@ Co nedělat: další vyhlazování, další zpoždění, další volby – dokud
 
 Stav: uživatel 2026-11-01 rozhodl „hodiny z kitu do her“ (bod 3; zadání odeslána) a schválil kit 0.9.12 = dopočet
 objektů o průchod (3.3), pevná zpoždění ve wb-takt (latO 40, adaptace jen s latOMax), cache HUD, centrování úzkých
-map, zastarání softClamp/smoothY, testy hodin. Zbývá: přechod režimů (0.9.13), odezva (hráč bez zpoždění, pod
-zámkem hned), recept, zmrazení; run-ahead jako experiment po 1.0.
+map, zastarání softClamp/smoothY, testy hodin. 0.9.13-14: hodiny v obou hrách (horizon, timeOf), vrstva CRT nad plátnem + web test §5.5. 0.9.15: přechod
+režimů z kitu (wb-scene 1.8 transition, libovolné měřítko, pravidlo „jedno plátno“ v kánonu A a §5.5). Zbývá:
+odezva (hráč bez zpoždění, pod zámkem hned), hry smažou staré cesty, recept, zmrazení; run-ahead po 1.0.
 
 ## Příloha A – odpověď Alien Breed II (relace abrii-ab, 2026-11-01)
 
