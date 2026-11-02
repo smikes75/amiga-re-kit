@@ -43,6 +43,9 @@ memory, the copy waits for the GPU).
 Every result names the WebGL renderer and the machine's load average before and after (1.3, G45: headless
 Chromium draws WebGL in software - SwiftShader - so the presenter runs on the CPU there, and a loaded machine
 dropped 500 of 1034 frames in one run); `--gpu` launches Chromium on the GPU (macOS: ANGLE on Metal).
+Headless Chromium also draws no CSS `blur()` under about 1 px (Superfrog: the default 20 % blur of Enhanced is 0.32 px
+at S 4 / dpr 2, the screenshots with and without the filter had one md5; headed with the GPU the same blur takes 2-4 %
+of the sharpness) - a blur check in headless verifies nothing, measure it headed or in the presenter's shader path.
 
 Phases: scroll (the right key held, every display frame sampled: its timestamp, the camera, the objects, the missing
 passes, the game's lead), latency (five key presses dispatched inside the page, the time until the camera moves),
@@ -69,6 +72,7 @@ The page's hooks (`globalThis.WBLONGRUN` 1.1; `arek web longrun` reads the same 
 | `focus` (optional, 1.1) | a selector or `[x, y]` to click into the game (default the largest canvas; G41: a page's menu at the corner pauses the game) |
 | `prepare()` (optional, 1.1) | brings the page into the game (past an intro and a menu); may return a promise; `ready()` is then awaited (G42) |
 | `route` (optional, 1.1) | `[[key, ms], ...]` held in turn and cycled while sampling (a maze: short free stretches; G42); the latency probes alternate left and right |
+| `player()` (optional, 1.5, kit 0.9.16) | `[x, y]` the player as drawn on the screen in this display frame: a second latency, key -> player, reported beside key -> camera and not judged (a page drawing its player without display latency - wb-scene 1.9 `freshSprites` - answers sooner than its camera) |
 | `interp()` (optional, 1.4) | false when the page draws the game's frames as they are, without interpolation (an original mode); `--no-interp` says the same for a page without the hook |
 
 1.4 (kit 0.8.5, Superfrog KIT-GAPS 38): without interpolation a 50 Hz game on a 60 Hz display repeats every sixth
@@ -176,6 +180,18 @@ scale (the kit's test: 0 mismatches half way through 2 -> 3 on the synthetic pag
 takes the fractional S too (its framebuffer and content rounded). A game puts the kit's transition behind a Debug
 switch next to its own until the author chooses; the Original mode's view carries latC -2 (no interpolation) and
 the Enhanced one its clock's latencies.
+
+1.9 (kit 0.9.16, the response): `freshSprites = true` draws the hardware sprites from the NEWEST game frame not later
+than the display time, at the screen position the hardware gave them, over the view's camera - instead of the pair at
+the delayed display time (latC 20-48 ms behind the game, the price of the interpolation). A player the camera tracks
+stands on the screen anyway, so nothing is lost there, and it answers a key one display delay sooner: on the synthetic
+page (Chromium on the GPU, 60 Hz, latC 30) key -> player 44 ms without and 28.5 ms with (25.8-44.8: the probe lands
+before or after a game frame), key -> camera 45 ms in both. Turrican II's rebuilds drew their player this way. The
+cost: while the camera moves the sprite leads its ground by the camera's motion over the display delay (1-2 px at
+walking speed, nothing when standing), and a sprite the camera does not track drifts by that much - so a game with
+enemy sprites judges by eye; the option is per game behind a Debug switch like the others. Under the lock the picture
+stays one display frame behind the permit (latC = FM - 2): the engine runs in another thread, so a frame granted at
+this tick is ready at the next; drawing it in the same tick would need the engine on the main thread.
 
 ## D. The sound (`wb-zvuk-worklet.js` + `wb-zvuk-out.js` 1.0, kit 0.8.1) - done
 

@@ -9,7 +9,9 @@
 // draw are uploaded, not only B's (Alien Breed II G56); 1.7 kit 0.9.12 - extrapolateObjects (the objects past the last
 // pass, so latO can stay fixed - Alien Breed II's engine did it), the widened HUD cached, a narrow map centred on a
 // whole game pixel, softClamp / smoothY deprecated; 1.8 kit 0.9.15 - any scale S (the device sizes rounded, the
-// sampling by a float32 multiply on both paths), transition() between two views, view.latC / latO for the drawer).
+// sampling by a float32 multiply on both paths), transition() between two views, view.latC / latO for the drawer; 1.9 kit
+// 0.9.16 - freshSprites: the hardware sprites from the newest game frame at their screen position, no display latency
+// for a tracked player - Turrican II's way).
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -63,7 +65,11 @@
 // the interpolated clamped camera over t +- tau ms, sampled every 5 ms, extrapolated past the newest frame by at most tau),
 // smoothY { tau } (the terrain's vertical camera as a triangle-weighted mean over the last tau ms, sampled every 5 ms;
 // sprites keep their screen position as in the original), pairOlder (a blinking sprite / object paired with up to n older
-// frames), fixedAxis { axis, value } (a level whose camera axis is fixed: black outside), passMax (1.1, default 100 ms: when
+// frames), freshSprites (1.9: the sprites of the newest game frame not later than the display time, at the screen position
+// the hardware gave them, instead of the pair at the delayed display time - a player the camera tracks stands on the screen
+// anyway and answers a key 20-48 ms sooner; it leads its ground by the camera's motion over the display delay while
+// moving, a sprite the camera does not track drifts by that much - Turrican II drew its player this way), fixedAxis
+// { axis, value } (a level whose camera axis is fixed: black outside), passMax (1.1, default 100 ms: when
 // no new pass came for longer, every frame counts as a pass - an interlude drawn by other code), x17 (12-bit colours * 17),
 // subpixel (1.5: the playfield is drawn at the camera snapped to whole device pixels and shifted by the remaining fraction
 // as a blend of the four neighbouring device pixels - integer weights /256, the GPU and the reference bit for bit; a 50 Hz
@@ -82,7 +88,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '1.8';
+    const VERSION = '1.9';
     let deprecated = false;
     const lerp = (a, b, f) => a + (b - a) * f;
 
@@ -216,14 +222,17 @@ const WBSCENE = (() => {
             const from = pr.from && !jumped([pr.from.x, pr.from.y], [pr.to.x, pr.to.y]) ? pr.from : null;
             return { o: pr.to, x: from ? lerp(from.x, pr.to.x, pr.f) : pr.to.x, y: from ? lerp(from.y, pr.to.y, pr.f) : pr.to.y }; });
         const shist = frames.filter((fr) => fr.t < A.t);
-        const sprs = pairById(A, B, f, (fr) => (fr.sprites || []).map((s) => Object.assign({ id: s.id !== undefined ? s.id : s.k }, s)), o.pairOlder || 0, shist, 1 + extC).map((pr) => {
+        let N = null;                                                              // 1.9: the newest frame at or before the display time
+        if (o.freshSprites) { for (const fr of frames) if (fr.t <= ts) N = fr; if (!N) N = B; }
+        const sprs = N ? (N.sprites || []).map((s) => ({ s, x: vcam[0] + ext.x + s.x, y: vcam[1] + ext.y + s.y, screen: true, fresh: true })) :
+        pairById(A, B, f, (fr) => (fr.sprites || []).map((s) => Object.assign({ id: s.id !== undefined ? s.id : s.k }, s)), o.pairOlder || 0, shist, 1 + extC).map((pr) => {
             if (pr.to.screen) return { s: pr.to, x: vcam[0] + ext.x + pr.to.x, y: vcam[1] + ext.y + pr.to.y, screen: true };   // 1.1: fixed on the screen
             // screen px relative to the window -> world (window of its own frame) -> the view; a jump is not crossed (1.2)
             const fc = pr.from ? frameCam(frames, pr.from, A) : null, fw = fc ? [pr.from.x + fc[0], pr.from.y + fc[1]] : null, tw = [pr.to.x + B.cam[0], pr.to.y + B.cam[1]];
             const from = fw && !jumped(fw, tw) ? fw : null;
             return { s: pr.to, x: from ? lerp(from[0], tw[0], pr.f) : tw[0], y: from ? lerp(from[1], tw[1], pr.f) : tw[1] };
         });
-        return { A, B, f, OA, OB, of, cam: vcam, spriteCam, gcam, win, map: B.map || null, limits: lim, objs, sprs, hud: B.hud || null,
+        return { A, B, f, OA, OB, of, cam: vcam, spriteCam, gcam, win, map: B.map || null, limits: lim, objs, sprs, hud: B.hud || null, freshT: N ? N.t : null,
                  W: win.w + 2 * ext.x, H: win.h + 2 * ext.y, S: view.S || 1, ext, fixed: o.fixedAxis || null, n: B.n, sub: subOf(vcam, view.S || 1, o) };
     }
     /** 1.5: the playfield's camera snapped to whole device pixels and the remaining fraction as weights /256 (x, y). */

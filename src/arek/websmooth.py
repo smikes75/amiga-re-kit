@@ -7,6 +7,7 @@ The page provides ``globalThis.WBLONGRUN`` (1.1; ``arek web longrun`` reads the 
   ready() -> bool; cam() -> [x, y] the camera in game pixels in this display frame (fractional when interpolated);
   objs() -> [[id, x, y], ...] the objects on screen with an identity, in the world in game pixels so that
   x - cam()[0] is where the object is drawn on the screen (optional; 1.2, G44: objects are judged on the screen);
+  player() -> [x, y] the player as drawn on the screen (optional; 1.5: key -> player latency, reported, not judged);
   scale() -> S, device pixels per game pixel, when the page draws on whole device pixels (optional, 1.2: an object's
   steps on the screen are then judged within 1/S);
   missing() -> display frames drawn without the next game frame / pass for the interpolation, so far (optional);
@@ -57,6 +58,17 @@ LATENCY_JS = """([code, maxMs]) => new Promise((res) => { const H = globalThis.W
     const f = () => { const dt = performance.now() - t0;
         if (out()) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(-1); }   // the game left the screen: void
         else if (Math.abs(H.cam()[0] - x0) > 0.01) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(dt); }
+        else if (dt > maxMs) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(null); }
+        else requestAnimationFrame(f); };
+    requestAnimationFrame(f); })"""
+PLAYER_JS = """([code, maxMs]) => new Promise((res) => { const H = globalThis.WBLONGRUN; const p0 = H.player(); if (!p0) { res(null); return; }
+    const out = () => H.ready && !H.ready();
+    const t0 = performance.now();
+    const ev = (type) => new KeyboardEvent(type, { key: code.replace('Arrow', ''), code, bubbles: true, cancelable: true });
+    window.dispatchEvent(ev('keydown')); document.dispatchEvent(ev('keydown'));
+    const f = () => { const dt = performance.now() - t0, p = H.player();
+        if (out()) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(-1); }
+        else if (p && (Math.abs(p[0] - p0[0]) > 0.01 || Math.abs(p[1] - p0[1]) > 0.01)) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(dt); }
         else if (dt > maxMs) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(null); }
         else requestAnimationFrame(f); };
     requestAnimationFrame(f); })"""
@@ -227,6 +239,22 @@ def measure(page, seconds=30.0, stalls=10, stall_ms=150, reps=5, log=None, inter
     r['latency_void'] = void
     r['latency_ms'] = round(statistics.median(lats), 1) if lats else None
     r['latency_all'] = [round(x, 1) for x in lats]
+    r['player_ms'], r['player_all'] = None, []                                 # 1.5 (kit 0.9.16): key -> the player as drawn, when the page gives player()
+    if page.evaluate('typeof globalThis.WBLONGRUN.player === "function"'):
+        pl = []
+        for k in range(reps + 10):
+            if len(pl) >= reps:
+                break
+            try:
+                page.wait_for_function('!WBLONGRUN.ready || WBLONGRUN.ready()', timeout=10000)
+            except Exception:
+                continue
+            lat = page.evaluate(PLAYER_JS, [keys['right'] if k % 2 == 0 else keys['left'], 1000])
+            if lat is not None and lat >= 0:
+                pl.append(lat)
+            page.wait_for_timeout(400)
+        r['player_ms'] = round(statistics.median(pl), 1) if pl else None
+        r['player_all'] = [round(x, 1) for x in pl]
     if page.evaluate('typeof globalThis.WBLONGRUN.audio === "function"'):
         a0 = page.evaluate('globalThis.WBLONGRUN.audio()')
         for _ in range(stalls):
@@ -294,9 +322,10 @@ def format_result(name, r):
     nj = '' if r.get('interp', True) is not False else ' (not judged: no interpolation)'
     aud = ('sound reserve %s ms, latency %s ms, dropouts %d over %s%s' % (fmt(a['reserve_ms']), fmt(a['latency_ms']), a['dropouts'], a['stalls'], ' (simulated by the page)' if a['simulated'] else '')) if a else 'no sound hook'
     return ('%s: %s - %d frames at %s Hz, %d dropped; camera jitter %.3f px (max %.3f; %d steps, speed deviation %.3f), objects jitter %.3f px, missing passes %s%s; '
-            'key -> camera %s ms %s; %s; %s' % (
+            'key -> camera %s ms %s%s; %s; %s' % (
                 name, 'PASSED' if r['passed'] else 'FAILED', r['frames'], r['refresh_hz'], r['dropped'], r['cam_jitter'], r['cam_jitter_max'], r['cam_moving'], r['cam_dev'], r['obj_jitter'],
-                '%.1f %%' % r['missing_pct'] if r['missing_pct'] is not None else 'n/a', nj, r['latency_ms'], r['latency_all'], aud,
+                '%.1f %%' % r['missing_pct'] if r['missing_pct'] is not None else 'n/a', nj, r['latency_ms'], r['latency_all'],
+                (', key -> player %s ms %s' % (r['player_ms'], r['player_all'])) if r.get('player_ms') is not None else '', aud,
                 ('; '.join(r['fails']) if r['fails'] else 'every limit met') + (' · ' + r['status'] if r.get('status') else '')
                 + (' · WebGL %s' % r['renderer'] if r.get('renderer') else '') + (' · load %s -> %s' % tuple(r['load']) if r.get('load') else '')
                 + ''.join(' · ' + n for n in r.get('notes', []))))

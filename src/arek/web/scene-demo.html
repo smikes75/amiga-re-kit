@@ -64,12 +64,14 @@ const hudRow = (h) => { const a = new Uint8Array(W0 * h * 4); for (let y = 0; y 
 const HUDT = hudRow(HUD), HUDB = hudRow(HUD);
 // the game: camera by the keys, objects on a 25 Hz loop (every other frame), the sprite at the window's centre
 let cam = [96, 40], keys = 0, done = 0, objs = OBJ.map((o) => ({ id: o.id, x: 160 + 90 * o.id, y: 100 + 40 * o.id }));
+let lean = 0;                                                              // 1.9: the frog leans up to 8 px into a held key (a player answering on the screen)
 let schedule = null;                                                       // 1.5 (arek web replay): [[frame, mask], ...] - the keys by game frame
 const opts = { pairOlder: parseInt(Q.get('pair') || '0', 10) };
 if (Q.get('soft') === '1') opts.softClamp = { tau: 20 };
 if (Q.get('smooth') === '1') opts.smoothY = { tau: 60 };
 if (Q.get('mean') === '1') opts.camMean = { tau: 20 };
 if (Q.get('fine') === '1') opts.subpixel = true;                          // 1.5: the playfield shifted by the fraction of a device pixel
+if (Q.get('fresh') === '1') opts.freshSprites = true;                     // 1.9: the frog from the newest frame, no display latency
 const UNDER = Q.get('under') === '1';                                     // 1.4: the sprites above the HUD rows; the frog's head reaches into the top HUD
 const screen = document.getElementById('screen'), O = WBOBRAZ;
 const pr = new O.Presenter(screen, { gl: Q.get('gl') === '0' ? 'off' : 'auto' });
@@ -81,13 +83,14 @@ function step() {
   done++;
   if (schedule) for (const [n, mask] of schedule) if (done >= n) keys = mask;
   const dx = (keys & 2 ? -2 : 0) + (keys & 1 ? 2 : 0), dy = (keys & 4 ? -1 : 0) + (keys & 8 ? 1 : 0);
+  const want = keys & 1 ? 8 : keys & 2 ? -8 : 0; lean += Math.sign(want - lean) * Math.min(2, Math.abs(want - lean));
   cam = [Math.min(Math.max(cam[0] + dx, limits.x0), limits.x1), Math.min(Math.max(cam[1] + dy, limits.y0), limits.y1)];
   const t = takt.stamp(done), pass = done & 1 ? t : null;               // the 25 Hz loop moves the objects on odd frames
   if (pass !== null) for (const o of objs) { const d = OBJ[o.id - 1]; o.x += d.vx * 2; o.y += d.vy * 2; if (o.x < 0 || o.x > COLS * 16 - 24) d.vx = -d.vx; if (o.y < 0 || o.y > ROWS * 16 - 16) d.vy = -d.vy; }
   if (pass !== null) { takt.pass(t); scene.lastPass = t; }
   scene.frame({ n: done, t, pass: scene.lastPass || t, cam: cam.slice(), limits, window: { w: W0, h: H0, idx: cleanWindow(cam[0], cam[1]), pal: PAL, over: overLayer(done) }, map,
     objects: objs.filter((o) => !(OBJ[o.id - 1].blink && (done & 1))).map((o) => ({ id: o.id, w: OBJ[o.id - 1].w, h: OBJ[o.id - 1].h, idx: OBJ[o.id - 1].idx, x: o.x, y: o.y, steady: o.id === 2 })),   // 1.6: object 2 stays on whole pixels under ?fine=1
-    sprites: [{ k: 0, h: 24, idx: SPR, x: 152, y: UNDER ? -EXTY - 6 : 88 }, { k: 1, h: 10, idx: BADGE, x: 4, y: 4, screen: true }], hud: { top: { h: HUD, rgba: HUDT, split: [60, 180, 260] }, bottom: { h: HUD, rgba: HUDB, split: [160] }, under: UNDER } });
+    sprites: [{ k: 0, h: 24, idx: SPR, x: 152 + lean, y: UNDER ? -EXTY - 6 : 88 }, { k: 1, h: 10, idx: BADGE, x: 4, y: 4, screen: true }], hud: { top: { h: HUD, rgba: HUDT, split: [60, 180, 260] }, bottom: { h: HUD, rgba: HUDB, split: [160] }, under: UNDER } });
 }
 let view = { W, H, S, extX: EXTX, extY: EXTY, x0: 0, y0: HUD * S };
 // 1.8 (?trans=1): E switches between this view and an "original" one (no margins, S + 1, no display latency) through
@@ -120,6 +123,7 @@ globalThis.WBLONGRUN = {
   version: '1.4',
   ready: () => drawn > 2,
   cam: () => scene.last ? scene.last.cam.slice() : [0, 0],
+  player: () => { const c = scene.last, s = c && c.sprs.find((p) => p.s.k === 0); return s ? [s.x - c.cam[0], s.y - c.cam[1]] : null; },   // 1.9: the frog as drawn on the screen (arek web smooth: key -> player)
   objs: () => scene.last ? scene.last.objs.map((o) => [o.o.id, o.x, o.y]) : [],
   scale: () => S,
   missing: () => takt.missing,

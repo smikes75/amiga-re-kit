@@ -61,6 +61,18 @@ def test_measure_the_synthetic_page_in_chromium():
     assert r['passed'], r['fails']
 
 
+def test_key_to_player_latency_on_the_scene_page():
+    """1.5 (kit 0.9.16): a page with player() gets a key -> player latency beside key -> camera (reported, not judged);
+    the scene page's frog leans into a held key - with freshSprites it answers within a game frame or two."""
+    pytest.importorskip('playwright')
+    r = _run(True, page='scene-demo.html?s=2&fresh=1', seconds=2, stalls=1, stall_ms=50)
+    assert 'error' not in r, r
+    assert r['player_ms'] is not None and r['player_ms'] < 120 and len(r['player_all']) >= 3, r
+    assert 'key -> player' in websmooth.format_result('chromium', r)
+    r0 = _run(True, page='smooth-demo.html', seconds=2, stalls=1, stall_ms=50)
+    assert r0['player_ms'] is None and 'key -> player' not in websmooth.format_result('chromium', r0)
+
+
 def test_messages_mode_runs_dry_under_stalls():
     """Without shared memory the page feeds the sound by messages: a 150 ms stall is longer than the 50 ms reserve."""
     pytest.importorskip('playwright')

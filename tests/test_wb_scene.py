@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '1.8' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '1.9' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -253,6 +253,17 @@ def test_gpu_equals_the_reference_during_a_transition():
     assert not end[1]['active'] and end[1]['S'] == 3 and end[1]['extX'] == 0 and end[0]['bad'] == 0, end
 
 
+def test_fresh_sprites_come_from_the_newest_frame():
+    """1.9: with freshSprites the sprites are the newest frame's (not later than the display time) at the screen position
+    the hardware gave them, over the view's camera; without it the pair at the delayed time."""
+    body = """(() => { const a = mk(1, 0, [0, 0], 50), b = mk(2, 20, [4, 0], 50); b.sprites[0].x = 10;
+        const c = S.compose([a, b], %s, { S: 1 }, { %s }, null); const s = c.sprs[0]; return [c.cam, s.x, !!s.screen, !!s.fresh, c.freshT === undefined ? null : c.freshT]; })()"""
+    assert js(with_mk(body % (10, ''))) == [[2, 0], 8, False, False, None]                        # the pair: world 2 -> 14 half way
+    assert js(with_mk(body % (10, 'freshSprites: true'))) == [[2, 0], 4, True, True, 0]          # frame a is the newest at ts 10: screen x 2 over the camera 2
+    assert js(with_mk(body % (20, 'freshSprites: true'))) == [[4, 0], 14, True, True, 20]        # frame b at ts 20
+    assert js(with_mk(body % (30, 'freshSprites: true'))) == [[4, 0], 14, True, True, 20]        # past the newest: still b
+
+
 def test_object_drawing_offset():
     """1.3: objects[].ox/oy place the drawing relative to the object's logical position, which is what interpolates."""
     r = js(with_mk("""(() => { const a = mk(1, 0, [0, 0], 0), b = mk(2, 20, [0, 0], 2); a.objects[0].ox = 1; b.objects[0].ox = 1; a.sprites[0].x = 3; b.sprites[0].x = 3;
@@ -296,7 +307,7 @@ def _run_page(url_tail, fn):
         srv.shutdown()
 
 
-@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2&soft=1&smooth=1', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1'])
+@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2&soft=1&smooth=1', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&fresh=1'])
 def test_gpu_equals_the_reference(tail):
     """The GPU band against the CPU reference of the same composition, pixel for pixel, while the camera moves and the
     objects interpolate (as Alien Breed II checked its WebGL path: 0 of 60 M pixels)."""
