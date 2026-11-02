@@ -1,6 +1,6 @@
 # WB-PLYNULOST - the canon of a smooth picture and sound in the browser (kit 0.8.x - 1.0)
 
-**Frozen at kit 1.0 (2026-11-02):** the display layer's contract is wb-takt 1.4, wb-obraz 1.6, wb-scene 2.0, wb-zvuk
+**Frozen at kit 1.0 (2026-11-02):** the display layer's contract is wb-takt 1.4, wb-obraz 1.6, wb-scene 2.1, wb-zvuk
 1.1 / wb-zvuk-out 1.0, WBLONGRUN 1.5 and `arek web test / smooth / replay` as they stand. From here it changes only for
 a gap a game measures (KIT-GAPS), never for a new idea - those wait after 1.0 (run-ahead, a per-sprite shift). What a
 game writes is on one page: `WB-RECIPE.md`; this file stays the reasons and the measurements. 2.0 of the scene removed
@@ -22,6 +22,22 @@ pixel = (i * w) div qw; no float is left in it on either path, so any GPU equals
 kit's test runs the fractional case in Chromium and WebKit). Alien Breed SE92's migration (kit-scena branch) read
 the recipe cold and listed what it lacked (R1-R15, folded into WB-RECIPE.md) and three gaps of its own: a transparent
 object (G1), a HUD at another scale (G2), a source of another size into a rectangle (G3) - the author decides.
+
+G60 (kit 1.0.2, wb-scene 2.1): the author tried the kit's mode transition (1.8, kit 0.9.15) and `freshSprites` (1.9,
+kit 0.9.16) in Alien Breed II and the other rebuilds and found both counterproductive; they are removed. The
+transition: `extX` / `extY` rounded at every step made the viewport grow in jumps of S device pixels, a fractional S
+changing every frame gave pixels of unequal width (the picture shimmered - the same phenomenon G59 measured), and a
+presenter resized every frame reallocated its canvas and textures (Safari had flickered on that before). The games'
+own transition - the presenter's - is right: ONE scale for the whole transition (the larger mode's), the canvas at
+the larger view, the viewport cropped in device pixels, the display size by CSS only while the 450 ms run; so the
+"real intermediate viewport" of the Codex rebuild stays an idea that measured worse than a crop. `freshSprites`: a
+player drawn from a newer frame than its ground leads the ground by the camera's motion over latC at every start,
+stop and turn and sinks into a wall; the gain was 10-15 ms (Chromium 61.4 -> 49.5, WebKit 61.3 -> 44.9 ms key ->
+player), under one 60 Hz frame - not a fault of the module but of the idea: the sprite and its ground move together.
+The whole-number sampling (2.0.1) and `player()` stay. The frozen contract is now wb-scene 2.1.
+Alien Breed SE92 confirmed G59 and its fix on 1.0.1 (83f5a70): 29 checks of 24.4 M pixels each at S 1, 1.5, 702/352, 2,
+2.37, 2.5, 3, 3.1415 and 4, with and without the shift - 0 mismatches in Chromium and WebKit with 2.0.1, where 2.0
+had given WebKit 2 146 differing pixels with the shift (Chromium 0); replay and the contract unchanged.
 
 The rebuilds of the kit (Superfrog, Alien Breed, Turrican II, Alien Breed II) show a game whose logic runs at 50 Hz on
 displays of 60, 120 or 144 Hz, in Chromium and in Safari, on weaker machines too. The canon says which layer does
@@ -95,7 +111,7 @@ The page's hooks (`globalThis.WBLONGRUN` 1.1; `arek web longrun` reads the same 
 | `focus` (optional, 1.1) | a selector or `[x, y]` to click into the game (default the largest canvas; G41: a page's menu at the corner pauses the game) |
 | `prepare()` (optional, 1.1) | brings the page into the game (past an intro and a menu); may return a promise; `ready()` is then awaited (G42) |
 | `route` (optional, 1.1) | `[[key, ms], ...]` held in turn and cycled while sampling (a maze: short free stretches; G42); the latency probes alternate left and right |
-| `player()` (optional, 1.5, kit 0.9.16) | `[x, y]` or `[x, y, image]` (1.5.1, Superfrog KIT-GAPS 53) the player as drawn on the screen in this display frame: a second latency, key -> player, reported beside key -> camera and not judged (a page drawing its player without display latency - wb-scene 1.9 `freshSprites` - answers sooner than its camera; a player the camera tracks does not move on the screen - it changes its picture first, so the image counts as the third value) |
+| `player()` (optional, 1.5, kit 0.9.16) | `[x, y]` or `[x, y, image]` (1.5.1, Superfrog KIT-GAPS 53) the player as drawn on the screen in this display frame: a second latency, key -> player, reported beside key -> camera and not judged (a player the camera tracks does not move on the screen - it changes its picture first, so the image counts as the third value) |
 | `interp()` (optional, 1.4) | false when the page draws the game's frames as they are, without interpolation (an original mode); `--no-interp` says the same for a page without the hook |
 
 1.4 (kit 0.8.5, Superfrog KIT-GAPS 38): without interpolation a 50 Hz game on a 60 Hz display repeats every sixth

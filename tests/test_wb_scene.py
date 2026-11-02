@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.0.1' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.1' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -211,23 +211,9 @@ def test_objects_extrapolated_past_the_last_pass():
     assert js('S.clampCam(0, 0, {x0: 0, x1: 0, y0: 0, y1: 0}, {w: 4, h: 2}, {x: 1, y: 1})') == [-1, -1]   # 1.7: (6 - 4) / 2 = 1, (4 - 2) / 2 = 1; an odd gap floors
 
 
-def test_transition_views_and_any_scale():
-    """1.8: transition(from, to) blends the viewport (whole game px), the band (whole device px, S = Wd / W), the origin,
-    the latencies and the CRT (the source's pattern in the first half, the target's in the second, dipped to 40 %);
-    the ends are the views themselves; a reversal starts from the current view. quadOf and the reference at a
-    fractional scale: an image of w game px is round(w * S) device px, each showing floor(i * w / qw)."""
-    A = "{ extX: 48, extY: 20, S: 2, x0: 0, y0: 16, latC: 30, latO: 60, crt: { mode: 'enhanced', on: 1 } }"
-    B = "{ extX: 0, extY: 0, S: 3, x0: 0, y0: 24, latC: -2, latO: -2, crt: { mode: 'original', on: 1 } }"
-    r = js("""(() => { const A = %s, B = %s, tr = S.transition(A, B, { ms: 450, t0: 1000, win: { w: 320, h: 200 } });
-        const pick = (v) => [v.W, v.H, v.S, v.Wd, v.Hd, v.extX, v.extY, v.y0, v.latC, v.latO, v.crt.mode, +v.crt.on.toFixed(4), v.crt.S, +v.e.toFixed(5), v.done];
-        const back = S.transition(tr.at(1225), A, { ms: 450, t0: 1225, win: { w: 320, h: 200 } });
-        return [pick(tr.at(999)), pick(tr.at(1450)), pick(tr.at(1225)), pick(tr.at(1112.5)), pick(back.at(1225)), pick(back.at(1675)), tr.at(1225).W * tr.at(1225).S]; })()""" % (A, B))
-    assert r[0] == [416, 240, 2, None, None, 48, 20, 16, 30, 60, 'enhanced', 1, None, 0, False]
-    assert r[1] == [320, 200, 3, None, None, 0, 0, 24, -2, -2, 'original', 1, None, 1, True]
-    assert r[2][:8] == [368, 220, 896 / 368, 896, 536, 24, 10, 20] and r[2][8:] == [14, 29, 'original', 0.4, 3, 0.5, False]   # half way: Wd 896 = lerp(832, 960), the CRT already the target's, dipped
-    assert r[3][5:7] == [41, 17] and r[3][10:13] == ['enhanced', 0.8125, 2] and r[3][13] == 0.15625                            # a quarter in: e = smoothstep(.25), the source's CRT
-    assert r[4][:8] == r[2][:8] and r[4][13:] == [0, False] and r[5] == r[0][:13] + [1, True]                                     # the reversal starts from the half-way view and ends at A
-    assert abs(r[6] - 896) < 1e-9
+def test_any_scale_quads_and_reference():
+    """quadOf and the reference at a fractional scale: an image of w game px is round(w * S) device px, each showing
+    (i * w) div qw; the playfield samples whole numbers (G59)."""
     assert js('S.quadOf(2, 1, 2.5)') == {'w': 5, 'h': 3, 'sx': 0.4000000059604645, 'sy': 0.3333333432674408} and js('S.quadOf(16, 24, 3)')['sx'] == 0.3333333432674408
     r = js(with_mk("""(() => { const a = mk(1, 0, [0, 0], 0), b = mk(2, 20, [0, 0], 0); const c = S.compose([a, b], 0, { S: 2.5 }, {}, null); const px = S.reference(c);
         const R = (x, y) => px[(y * 10 + x) * 4], G = (x, y) => px[(y * 10 + x) * 4 + 1];
@@ -254,37 +240,6 @@ def test_gpu_equals_the_reference_at_a_fractional_scale_in_both_browsers(browser
         pytest.skip('no WebGL2 in this %s' % browser)
     for r in res:
         assert r['bad'] == 0 and r['pixels'] > 100000 and r['glErr'] == 0, r
-
-
-def test_gpu_equals_the_reference_during_a_transition():
-    """1.8: half way through a mode transition the scale is fractional (2 -> 3 over 450 ms); the GPU band equals the
-    reference there too, and at the end the view is the target's."""
-    def go(p):
-        p.keyboard.down('ArrowRight')
-        p.wait_for_timeout(400)
-        p.evaluate('wbSceneTest.transit()')
-        p.wait_for_timeout(180)
-        mid = (p.evaluate('wbSceneTest.compare()'), p.evaluate('wbSceneTest.view()'))
-        p.wait_for_timeout(500)
-        end = (p.evaluate('wbSceneTest.compare()'), p.evaluate('wbSceneTest.view()'))
-        p.keyboard.up('ArrowRight')
-        return mid, end, p.evaluate('wbSceneTest.gl()')
-    mid, end, gl = _run_page('?s=2&trans=1', go)
-    if not gl:
-        pytest.skip('no WebGL2 in this Chromium')
-    assert mid[1]['active'] and 2 < mid[1]['S'] < 3 and mid[0]['bad'] == 0 and mid[0]['pixels'] > 100000, mid
-    assert not end[1]['active'] and end[1]['S'] == 3 and end[1]['extX'] == 0 and end[0]['bad'] == 0, end
-
-
-def test_fresh_sprites_come_from_the_newest_frame():
-    """1.9: with freshSprites the sprites are the newest frame's (not later than the display time) at the screen position
-    the hardware gave them, over the view's camera; without it the pair at the delayed time."""
-    body = """(() => { const a = mk(1, 0, [0, 0], 50), b = mk(2, 20, [4, 0], 50); b.sprites[0].x = 10;
-        const c = S.compose([a, b], %s, { S: 1 }, { %s }, null); const s = c.sprs[0]; return [c.cam, s.x, !!s.screen, !!s.fresh, c.freshT === undefined ? null : c.freshT]; })()"""
-    assert js(with_mk(body % (10, ''))) == [[2, 0], 8, False, False, None]                        # the pair: world 2 -> 14 half way
-    assert js(with_mk(body % (10, 'freshSprites: true'))) == [[2, 0], 4, True, True, 0]          # frame a is the newest at ts 10: screen x 2 over the camera 2
-    assert js(with_mk(body % (20, 'freshSprites: true'))) == [[4, 0], 14, True, True, 20]        # frame b at ts 20
-    assert js(with_mk(body % (30, 'freshSprites: true'))) == [[4, 0], 14, True, True, 20]        # past the newest: still b
 
 
 def test_object_drawing_offset():
@@ -329,7 +284,7 @@ def _run_page(url_tail, fn, browser='chromium'):
         srv.shutdown()
 
 
-@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&fresh=1'])
+@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1'])
 def test_gpu_equals_the_reference(tail):
     """The GPU band against the CPU reference of the same composition, pixel for pixel, while the camera moves and the
     objects interpolate (as Alien Breed II checked its WebGL path: 0 of 60 M pixels)."""

@@ -110,7 +110,9 @@ odezva - freshSprites (hráč bez zpoždění, na syntetické stránce klávesa 
 měření; „pod zámkem hned“ nejde s enginem ve vlákně (snímek je hotový až příští tep), zůstává FM − 2. Kit 1.0.0 (2026-11-02):
 recept docs/WB-RECIPE.md, kontrakt zmrazen (wb-scene 2.0 bez softClamp/smoothY). Zbývá u her: porovnat přechod a
 hráče bez zpoždění, smazat staré cesty (SF scene.js + druhý presenter + vlastní takt + layoutTransition; ABR II
-view_render/gl.js + PACE). Po 1.0: run-ahead jako experiment.
+view_render/gl.js + PACE). Po 1.0: run-ahead jako experiment. 1.0.1: G59 (celočíselné vzorkování), KIT-GAPS 52/53, recept podle AB SE92 (R1–R15).
+1.0.2: uživatel po zkoušce v hrách vyřadil přechod z kitu (0.9.15) i hráče bez zpoždění (0.9.16) - G60, obojí
+odstraněno; správný přechod je presenterův (jedno S, ořez v pixelech zařízení, CSS).
 
 ## Příloha A – odpověď Alien Breed II (relace abrii-ab, 2026-11-01)
 

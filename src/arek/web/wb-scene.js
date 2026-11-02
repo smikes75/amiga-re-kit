@@ -1,4 +1,4 @@
-// wb-scene.js 2.0.1 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
+// wb-scene.js 2.1 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
 // after Superfrog's switch - KIT-GAPS 40-43: screen-fixed sprites, the means over the interpolated camera, a layer of
 // drawings without identity, a guard for a pass that never changes, one timebase; 1.2 kit 0.9.2 - KIT-GAPS 44-46: no
 // interpolation across a jump, sprites[].id, camMean for both axes; 1.3 kit 0.9.3 - objects[].ox/oy, the drawing's offset
@@ -9,11 +9,12 @@
 // draw are uploaded, not only B's (Alien Breed II G56); 1.7 kit 0.9.12 - extrapolateObjects (the objects past the last
 // pass, so latO can stay fixed - Alien Breed II's engine did it), the widened HUD cached, a narrow map centred on a
 // whole game pixel, softClamp / smoothY deprecated; 1.8 kit 0.9.15 - any scale S (the device sizes rounded, the
-// sampling by a float32 multiply on both paths), transition() between two views, view.latC / latO for the drawer; 1.9 kit
-// 0.9.16 - freshSprites: the hardware sprites from the newest game frame at their screen position, no display latency
-// for a tracked player - Turrican II's way; 2.0 kit 1.0 - the contract frozen, softClamp / smoothY removed; 2.0.1 kit 1.0.1 -
+// sampling by a float32 multiply on both paths); 2.0 kit 1.0 - the contract frozen, softClamp / smoothY removed; 2.0.1 kit 1.0.1 -
 // a HUD wider than the view is narrowed at its splits (Superfrog KIT-GAPS 52); the sampling of the playfield and the images in
-// whole numbers only on both paths - no float on the GPU (Alien Breed II G59: WebKit differed at S = 702 / 352)).
+// whole numbers only on both paths - no float on the GPU (Alien Breed II G59: WebKit differed at S = 702 / 352); 2.1 kit 1.0.2 -
+// transition() (0.9.15) and freshSprites (0.9.16) removed: the author found both counterproductive in every game (G60) - a
+// mode transition keeps one scale and crops in device pixels (the presenter's), a player drawn ahead of its ground sinks
+// into walls).
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -65,10 +66,7 @@
 // every 5 ms - Superfrog's best measured smoothing, symmetric so without lag; it replaces softClamp and smoothY when set;
 // the sprites keep their screen position as in the original, shifted only by the stop at a map edge; 2.0: softClamp and
 // smoothY of 1.0 are gone - camMean replaced them in 1.2 and no game set them), pairOlder (a blinking sprite / object paired with up to n older
-// frames), freshSprites (1.9: the sprites of the newest game frame not later than the display time, at the screen position
-// the hardware gave them, instead of the pair at the delayed display time - a player the camera tracks stands on the screen
-// anyway and answers a key 20-48 ms sooner; it leads its ground by the camera's motion over the display delay while
-// moving, a sprite the camera does not track drifts by that much - Turrican II drew its player this way), fixedAxis
+// frames), fixedAxis
 // { axis, value } (a level whose camera axis is fixed: black outside), passMax (1.1, default 100 ms: when
 // no new pass came for longer, every frame counts as a pass - an interlude drawn by other code), x17 (12-bit colours * 17),
 // subpixel (1.5: the playfield is drawn at the camera snapped to whole device pixels and shifted by the remaining fraction
@@ -88,7 +86,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '2.0.1';
+    const VERSION = '2.1';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -190,7 +188,6 @@ const WBSCENE = (() => {
         if (frames.length && passMax > 0 && frames[frames.length - 1].t - passes[passes.length - 1].t > passMax) passes = frames;   // 1.1: no new pass for a while: every frame is one
         const extC = o.extrapolate || 0, extO = o.extrapolateObjects !== undefined ? o.extrapolateObjects : extC;   // 1.7
         if (takt) { const v = takt.view(ts); tv = v.tv; tvO = v.tvO; }
-        if (view.latC !== undefined) { tv = ts - view.latC; tvO = ts - (view.latO !== undefined ? view.latO : view.latC); }   // 1.8: the view's own latencies (a transition blends them)
         if (takt) { p = takt.pair(frames, tv, extC > 0 ? true : undefined); q = takt.pair(passes, tvO, extO > 0 ? true : undefined); }
         else { p = pairOf(frames, tv); q = pairOf(passes, tvO); }
         if (!p) return null;
@@ -218,17 +215,14 @@ const WBSCENE = (() => {
             const from = pr.from && !jumped([pr.from.x, pr.from.y], [pr.to.x, pr.to.y]) ? pr.from : null;
             return { o: pr.to, x: from ? lerp(from.x, pr.to.x, pr.f) : pr.to.x, y: from ? lerp(from.y, pr.to.y, pr.f) : pr.to.y }; });
         const shist = frames.filter((fr) => fr.t < A.t);
-        let N = null;                                                              // 1.9: the newest frame at or before the display time
-        if (o.freshSprites) { for (const fr of frames) if (fr.t <= ts) N = fr; if (!N) N = B; }
-        const sprs = N ? (N.sprites || []).map((s) => ({ s, x: vcam[0] + ext.x + s.x, y: vcam[1] + ext.y + s.y, screen: true, fresh: true })) :
-        pairById(A, B, f, (fr) => (fr.sprites || []).map((s) => Object.assign({ id: s.id !== undefined ? s.id : s.k }, s)), o.pairOlder || 0, shist, 1 + extC).map((pr) => {
+        const sprs = pairById(A, B, f, (fr) => (fr.sprites || []).map((s) => Object.assign({ id: s.id !== undefined ? s.id : s.k }, s)), o.pairOlder || 0, shist, 1 + extC).map((pr) => {
             if (pr.to.screen) return { s: pr.to, x: vcam[0] + ext.x + pr.to.x, y: vcam[1] + ext.y + pr.to.y, screen: true };   // 1.1: fixed on the screen
             // screen px relative to the window -> world (window of its own frame) -> the view; a jump is not crossed (1.2)
             const fc = pr.from ? frameCam(frames, pr.from, A) : null, fw = fc ? [pr.from.x + fc[0], pr.from.y + fc[1]] : null, tw = [pr.to.x + B.cam[0], pr.to.y + B.cam[1]];
             const from = fw && !jumped(fw, tw) ? fw : null;
             return { s: pr.to, x: from ? lerp(from[0], tw[0], pr.f) : tw[0], y: from ? lerp(from[1], tw[1], pr.f) : tw[1] };
         });
-        return { A, B, f, OA, OB, of, cam: vcam, spriteCam, gcam, win, map: B.map || null, limits: lim, objs, sprs, hud: B.hud || null, freshT: N ? N.t : null,
+        return { A, B, f, OA, OB, of, cam: vcam, spriteCam, gcam, win, map: B.map || null, limits: lim, objs, sprs, hud: B.hud || null,
                  W: win.w + 2 * ext.x, H: win.h + 2 * ext.y, S: view.S || 1, ext, fixed: o.fixedAxis || null, n: B.n, sub: subOf(vcam, view.S || 1, o) };
     }
     /** 1.5: the playfield's camera snapped to whole device pixels and the remaining fraction as weights /256 (x, y). */
@@ -286,32 +280,6 @@ const WBSCENE = (() => {
     }
     /** 1.8: an image of w x h game pixels at scale S: the quad in whole device pixels and the image pixel per device pixel. */
     function quadOf(w, h, S) { const qw = Math.round(w * S), qh = Math.round(h * S); return { w: qw, h: qh, sx: Math.fround(w / qw), sy: Math.fround(h / qh) }; }
-    /** 1.8: the view between two modes over ms (the Codex Superfrog rebuild's transition): e = smoothstep(t); the viewport
-     *  in whole game pixels (extX / extY rounded), the band in whole device pixels (Wd rounded, S = Wd / W - whole only at
-     *  the ends, Hd = round(H * S)), the band's origin and the display latencies blended, the CRT of the source mode in
-     *  the first half and of the target's in the second with its opacity dipped to 40 % (wb-obraz crtOn). from / to:
-     *  { extX, extY, S, x0, y0, latC, latO, crt: { mode, detail, shape, on } ... } - other fields are copied from `to`
-     *  (`from` when e < 1 and they differ? no: from `to`, so give both the same extras). Returns { at(ts), from, to, ms,
-     *  t0 }: at(ts) -> the view for the drawer (+ e, t, done); a reversal is transition(cur.at(ts), from, { t0: ts }). */
-    function transition(from, to, o) {
-        const ms = (o && o.ms) || 450, t0 = (o && o.t0) || 0, win = (o && o.win) || { w: from.W - 2 * from.extX, h: from.H - 2 * from.extY };
-        const sm = (t) => t * t * (3 - 2 * t), L = (a, b, e) => a + (b - a) * e;
-        const crtOn = (e, a, b) => (a > 0 && b > 0) ? (e < .5 ? a * (1 - 1.2 * e) : 1 - 1.2 * (1 - e)) : a + (b - a) * e;
-        const full = (v, e, t, done) => Object.assign({}, v, { W: win.w + 2 * v.extX, H: win.h + 2 * v.extY, e, t, done });
-        const at = (ts) => {
-            const t = Math.min(1, Math.max(0, (ts - t0) / ms));
-            if (t >= 1) return full(to, 1, 1, true);
-            if (t <= 0) return full(from, 0, 0, false);
-            const e = sm(t), extX = Math.round(L(from.extX, to.extX, e)), extY = Math.round(L(from.extY, to.extY, e));
-            const W = win.w + 2 * extX, H = win.h + 2 * extY;
-            const Wd = Math.round(L((win.w + 2 * from.extX) * from.S, (win.w + 2 * to.extX) * to.S, e)), S = Wd / W, Hd = Math.round(H * S);
-            const v = Object.assign({}, to, { extX, extY, W, H, S, Wd, Hd, x0: Math.round(L(from.x0 || 0, to.x0 || 0, e)), y0: Math.round(L(from.y0 || 0, to.y0 || 0, e)), e, t, done: false });
-            if (from.latC !== undefined || to.latC !== undefined) { v.latC = L(from.latC || 0, to.latC || 0, e); v.latO = L(from.latO !== undefined ? from.latO : (from.latC || 0), to.latO !== undefined ? to.latO : (to.latC || 0), e); }
-            if (from.crt || to.crt) { const a = from.crt || { on: 0 }, b = to.crt || { on: 0 }; v.crt = Object.assign({}, t < .5 ? a : b, { on: crtOn(e, a.on || 0, b.on || 0), S: t < .5 ? from.S : to.S }); }
-            return v;
-        };
-        return { at, from, to, ms, t0 };
-    }
     /** 1.6: the window's pixels the model does not explain (Alien Breed SE92's check of its model against the game's own
      *  picture). The model of the window: the clean picture where it has an index, the map through the holes, then the
      *  record's objects at round(x - cam) (what the game blitted into this picture; the project passes the objects the
@@ -601,7 +569,7 @@ const WBSCENE = (() => {
             return { pixels: out, w, h, composition: c };
         }
     }
-    return { VERSION, lerp, clampCam, valueAt, windowMean, pairById, pairOf, fnv1a, x17, widenColumns, compose, reference, unexplained, quadOf, transition, Scene };
+    return { VERSION, lerp, clampCam, valueAt, windowMean, pairById, pairOf, fnv1a, x17, widenColumns, compose, reference, unexplained, quadOf, Scene };
 })();
 if (typeof globalThis !== 'undefined') globalThis.WBSCENE = WBSCENE;
 if (typeof module !== 'undefined') module.exports = WBSCENE;

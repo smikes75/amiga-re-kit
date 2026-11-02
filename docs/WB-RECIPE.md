@@ -1,7 +1,7 @@
 # WB-RECIPE - the display layer of the kit for a new game, on one page (kit 1.0)
 
 The canon `WB-PLYNULOST.md` says WHY every piece is as it is, with the measurements behind it. This page says WHAT a
-game writes. The contract is frozen at kit 1.0: wb-takt 1.4, wb-obraz 1.6, wb-scene 2.0 (2.0.1 in kit 1.0.1), wb-zvuk
+game writes. The contract is frozen at kit 1.0: wb-takt 1.4, wb-obraz 1.6, wb-scene 2.1 (kit 1.0.2), wb-zvuk
 1.1, WBLONGRUN 1.5; it changes only for a gap a game measures (KIT-GAPS), never for a new idea - those wait after 1.0.
 (Revised with Alien Breed SE92's notes from its migration, R1-R15.)
 
@@ -60,8 +60,8 @@ uploaded; the view's camera is never left of the map's edge.
 | option | what it trades | who chose what |
 |---|---|---|
 | `subpixel` | even motion on a 60 / 144 Hz display against sharp edges on whole pixels | Superfrog off (a platformer at zoom 3), Alien Breed II on (top-down) |
-| `freshSprites` | a tracked player answers a key one display delay sooner against a 1-2 px lead over the ground while moving | measured 44 -> 28 ms key -> player |
-| `WBSCENE.transition(from, to)` | the kit's mode transition (the real intermediate viewport, the latencies blended, the CRT by the measured rules) against the game's own | one for all games |
+| the mode transition | the presenter's (wb-obraz, 450 ms smoothstep): ONE scale for the whole transition - the larger mode's - the canvas at the larger view, the viewport cropped in device pixels (fractions through the shift), the display size by CSS only while it runs; the CRT's pattern from a mode's whole scale, the source's in the first half, the target's in the second, dipped to 40 % | never a fractional scale per frame nor a presenter resize per frame (G60: the kit's 0.9.15 transition did both and shimmered) |
+| the player's latency | the sprite moves WITH its ground - a player drawn from a newer frame than the ground leads it at every start, stop and turn and sinks into walls (G60: 0.9.16 freshSprites, 10-15 ms, removed) | the clock's latC is the whole budget |
 | `latC` / `latO` | less display delay against missing pairs (extrapolation fills them) | 20 / 40 with a thread, 28 / 48 Superfrog |
 | `lock` | one game frame per k display frames on a k x 50 Hz display | 'auto' |
 
