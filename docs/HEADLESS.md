@@ -115,7 +115,7 @@ Other masters may need the three hunks transplanted by hand; they are small.
   | `keyboard press 64` | a raw Amiga keycode (`$40` = space) |
 
   `joystick 1 press fire` is a syntax error, `joystick2 press fire` "not a
-  number"; `mouse1` and `keyboard` take no `release`. After an error the
+  number"; `mouse1` and `keyboard` take no `release` (a repeated `mouse1 press left` is another click - measured by the Turrican II project). After an error the
   script stops (see the first point).
 - In warp mode Denise swaps its frame buffer only every 17th frame
   (`DENISE_FRAME_SKIPPING = 16`); a screenshot could be 16 frames older than

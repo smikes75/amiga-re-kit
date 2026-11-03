@@ -40,7 +40,7 @@ them, `arek adf cat` reassembles one with every block verified, and only the
 reassembled file is a packer's input.
 
 `arek scan` finds packers. A *signature* (PP20, RNC, ATN!, IMP!, …) is a hint;
-a *verified* Bytekiller block (header plausible, XOR checksum zero, full
+a *verified* Bytekiller block (header plausible - the 8-byte B or the classic 12-byte BK layout - XOR checksum zero, full
 unpack succeeds) is evidence. When neither fires, the game has its own
 packer — read the decrunch routine (it is always short, always near the
 loader) and re-implement it. `arek.packers` holds four such

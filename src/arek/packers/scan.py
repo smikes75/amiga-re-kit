@@ -11,6 +11,8 @@ Three kinds of evidence, reported separately so nothing is over-claimed:
 * **bytekiller_b** - the format has no magic, but it has an 8-byte header and
   an XOR checksum over the whole stream that must come out 0; a header that
   passes the checksum and then unpacks without error is a very strong hit.
+* **bytekiller_bk** - the classic 12-byte header (packed, unpacked, checksum); the
+  stream's XOR must equal the header's checksum (kit 1.0.4, Turrican II's cracktro).
 * **bytekiller_a** (``deep=True``) - the SWIV word-stream variant has no
   checksum; a block is a hit only if a full unpack succeeds and consumes the
   stream exactly. It is tried only at offsets whose header is plausible.
@@ -100,6 +102,36 @@ def bytekiller_b(data, align=2, verify=True):
     return hits
 
 
+def bytekiller_bk(data, align=2, verify=True):
+    """1.0.4: offsets where the classic 12-byte Bytekiller header (packed length, unpacked length, checksum) is
+    followed by a stream whose longword XOR equals the header's checksum (Turrican II's cracktro layer). With
+    ``verify`` the block is also unpacked."""
+    hits = []
+    n = len(data)
+    off = 0
+    while off + 20 <= n:
+        if off + 12 <= n:
+            packed, size, chk = struct.unpack_from('>III', data, off)
+            if 16 <= size <= MAX_UNPACKED and 4 <= packed <= size + 64 and packed % 4 == 0 and off + 12 + packed <= n:
+                s0 = off + 12
+                x = 0
+                for i in range(s0, s0 + packed, 4):
+                    x ^= struct.unpack_from('>I', data, i)[0]
+                if x == chk:
+                    hit = {'offset': off, 'unpacked': size, 'packed': packed, 'checksum': 'ok', 'format': 'bk'}
+                    if verify:
+                        try:
+                            out, ok = bytekiller.unpack_bk(data, off)
+                            hit['verified'] = ok and len(out) == size
+                        except Exception as e:           # corrupt / false positive
+                            hit['verified'] = False
+                            hit['error'] = str(e)
+                    if not verify or hit['verified']:
+                        hits.append(hit)
+        off += align
+    return hits
+
+
 def bytekiller_a(data, align=2, max_tries=20000):
     """Costly: tries a full format-A unpack at every plausible header."""
     hits, tries = [], 0
@@ -174,7 +206,8 @@ def scan(data, deep=False, align=2):
            'signatures': signatures(data, align),
            'pp20': pp20_blocks(data),
            'atomik': atomik_blocks(data, align),
-           'bytekiller_b': bytekiller_b(data, align)}
+           'bytekiller_b': bytekiller_b(data, align),
+           'bytekiller_bk': bytekiller_bk(data, align)}
     if deep:
         rep['bytekiller_a'] = bytekiller_a(data, align)
     return rep
@@ -188,6 +221,10 @@ def format_report(rep):
         L.append('  %08x  %-6s %s%s' % (h['offset'], h['magic'], h['what'], extra))
     L.append('bytekiller B blocks (checksum ok + unpack ok): %d' % len(rep['bytekiller_b']))
     for h in rep['bytekiller_b']:
+        L.append('  %08x  packed %6d -> unpacked %6d' % (h['offset'], h['packed'], h['unpacked']))
+    bk = rep.get('bytekiller_bk', [])
+    L.append('bytekiller BK blocks (12-byte header, checksum ok + unpack ok): %d' % len(bk))
+    for h in bk:
         L.append('  %08x  packed %6d -> unpacked %6d' % (h['offset'], h['packed'], h['unpacked']))
     if 'bytekiller_a' in rep:
         L.append('bytekiller A blocks (full unpack ok): %d' % len(rep['bytekiller_a']))

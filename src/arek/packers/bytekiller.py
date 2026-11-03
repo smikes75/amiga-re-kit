@@ -14,8 +14,21 @@ register (LSB first), no checksum but a richer code: match lengths of
 1/2/4/8 bits with bases 1/3/7/23, offsets 5/9/14 bits with bases 0/32/544;
 length 23 is stolen as the escape for long literal runs.
 
+Format BK (kit 1.0.4, Turrican II's cracktro layer at $40024, reported by the
+Turrican-recomp project) is the same classic Bytekiller code with the ORIGINAL
+12-byte header::
+
+    +0  long  packed stream length (from +12)
+    +4  long  unpacked length
+    +8  long  checksum: the decruncher starts d5 there and XORs every long it
+              reads; d5 must end at 0
+
+so there is no checksum long inside the stream and no extra long read at the
+end. ``unpack_bk(data, off)`` -> (bytes, checksum_ok); ``detect(data, off)``
+tells which of B / BK verifies at an offset.
+
 ``unpack_b(data, off)`` -> (bytes, checksum_ok); ``unpack_a(data, off)`` -> (bytes, True).
-``pack_b_literal`` is a literal-only encoder for round-trip tests.
+``pack_b_literal`` / ``pack_bk_literal`` are literal-only encoders for round-trip tests.
 """
 
 
@@ -32,10 +45,10 @@ class BitReader:
         roxr.l #1,d0     ; X -> bit31, novy spodni bit -> C
     """
 
-    def __init__(self, data, end):
+    def __init__(self, data, end, checksum=0):
         self.data = data
         self.pos = end          # a0, ukazuje ZA konec proudu
-        self.checksum = 0       # d5
+        self.checksum = checksum  # d5 (format BK starts it at the header's checksum)
         self.buf = self._long()  # d0
 
     def _long(self):
@@ -64,15 +77,9 @@ class BitReader:
         return v
 
 
-def unpack_b(data, off=0):
-    """Rozbali blok na offsetu off. Vraci (data, ok_checksum)."""
-    size = int.from_bytes(data[off:off + 4], "big")
-    packed = int.from_bytes(data[off + 4:off + 8], "big")
-    if size == 0 or size > 8 << 20:
-        raise ValueError("nesmyslna delka rozbalenych dat: %d" % size)
-
+def _decode_b(br, size):
+    """The classic Bytekiller code (formats B and BK share it): writes backwards into ``size`` bytes."""
     out = bytearray(size)
-    br = BitReader(data, off + 8 + packed)
     p = size                                    # a1, zapis pozpatku
 
     def literals(n):
@@ -107,8 +114,46 @@ def unpack_b(data, off=0):
             else:
                 literals(br.bits(8) + 9)        # 9..264 literalu
 
+    return out
+
+
+def unpack_b(data, off=0):
+    """Rozbali blok na offsetu off. Vraci (data, ok_checksum)."""
+    size = int.from_bytes(data[off:off + 4], "big")
+    packed = int.from_bytes(data[off + 4:off + 8], "big")
+    if size == 0 or size > 8 << 20:
+        raise ValueError("nesmyslna delka rozbalenych dat: %d" % size)
+
+    br = BitReader(data, off + 8 + packed)
+    out = _decode_b(br, size)
     br._long()                                  # zaverecny longword (0x9c)
     return bytes(out), br.checksum == 0
+
+def unpack_bk(data, off=0):
+    """Format BK: the classic 12-byte header (packed length, unpacked length, checksum). Returns (data, ok_checksum)."""
+    packed = int.from_bytes(data[off:off + 4], "big")
+    size = int.from_bytes(data[off + 4:off + 8], "big")
+    chk = int.from_bytes(data[off + 8:off + 12], "big")
+    if size == 0 or size > 8 << 20:
+        raise ValueError("nesmyslna delka rozbalenych dat: %d" % size)
+    if packed < 4 or off + 12 + packed > len(data):
+        raise ValueError("nesmyslna delka zabalenych dat: %d" % packed)
+    br = BitReader(data, off + 12 + packed, chk)
+    out = _decode_b(br, size)
+    return bytes(out), br.checksum == 0
+
+
+def detect(data, off=0):
+    """Which header layout verifies at ``off``: 'bk', 'b' or None (both decoded, both checksums checked)."""
+    for fmt, fn in (('bk', unpack_bk), ('b', unpack_b)):
+        try:
+            _, ok = fn(data, off)
+        except (ValueError, IndexError):
+            ok = False
+        if ok:
+            return fmt
+    return None
+
 
 
 class BitReaderA:
@@ -277,3 +322,14 @@ def pack_b_literal(data):
     stream = struct.pack('>I', checksum) + stream
     packed = len(stream)
     return struct.pack('>II', len(data), packed) + stream
+
+
+def pack_bk_literal(data):
+    """Format BK stream of literal runs only: the 12-byte header (packed, unpacked, checksum) and the backwards
+    longword stream; the checksum is the XOR of the stream's longs so that the decruncher's d5 ends at 0."""
+    b = pack_b_literal(data)
+    stream = b[8 + 4:]                           # drop the 8-byte header and the extra first long of format B
+    checksum = 0
+    for i in range(0, len(stream), 4):
+        checksum ^= int.from_bytes(stream[i:i + 4], 'big')
+    return struct.pack('>III', len(stream), len(data), checksum) + stream

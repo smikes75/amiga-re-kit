@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.3 on PyPI, 2504 tests. Extracted from five game
+- **The kit:** version 1.0.4 on PyPI, 2522 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -47,7 +47,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2504 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2522 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -65,7 +65,7 @@ arek init myproject && cd myproject    # skeleton + local.conf (edit the paths)
 arek adf info  disk.adf                # size, sha256, boot block, checksum
 arek adf map   disk.adf                # entropy picture, one char per sector
 arek adf regions disk.adf              # where code / data / packed blocks sit
-arek scan      disk.adf                # packer signatures, verified Bytekiller blocks
+arek scan      disk.adf                # packer signatures, verified Bytekiller blocks (formats B and BK)
 
 # 2. unpack what the loader unpacks
 arek adf track  disk.adf -n 1 -o trk1.bin
@@ -171,7 +171,7 @@ asks for (see `examples/profile.example.json`).
 | `arek.adf` | geometry, boot block checksum, entropy map / regions, inventory | new |
 | `arek.amigados` | AmigaDOS OFS/FFS reader (directories, files, extension blocks, checksums) + synthetic image builder for tests | new |
 | `arek.packers.pp20` | PowerPacker 2.0 decruncher (+ literal-only encoder for tests) | Turrican II / Superfrog |
-| `arek.packers.bytekiller` | Bytekiller format B (XOR checksum) and the SWIV word-stream format A | S.W.I.V. |
+| `arek.packers.bytekiller` | Bytekiller format B (8-byte header, XOR checksum), BK (the classic 12-byte header; kit 1.0.4) and the SWIV word-stream format A | S.W.I.V., Turrican II |
 | `arek.packers.turrican2` | Huffman → backwards LZ → RLE three-stage decruncher | Turrican II |
 | `arek.packers.atomik` | Atomik (`ATN!`) decruncher with exact block extent (+ greedy LZ test encoder) | Superfrog |
 | `arek.packers.scan` | brute-force scan: signatures (PP20, RNC, ATN!, IMP!, …) + verified blocks | S.W.I.V. |

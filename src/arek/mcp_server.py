@@ -132,7 +132,7 @@ def scan_packed(path: str, deep: bool = False) -> dict:
 
 @mcp.tool()
 def unpack(path: str, out: str, kind: str = 'auto', offset: str = '0') -> dict:
-    """Unpack a block to ``out``. kind: auto | pp20 | atn | bytekiller | bytekiller_a | t2."""
+    """Unpack a block to ``out``. kind: auto | pp20 | atn | bytekiller (B or BK by checksum) | bytekiller_b | bytekiller_bk | bytekiller_a | t2."""
     from .packers import atomik, bytekiller, pp20, turrican2
     data = _bytes(path)
     off = _addr(offset)
@@ -143,8 +143,14 @@ def unpack(path: str, out: str, kind: str = 'auto', offset: str = '0') -> dict:
         res, ok = pp20.unpack(data[off:]), True
     elif kind == 'atn':
         res, ok = atomik.unpack(data[off:]), True
-    elif kind == 'bytekiller':
+    elif kind == 'bytekiller':                    # 1.0.4: the header layout by checksum (B: 8 bytes, BK: the classic 12 bytes)
+        kind = bytekiller.detect(data, off) or 'b'
+        res, ok = (bytekiller.unpack_bk if kind == 'bk' else bytekiller.unpack_b)(data, off)
+        kind = 'bytekiller_' + kind
+    elif kind == 'bytekiller_b':
         res, ok = bytekiller.unpack_b(data, off)
+    elif kind == 'bytekiller_bk':
+        res, ok = bytekiller.unpack_bk(data, off)
     elif kind == 'bytekiller_a':
         res, ok = bytekiller.unpack_a(data, off)
     elif kind == 't2':

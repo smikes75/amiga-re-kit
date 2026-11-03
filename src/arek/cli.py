@@ -150,12 +150,16 @@ def cmd_pp20(a):
 def cmd_bytekiller(a):
     from .packers import bytekiller
     data = rd(a.file)
-    if a.format == 'b':
-        out, ok = bytekiller.unpack_b(data, a.offset)
-        if not ok:
-            print('warning: checksum mismatch', file=sys.stderr)
+    fmt = a.format
+    if fmt == 'auto':                             # 1.0.4: B (8-byte header) or BK (the classic 12-byte header)
+        fmt = bytekiller.detect(data, a.offset) or 'b'
+    if fmt == 'a':
+        out, ok = bytekiller.unpack_a(data, a.offset)
     else:
-        out, _ = bytekiller.unpack_a(data, a.offset)
+        out, ok = (bytekiller.unpack_bk if fmt == 'bk' else bytekiller.unpack_b)(data, a.offset)
+        if not ok:
+            print('warning: checksum mismatch (format %s; try --format %s)' % (fmt, 'b' if fmt == 'bk' else 'bk'), file=sys.stderr)
+    print('format %s: %d bytes' % (fmt, len(out)), file=sys.stderr)
     wr(a.out, out)
 
 
@@ -869,10 +873,10 @@ def build_parser():
     s.add_argument('-o', '--out', required=True)
     s.set_defaults(fn=cmd_pp20)
 
-    s = sp.add_parser('bytekiller', help='unpack a Bytekiller block (format B, or A for SWIV)')
+    s = sp.add_parser('bytekiller', help='unpack a Bytekiller block (B: 8-byte header, BK: the classic 12-byte header, A: SWIV; auto = B or BK by checksum)')
     s.add_argument('file')
     s.add_argument('-o', '--out', required=True)
-    s.add_argument('--format', choices=['b', 'a'], default='b')
+    s.add_argument('--format', choices=['auto', 'b', 'bk', 'a'], default='auto')
     s.add_argument('--offset', type=A, default=0)
     s.set_defaults(fn=cmd_bytekiller)
 

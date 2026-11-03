@@ -25,6 +25,30 @@ def test_bytekiller_b_roundtrip(rnd, n):
     assert ok and out == d
 
 
+@pytest.mark.parametrize('n', [1, 2, 3, 4, 7, 8, 9, 31, 32, 33, 100, 264, 265, 300, 1000, 4097])
+def test_bytekiller_bk_roundtrip(rnd, n):
+    d = rnd(n)
+    p = bytekiller.pack_bk_literal(d)
+    assert int.from_bytes(p[4:8], 'big') == n and int.from_bytes(p[:4], 'big') == len(p) - 12
+    out, ok = bytekiller.unpack_bk(p)
+    assert ok and out == d
+    assert bytekiller.detect(p) == 'bk'
+
+
+def test_bytekiller_detect_tells_b_from_bk(rnd):
+    d = rnd(500)
+    assert bytekiller.detect(bytekiller.pack_b_literal(d)) == 'b'
+    assert bytekiller.detect(bytekiller.pack_bk_literal(d)) == 'bk'
+    assert bytekiller.detect(rnd(64)) is None
+
+
+def test_bytekiller_bk_checksum_detects_corruption(rnd):
+    p = bytearray(bytekiller.pack_bk_literal(rnd(200)))
+    p[16] ^= 0x40                                   # flip a bit inside the stream
+    out, ok = bytekiller.unpack_bk(bytes(p))
+    assert not ok
+
+
 def test_bytekiller_checksum_detects_corruption(rnd):
     p = bytearray(bytekiller.pack_b_literal(rnd(200)))
     p[12] ^= 0x40                                   # flip a bit inside the stream
@@ -37,14 +61,17 @@ def test_scan_finds_blocks_and_signatures(rnd):
     d = rnd(300)
     bk = bytekiller.pack_b_literal(d)
     img[4000:4000 + len(bk)] = bk
+    bkk = bytekiller.pack_bk_literal(d)
+    img[6000:6000 + len(bkk)] = bkk
     pp = pp20.pack_literal(d)
     img[9000:9000 + len(pp)] = pp
     img[12000:12004] = b'RNC\x01'
     rep = scan.scan(bytes(img))
     assert [h['offset'] for h in rep['bytekiller_b']] == [4000]
+    assert [h['offset'] for h in rep['bytekiller_bk']] == [6000] and rep['bytekiller_bk'][0]['unpacked'] == 300
     magics = {(h['offset'], h['magic']) for h in rep['signatures']}
     assert (9000, 'PP20') in magics and (12000, 'RNC\x01') in magics
-    assert 'bytekiller' in scan.format_report(rep)
+    assert 'bytekiller' in scan.format_report(rep) and 'BK blocks' in scan.format_report(rep)
 
 
 def test_scan_pp20_file_verified(rnd):
