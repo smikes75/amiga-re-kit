@@ -244,3 +244,73 @@ def test_potgo_readback_and_cia_timer(tmp_path):
     t0, t1 = (before >> 8) * 227 + (before & 0xff), (after >> 8) * 227 + (after & 0xff)
     assert 100 * 5 <= t1 - t0 <= 100 * 5 + 60                                              # 100 E ticks of 5 CCK, then the poll and the stores
     assert 'io_unknown 0' in r.stderr
+
+
+MAIN_IRQ, LOOP_IRQ, L3_IRQ, COPLIST_IRQ = 0x1000, 0x1046, 0x1100, 0x1800
+PROG_IRQ = {
+    COPLIST_IRQ: '6401fffe'          # WAIT line 100
+              '009c8010'          # MOVE INTREQ, SET|COPER
+              'fffffffe',
+    MAIN_IRQ: '4df900dff000'         # lea $dff000,a6
+           '3d7cc050009a'         # move.w #$c050,$9a(a6)   INTENA: master + COPER + BLIT
+           '3d7c09f00040'         # BLTCON0: A -> D, minterm $f0
+           '3d7c00000042'         # BLTCON1
+           '3d7cffff0044'         # BLTAFWM
+           '3d7cffff0046'         # BLTALWM
+           '2d7c000050000050'     # BLTAPT = $5000
+           '2d7c000060000054'     # BLTDPT = $6000
+           '3d7c00000064'         # BLTAMOD
+           '3d7c00000066'         # BLTDMOD
+           '3d7c00410058'         # BLTSIZE: 1 line x 1 word
+           '52784000'             # loop: addq.w #1,$4000
+           '60fa',                #       bra.s loop
+    L3_IRQ: '303900dff01e'           # move.w $dff01e,d0          INTREQR as the handler sees it
+         '31c04002'               # move.w d0,$4002
+         '52784004'               # addq.w #1,$4004
+         '33fc005000dff09c'       # move.w #$50,$dff09c        clear COPER + BLIT
+         '4e73',                  # rte
+}
+
+
+def test_mid_frame_start_keeps_the_coppers_irq_and_a_blit_raises_blit(tmp_path):
+    """1.0.5 (Turrican II KIT-GAPS 2, 3): a trace that starts after the line where the Copper wrote INTREQ must not
+    raise that frame's COPER again (the state already carries it); a blit the CPU starts sets INTREQ BLIT when it ends."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    img = bytearray(0x2000)
+    for at, hx in PROG_IRQ.items():
+        img[at:at + len(hx) // 2] = bytes.fromhex(hx)
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN_IRQ, L3_IRQ], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1046u',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', '-DHOST_L3_PC=0x1100u',
+                    os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'),
+                    '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', 0x02c0)                     # DMAEN + COPEN + BLTEN
+    creg[0x82:0x84] = struct.pack('>H', COPLIST_IRQ)
+    (st / 'creg.bin').write_bytes(creg)
+    t0 = 150 * 227                                                  # the start: line 150, after the Copper's INTREQ at line 100
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 %d 0 1000\nfe 0 0 0 0 5500\n100\n' % t0)
+    out = tmp_path / 'run.vtr'
+    r = subprocess.run([str(exe), str(st), str(out), '4', '--full'], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    irqs = [x for x in trace.records(str(out)) if x['pc'] == L3_IRQ]
+    seen = [struct.unpack('>H', x['ranges'][0][0x4002:0x4004])[0] for x in irqs]   # record k holds what handler k-1 read
+    assert len(irqs) >= 3, (len(irqs), [(x['frame'], x['v'], hex(v)) for x, v in zip(irqs, seen)], r.stderr)
+    # frame 100: exactly one entry - the blit's, right after the start (no COPER: its write at line 100 lies before t0)
+    first = [x for x in irqs if x['frame'] == 100]
+    assert len(first) == 1 and 150 <= first[0]['v'] <= 156, [(x['frame'], x['v']) for x in irqs]
+    assert seen[1] & 0x0040 and not seen[1] & 0x0010, hex(seen[1])
+    # the frames after: COPER at the Copper's line, no BLIT (the blit ran once)
+    later = [x for x in irqs if x['frame'] > 100]
+    assert later and all(100 <= x['v'] <= 103 for x in later), [(x['frame'], x['v']) for x in later]
+    assert all(v & 0x0010 and not v & 0x0040 for v in seen[2:]), [hex(v) for v in seen]

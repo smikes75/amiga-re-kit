@@ -67,6 +67,9 @@ them, SR (`Flags`) and CIA-A; a trace armed at the same stop supplies SR otherwi
    measured 18 CCK, not 11); at the end: Paula to the end, the picture, shots, `h_frame_done_cb`,
    the new frame (`arek_glue_frame`, `arek_paula_frame`), VERTB pending, `h_frame_cb` (inputs);
    VERTB becomes visible `H_VBL_LAT` (10) CCK into the frame; COPER when the Copper wrote INTREQ;
+   a run that starts after that write (a state taken mid-frame) does not raise that frame's COPER again
+   (1.0.5); BLIT when a blit the CPU started (BLTSIZE) ends as the bus model sees it (1.0.5; a blit the Copper
+   starts does not set it yet);
 3. Paula's events up to now, the picture up to the current line;
 4. `h_pc_cb(m, pc)` - the emulator's breakpoint fires here, before an interrupt is accepted, and
    again after the handler's rte;
