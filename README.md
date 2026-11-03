@@ -16,14 +16,17 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 [FAQ](https://smikes75.github.io/amiga-re-kit/faq.html); Czech mirror).
 **Feedback:** [GitHub Discussions](https://github.com/smikes75/amiga-re-kit/discussions).
 
-## Status, October 2026
+## Status, November 2026
 
-- **Alien Breed II** (Team17, 1993): intro, title and levels 1–2 playable at
-  https://smikes75.github.io/arek-play/alienbreed2/ with your own disk images
-  (A500 version, disks 1 and 2 as `.adf`; the preserved Fairlight dumps are
-  verified, an original retail disk is not yet; AGA is not supported).
-  Original and Enhanced modes, one or two players.
-- **Superfrog** (Team17, 1993): in verification, not playable yet.
+- **Alien Breed II** (Team17, 1993): the whole game playable at
+  https://arek.fun/alienbreed2/ with your own disk images (A500 version,
+  disks 1 and 2 as `.adf`; the preserved Fairlight dumps are verified, an
+  original retail disk is not yet; AGA is not supported). Original and
+  Enhanced modes, one or two players; levels 1–2 measured against the
+  original, the later levels are being checked.
+- **Superfrog** (Team17, 1993): the whole game playable at
+  https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
+  verified against the original with a recorded run.
 - **The kit:** version 1.0.3 on PyPI, 2504 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
