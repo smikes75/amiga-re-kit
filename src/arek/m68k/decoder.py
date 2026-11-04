@@ -772,6 +772,12 @@ def walk(data, base, start, lo, hi, flow=NOFLOW, cache=None):
             elif not stub_for(i.ea):
                 indirect.append((a, 'jmp ' + i.ea.text))
         nxt = successors(i)
+        for t in list(nxt):                              # 1.0.14 (Turrican II KIT-GAPS 21): a branch nowhere - outside the address space
+            if t == i.end and t >= base + len(data):
+                continue                                 # the fall-through off the end: the rule below
+            if t < 0 or t > 0xffffff or (not (lo <= t < hi) and not flow.lib and not flow.run_time(t) and not flow.boundary(t)):
+                bad.append((a, 'branch outside the code range to $%x' % (t & 0xffffffff) if t >= 0 else 'branch to a negative address'))
+                nxt = [x for x in nxt if x != t]         # (or out of a non-module translation's range): data decoded as a branch
         if i.end in nxt and i.end >= base + len(data):   # 1.0.13 (Turrican II KIT-GAPS 18, 20): FALLING THROUGH off the end of the
             bad.append((i.end, 'runs past the end of the image'))   # image is a frontier; a branch to code outside it (resident code,
             nxt = [t for t in nxt if t != i.end]         # another area) stays an external target, as before 1.0.12

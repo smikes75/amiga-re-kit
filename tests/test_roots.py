@@ -99,3 +99,30 @@ def test_walk_marks_a_flow_leaving_the_image():
     rep = {}
     recomp.generate(img + b'', 0x1000, auto=[0x1000], auto_soft=True, report=rep)
     assert rep['dropped'] and 'past the end' in rep['dropped'][0][1]
+
+
+def test_auto_soft_drops_a_root_that_branches_nowhere():
+    """1.0.14 (Turrican II KIT-GAPS 21): data decoded as a bra to a negative address (or out of a resident translation's
+    range) is a frontier: --auto-soft drops the root instead of the generator refusing 'skok mimo funkci na $-25c8'."""
+    img = bytearray(0x100)
+    img[0x000:0x004] = bytes.fromhex('70014e75')                 # $1000 good root
+    img[0x010:0x014] = bytes.fromhex('6000') + (0x10000 - 0x2000).to_bytes(2, 'big')   # $1010 bra.w $-ffe: below 0
+    rep = {}
+    src, _, entries = recomp.generate(bytes(img), 0x1000, auto=[0x1000, 0x1010], auto_soft=True, report=rep)
+    assert 0x1000 in entries and 0x1010 not in entries
+    assert rep['dropped'] and 'negative' in rep['dropped'][0][1], rep
+
+
+def test_scan_finds_a_pointer_inside_word_long_pairs():
+    """1.0.14 (Turrican II KIT-GAPS 22): in a table of (word, long) pairs the misaligned long read across a word and the
+    next pointer's high word can itself land on code; a run that went on at a stride of 4 then jumped over the next
+    aligned pointer (the final boss's handler of Turrican II 5-2)."""
+    img = bytearray(0x20100)
+    img[0x1000:0x1004] = bytes.fromhex('70014e75')                # code
+    img[0x1180:0x1184] = bytes.fromhex('70024e75')                # code: the pointer that was missed
+    img[0x20000:0x20004] = bytes.fromhex('70034e75')              # code where the misaligned read lands
+    img[0x100:0x104] = struct.pack('>I', 0x1000)                  # L1
+    img[0x104:0x106] = bytes.fromhex('0002')                      # w2: (w2 << 16 | hi(L2)) = $20000, code
+    img[0x106:0x10a] = struct.pack('>I', 0x1180)                  # L2
+    r = roots.scan(bytes(img), 0)
+    assert 0x1180 in r and 'ptr' in r[0x1180], sorted(hex(a) for a in r)

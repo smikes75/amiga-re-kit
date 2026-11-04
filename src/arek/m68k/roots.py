@@ -86,8 +86,15 @@ def scan(data, base, lo=None, hi=None, min_slots=4, min_run=1, kinds=('slots', '
             else:
                 a += 2
     if 'ptr' in kinds:
+        # every start position counts (1.0.14, Turrican II KIT-GAPS 22: a run read at a stride of 4 from the word before
+        # a pointer jumped over the next aligned one); a position already read inside a run is not started again, so a
+        # long block of equal values stays linear
+        done = set()
         p = lo
         while p + 4 <= hi:
+            if p in done:
+                p += 2
+                continue
             run = []
             q = p
             while q + 4 <= hi:
@@ -95,13 +102,12 @@ def scan(data, base, lo=None, hi=None, min_slots=4, min_run=1, kinds=('slots', '
                 if not lo <= v < hi or not code_at(v):
                     break
                 run.append(v)
+                done.add(q)
                 q += 4
             if len(run) >= min_run:
                 for v in run:
                     add(v, 'ptr')
-                p = q
-            else:
-                p += 2
+            p += 2
     for a, i in ins.items():
         if 'lea' in kinds and i.kind in ('lea', 'pea'):
             t = getattr(i.ea, 'absval', None)
