@@ -45,7 +45,7 @@ def test_an_unknown_module_stops_with_its_fingerprint(tmp_path):
         run(tmp_path, MAIN, {}, auto=(0x1000, 0x1010), flow=MAIN_FLOW, extra_c=extra, ram_init={0x2000: MOD_X})
     assert e.value.returncode == 5
     src = module(MOD_A, 'ovA_')
-    assert '0x%016xull' % fnv1a64(MOD_A) in src and 'ovl_ovA__register' in src and ', 0x2000u, 4u); }' in src
+    assert '0x%016xull' % fnv1a64(MOD_A) in src and 'ovl_ovA__register' in src and ', 0x2000u, 4u, 0x' in src
 
 
 def test_module_anywhere_in_a_larger_area_and_the_unknown_hook(tmp_path):
@@ -108,3 +108,23 @@ def test_module_branch_into_resident_code_is_external():
     rep = {}
     _, _, entries = recomp.generate(bytes(img), base, auto=[0x20700, 0x20710], flow=fl, auto_soft=True, report=rep)
     assert rep['dropped'] == [] and {0x20700, 0x20710} <= set(entries)
+
+
+def test_a_module_running_past_its_area_is_found_through_a_pointer(tmp_path):
+    """1.0.15 (Turrican II KIT-GAPS 23): two areas (an intro and a music block are loaded at once); a level module at the
+    first area's base runs past its end. A call through a pointer into its code beyond the boundary must reach it - its
+    extent covers the address and its fingerprint matches - not only modules whose base lies in the second area."""
+    big = bytearray(0xa0)
+    big[0x00:0x04] = bytes.fromhex('70014e75')                 # $2000 moveq #1,d0 ; rts
+    big[0x90:0x94] = bytes.fromhex('70094e75')                 # $2090 moveq #9,d0 ; rts  (in the second area)
+    big = bytes(big)
+    src_big, _, _ = recomp.generate(big, 0x2000, auto=[0x2000, 0x2090],
+                                    flow=Flow(prefix=('lv_', 0x2000, 0x20a0), lib=True, module=(0x2000, 4)))
+    small = bytes.fromhex('70054e75')                          # the music module at $2080 (not loaded now)
+    src_small, _, _ = recomp.generate(small, 0x2080, auto=[0x2080],
+                                      flow=Flow(prefix=('mu_', 0x2080, 0x2100), lib=True, module=(0x2080, 4)))
+    main = '4eb82090' '4e75'                                   # jsr $2090.w ; rts
+    two = Flow(overlays=[(0x2000, 0x80, 4), (0x2080, 0x80, 4)])
+    d, *_ = run(tmp_path, main, {}, auto=(0x1000,), flow=two, extra_c='\n' + src_big + '\n' + src_small,
+                ram_init={0x2000: big})
+    assert d[0] == 9

@@ -643,10 +643,10 @@ static uint32_t INLINE_RET = 0;     /* where a routine with data after its call 
    area as it is now, so modules may lie anywhere in the area and several may share it. An unknown module stops the
    run (exit 5) unless the host defines OVERLAY_HOOK and overlay_unknown_hook(m, base, entry, fp). */
 typedef void (*OvlFn)(M68 *m, uint32_t a);
-static struct { uint64_t fp; OvlFn fn; const char *name; uint32_t base, key; } OVL[64];
+static struct { uint64_t fp; OvlFn fn; const char *name; uint32_t base, key, end; } OVL[64];
 static int OVL_N = 0;
-void overlay_register(uint64_t fp, OvlFn fn, const char *name, uint32_t base, uint32_t key) {
-    if (OVL_N < 64) { OVL[OVL_N].fp = fp; OVL[OVL_N].fn = fn; OVL[OVL_N].name = name; OVL[OVL_N].base = base; OVL[OVL_N].key = key; OVL_N++; }
+void overlay_register(uint64_t fp, OvlFn fn, const char *name, uint32_t base, uint32_t key, uint32_t end) {   /* 1.0.15: end = the module's extent */
+    if (OVL_N < 64) { OVL[OVL_N].fp = fp; OVL[OVL_N].fn = fn; OVL[OVL_N].name = name; OVL[OVL_N].base = base; OVL[OVL_N].key = key; OVL[OVL_N].end = end; OVL_N++; }
 }
 #ifdef OVERLAY_HOOK
 void overlay_unknown_hook(M68 *m, uint32_t base, uint32_t entry, uint64_t fp);
@@ -710,7 +710,7 @@ class Gen:
         self.emit('void overlay_call(M68 *m, uint32_t a);')
         self.emit('void call_addr(M68 *m, uint32_t a);')
         if self.flow.module:
-            self.emit('void overlay_register(uint64_t fp, void (*fn)(M68 *, uint32_t), const char *name, uint32_t base, uint32_t key);')
+            self.emit('void overlay_register(uint64_t fp, void (*fn)(M68 *, uint32_t), const char *name, uint32_t base, uint32_t key, uint32_t end);')
         self.emit()
         for s, e, entry in self.funcs:
             self.gen_func(s, e, entry)
@@ -773,6 +773,12 @@ class Gen:
         for b, n, k in self.flow.overlays:
             self.emit('    if (a - 0x%xu < 0x%xu) { base = 0x%xu; size = 0x%xu; key = %du; }' % (b, n, b, n, k))
         self.emit('    if (!size) unknown_call(a);')
+        self.emit('    {   /* 1.0.15 (Turrican II KIT-GAPS 23): a loaded module whose EXTENT covers a, whichever area a falls in; of several, the')
+        self.emit('        * nearest base (an intro and a music block loaded at once; a level module whose code runs past its area) */')
+        self.emit('        int best = -1;')
+        self.emit('        for (int i = 0; i < OVL_N; i++)')
+        self.emit('            if (OVL[i].base <= a && a < OVL[i].end && (best < 0 || OVL[i].base > OVL[best].base) && OVL[i].fp == overlay_fp(OVL[i].base, OVL[i].key)) best = i;')
+        self.emit('        if (best >= 0) { OVL[best].fn(m, a); return; } }')
         self.emit('    for (int i = 0; i < OVL_N; i++)')
         self.emit('        if (OVL[i].base - base < size && OVL[i].fp == overlay_fp(OVL[i].base, OVL[i].key)) { OVL[i].fn(m, a); return; }')
         self.emit('    uint64_t fp = overlay_fp(a, key);')
@@ -804,6 +810,9 @@ class Gen:
         if off < 0 or off + key > len(self.data):
             raise Unsupported('overlay module: $%x+%d is outside the image' % (base, key))
         fp = fnv1a64(self.data[off:off + key])
+        end = self.base + len(self.data)                 # 1.0.15: the module's extent - its image, cut by the --prefix range
+        if self.flow.prefix and self.flow.prefix[2]:
+            end = min(end, self.flow.prefix[2])
         name = self.flow.prefix[0] or 'module_%x' % base
         self.emit('static void ovl_%s(M68 *m, uint32_t a) {' % name)
         self.emit('    switch (a) {')
@@ -813,7 +822,7 @@ class Gen:
         self.emit('    unknown_call(a);')
         self.emit('}')
         self.emit('__attribute__((constructor)) static void ovl_%s_register(void) '
-                  '{ overlay_register(0x%016xull, ovl_%s, "%s", 0x%xu, %du); }' % (name, fp, name, name, base, key))
+                  '{ overlay_register(0x%016xull, ovl_%s, "%s", 0x%xu, %du, 0x%xu); }' % (name, fp, name, name, base, key, end))
         self.emit()
 
     def all_entries(self):

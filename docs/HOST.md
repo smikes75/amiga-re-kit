@@ -48,7 +48,9 @@ handlers at run time, an intro and a level (1.0.6, Turrican II). Overlays: insid
 ordinary call - walked and translated (1.0.11); only targets outside it in an overlay area go through `overlay_call`.
 The module fingerprint (`overlay_fp`, 256 bytes of RAM) is a raw read of the host, not a CPU access - until
 1.0.6 it was bus-counted and every `overlay_call` cost emulated time (Turrican II: 7 modules = 9 lines of the frame,
-seen as a loop 2-8 lines slower than the original). Overlays: one area holds ONE module at a time -
+seen as a loop 2-8 lines slower than the original). Overlays (1.0.15): `overlay_call` first takes a loaded module whose EXTENT (its image, cut by --prefix) covers the
+address and whose fingerprint matches - of several, the nearest base - so a level module whose code runs past its
+area is reached through pointers too (Turrican II); otherwise, as before, one area holds ONE module at a time -
 `overlay_call` takes the first registered module whose base lies in the area and whose fingerprint matches, for any
 address of the area; two modules loaded at once (an intro and a music block) need two areas (`--overlay A:n B:m`).
 `HOST_ACK_HANDLER(name, bits)` makes a handler that only acknowledges INTREQ bits, for a level the
