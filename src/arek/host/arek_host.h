@@ -310,4 +310,32 @@ void tick_hook(M68 *m, uint32_t pc, uint32_t clocks) {
       if (H_IRQS != n0 && h_pc_cb) h_pc_cb(m, pc); }   /* after the rte the pc is reached again: the breakpoint fires twice */
     arek_glue_insn(pc, clocks);
 }
+
+/* 1.0.8 (Turrican II KIT-GAPS 12): an --extern routine that replaces a loader or a decruncher in C spends the time the
+ * original took - the game's phase against its interrupts stays. cck = the ELAPSED time from the routine's entry to its
+ * return as measured in the original (clocks per decrunched byte, frames per track...), INCLUDING the interrupt handlers
+ * taken meanwhile: the spend ends when the host's clock reaches entry + cck, whatever ran inside (a handler longer
+ * than what is left ends it right after). access_every > 0 = one CPU access into the slot map every so many CCK (the
+ * original's loop took slots: the blitter beside it slows down), 0 = none. Time moves in steps of HOST_SPEND_STEP CCK;
+ * at every step the frame's events run and an interrupt is accepted as at an instruction boundary (its handler runs
+ * inside the spend, like in a WAIT_LOOP). The routine's own memory effect goes before or after the call (a disk read
+ * writes its buffer after, as the hardware). Natively and in the engine alike. host_elapsed() = the host's clock in CCK
+ * (absolute, across frames) for an extern that wants to stop at a measured end itself. */
+#ifndef HOST_SPEND_STEP
+#define HOST_SPEND_STEP 32.0
+#endif
+double host_elapsed(void) { return h_abs(); }
+void host_spend(M68 *m, double cck, double access_every) {
+    const double end = h_abs() + cck; double acc = 0;
+    while (h_abs() < end) {
+        double left = end - h_abs(), step = left < HOST_SPEND_STEP ? left : HOST_SPEND_STEP;
+        { ArekBus *bb = arek_glue_bus(); double t = arek_glue_time() + step;
+          if (access_every > 0) { acc += step; while (acc >= access_every) { acc -= access_every; t = arek_bus_access(bb, t); } }
+          arek_glue_set_time(t); }
+        host_events();
+        arek_paula_run(&H_PAULA, h_abs());
+        { int ln = (int)(h_now() / HOST_HPOS); if (ln > ARD_NEXT) ard_until(ln); }
+        host_irq(m, H_PC);                                   /* a handler taken here advances the clock: its time counts */
+    }
+}
 #endif

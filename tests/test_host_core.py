@@ -446,3 +446,103 @@ def test_blit_crossing_the_frame_end_goes_on_in_the_next_frame(tmp_path):
     bl = second.count(25)
     assert 6000 < bl < 9000, bl                                     # the rest of the blit: ~7 300 slots in the next frame
     assert second[:32 * 227].count(25) > 6000 and second[40 * 227:].count(25) == 0   # in lines 0-32, nothing after
+
+
+def test_host_trace_reglog_regs_selects_the_registers(tmp_path):
+    """1.0.8 (Turrican II KIT-GAPS 11): host_trace --reglog-regs 040-058 records the blitter registers; the default set does not."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    img = bytearray(0x2000)
+    for at, hx in PROG_BX.items():
+        img[at:at + len(hx) // 2] = bytes.fromhex(hx)
+    img[0x6c:0x70] = struct.pack('>I', 0x1300)
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN_BX, 0x1300], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x104eu',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=host_vec_l3',
+                    os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'),
+                    '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    ram[0x1800:0x1804] = bytes.fromhex('fffffffe')
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', 0x0200)
+    creg[0x82:0x84] = struct.pack('>H', 0x1800)
+    (st / 'creg.bin').write_bytes(creg)
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
+    out = tmp_path / 'run.vtr'
+    r = subprocess.run([str(exe), str(st), str(out), '2', '--reglog', str(tmp_path / 'r1.bin'), '--reglog-regs', '040-058,096'], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    rows = trace.read_reglog(str(tmp_path / 'r1.bin'))
+    regs = [(x['reg'], x['value']) for x in rows]
+    assert (0x058, 0x7414) in regs and (0x040, 0x09f0) in regs and (0x096, 0x8440) in regs, regs[:12]
+    assert all(0x040 <= x['reg'] <= 0x058 or x['reg'] == 0x096 for x in rows)
+    r = subprocess.run([str(exe), str(st), str(out), '2', '--reglog', str(tmp_path / 'r2.bin')], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    regs2 = [x['reg'] for x in trace.read_reglog(str(tmp_path / 'r2.bin'))]
+    assert 0x096 in regs2 and 0x058 not in regs2                      # the default set: DMACON yes, BLTSIZE no
+    r = subprocess.run([str(exe), str(st), str(out), '2', '--reglog', str(tmp_path / 'r3.bin'), '--reglog-regs', 'xyz'], capture_output=True, text=True)
+    assert r.returncode != 0 and 'reglog-regs' in r.stderr
+
+
+MAIN_SP, L3_SP, EXT_SP, TICK_SP = 0x1000, 0x1100, 0x1400, 0x1012
+PROG_SP = {
+    MAIN_SP: '4df900dff000'         # lea $dff000,a6
+             '3d7cc020009a'         # move.w #$c020,$9a(a6)   INTENA: master + VERTB
+             '4eb900001400'         # jsr $1400               the --extern (a loader replaced in C): spends two frames
+             '52784000'             # tick: addq.w #1,$4000
+             '60fa',                #       bra.s tick
+    L3_SP: '52784002'               # addq.w #1,$4002         VERTB count
+           '33fc002000dff09c'       # move.w #$20,$dff09c     clear VERTB
+           '4e73',                  # rte
+}
+EXTERN_SP = r"""
+void f_spend(M68 *m) { host_spend(m, 2.0 * 313 * 227 + 10, 0); m->a[7] += 4; }   /* the rts of the replaced routine */
+"""
+
+
+def test_extern_spends_the_originals_time_with_interrupts_served(tmp_path):
+    """1.0.8 (Turrican II KIT-GAPS 12): an --extern that calls host_spend() moves the host's time on; the VERTB
+    interrupts of the frames it covers are taken inside it, and the game resumes two frames later."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    img = bytearray(0x2000)
+    for at, hx in PROG_SP.items():
+        img[at:at + len(hx) // 2] = bytes.fromhex(hx)
+    fl = recomp.flow_from_specs(bytes(img), 0, extern=['1400=f_spend'])
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN_SP, L3_SP], flow=fl, timing=True, bus_table=True)
+    assert 'f_spend(m)' in src
+    (tmp_path / 'game.c').write_text(src + EXTERN_SP)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1012u',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', '-DHOST_L3_PC=0x1100u',
+                    os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'),
+                    '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    ram[0x1800:0x1804] = bytes.fromhex('fffffffe')
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', 0x0200)
+    creg[0x82:0x84] = struct.pack('>H', 0x1800)
+    (st / 'creg.bin').write_bytes(creg)
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
+    out = tmp_path / 'run.vtr'
+    r = subprocess.run([str(exe), str(st), str(out), '4', '--full'], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    recs = list(trace.records(str(out)))
+    irqs = [x for x in recs if x['pc'] == L3_SP]
+    ticks = [x for x in recs if x['pc'] == TICK_SP]
+    assert ticks and ticks[0]['frame'] == 102 and ticks[0]['v'] <= 1, (ticks[0]['frame'], ticks[0]['v'])   # the game resumes two frames later
+    assert [x['frame'] for x in irqs[:2]] == [101, 102], [(x['frame'], x['v']) for x in irqs]            # VERTB taken inside the spend
+    assert struct.unpack('>H', ticks[0]['ranges'][0][0x4002:0x4004])[0] >= 2                            # the handler ran twice before the first tick

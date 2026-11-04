@@ -168,6 +168,8 @@ uint8_t SLOWLOG[SLOWSZ];
 #endif
 
 typedef struct { uint32_t d[8], a[8]; int x, n, z, v, c; uint32_t srhi; } M68;
+void host_spend(M68 *m, double cck, double access_every);   /* arek_host.h 1.0.8: an --extern routine spends the original's elapsed time (its interrupt handlers inside it); defined by the host, unused elsewhere */
+double host_elapsed(void);                                 /* arek_host.h 1.0.8: the host's clock in CCK, absolute */
 void exit_point(M68 *m, uint32_t at);   /* a Flow.exits routine was called: the host ends the run */
 
 %%PROFILE%%

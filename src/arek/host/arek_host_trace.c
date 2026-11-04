@@ -4,7 +4,7 @@
  *   cc -O2 -I lib -DGAME_SRC='"game.c"' -DTICK_PC=0xc01c72u -DHOST_ENTRY=f_c01c72 -DHOST_L3=f_c13e1c \
  *      arek_host_trace.c arek_bus.c arek_bus_vamiga.c -lm -o host_trace
  *   host_trace STATE_DIR OUT.vtr FRAMES [INPUTS.txt] [--full] [--skip-stack N] [--own FILE] [--pclog FILE PCS.txt]
- *              [--reglog FILE] [--audlog FILE] [--shots PREFIX FIRST:LAST]
+ *              [--reglog FILE] [--reglog-regs SPEC] [--audlog FILE] [--shots PREFIX FIRST:LAST]
  * A record at every pass of TICK_PC outside an interrupt (the game's tick) and, with HOST_L3_PC, at every entry of the
  * level-3 handler; ranges 0:MEMSZ and SLOWBASE:SLOWSZ as FNV-1a 64 hashes (like --range ...h), with --full the bytes.
  * INPUTS: line k = the keys of frame k (R L U D F S, as arek fuzz writes them); line 0 applies from the start.
@@ -94,8 +94,21 @@ static void r_aud(int ch, double t, int value) {
     fwrite(rec, 4, 3, R_AUD);
 }
 static FILE *R_REG = 0;
+static uint8_t R_MASK[0x100]; static int R_MASKED = 0;   /* 1.0.8: --reglog-regs 040-076,09c,... (Turrican II KIT-GAPS 11); else the default set */
+static int r_regs_parse(const char *spec) {
+    memset(R_MASK, 0, sizeof R_MASK);
+    while (*spec) {
+        char *e; unsigned a = (unsigned)strtoul(spec, &e, 16), b = a;
+        if (e == spec) return 0;
+        if (*e == '-') { b = (unsigned)strtoul(e + 1, &e, 16); }
+        for (unsigned r = a & ~1u; r <= b && r < 0x200; r += 2) R_MASK[r >> 1] = 1;
+        spec = *e == ',' ? e + 1 : e;
+    }
+    R_MASKED = 1; return 1;
+}
 static void r_reg(uint32_t off, uint32_t v) {
-    if (!(off == 0x096 || off == 0x09a || off == 0x09c || off == 0x09e || (off >= 0x0a0 && off < 0x0e0))) return;
+    if (R_MASKED) { if (off >= 0x200 || !R_MASK[off >> 1]) return; }
+    else if (!(off == 0x096 || off == 0x09a || off == 0x09c || off == 0x09e || (off >= 0x0a0 && off < 0x0e0))) return;
     long tt = (long)h_now();
     uint32_t rec[4] = { (uint32_t)(H_FRAME0 + H_FRAME), (uint32_t)(((tt / HOST_HPOS) << 16) | (tt % HOST_HPOS)), (off << 16) | (v & 0xffff), H_PC & 0xffffff };
     fwrite(rec, 4, 4, R_REG);
@@ -115,7 +128,7 @@ static void rdfile(const char *dir, const char *n, void *buf, size_t len) {
     FILE *f = fopen(p, "rb"); if (!f || fread(buf, 1, len, f) != len) { fprintf(stderr, "read %s\n", p); exit(1); } fclose(f);
 }
 int main(int argc, char **argv) {
-    if (argc < 4) { fprintf(stderr, "host_trace STATE_DIR OUT.vtr FRAMES [INPUTS.txt] [--full] [--skip-stack N] [--own F] [--pclog F PCS] [--reglog F] [--audlog F] [--shots P A:B]\n"); return 1; }
+    if (argc < 4) { fprintf(stderr, "host_trace STATE_DIR OUT.vtr FRAMES [INPUTS.txt] [--full] [--skip-stack N] [--own F] [--pclog F PCS] [--reglog F] [--reglog-regs SPEC] [--audlog F] [--shots P A:B]\n"); return 1; }
     MAXFRAMES = atol(argv[3]);
     for (int i = 4; i < argc; i++) {
         if (!strcmp(argv[i], "--full")) { FULL = 1; continue; }
@@ -131,6 +144,7 @@ int main(int argc, char **argv) {
             }
             if (pf) fclose(pf); continue; }
         if (!strcmp(argv[i], "--reglog") && i + 1 < argc) { R_REG = fopen(argv[++i], "wb"); h_wr_cb = r_reg; continue; }
+        if (!strcmp(argv[i], "--reglog-regs") && i + 1 < argc) { if (!r_regs_parse(argv[++i])) { fprintf(stderr, "--reglog-regs: hex offsets and ranges, e.g. 040-076,09c\n"); return 1; } continue; }
         if (!strcmp(argv[i], "--audlog") && i + 1 < argc) { R_AUD = fopen(argv[++i], "wb"); h_sample_cb = r_aud; continue; }
         if (!strcmp(argv[i], "--shots") && i + 2 < argc) { H_SHOT_PREFIX = argv[++i]; sscanf(argv[++i], "%ld:%ld", &H_SHOT_FIRST, &H_SHOT_LAST); continue; }
         FILE *f = fopen(argv[i], "r"); if (!f) { perror(argv[i]); return 1; }

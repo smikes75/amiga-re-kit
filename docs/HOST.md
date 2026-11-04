@@ -34,6 +34,14 @@ cc -O2 -I lib -DGAME_SRC='"game.c"' -DTICK_PC=0xc01c72u -DHOST_ENTRY=f_c01c72 -D
 word after DMA on and the end of every block - as a sound driver that chains blocks through AUDxINT needs).
 The host calls a handler directly (`H_ENTER`), never through a pointer, so a browser build with
 `ASYNCIFY_IGNORE_INDIRECT` can sleep in a wait loop inside the handler (Alien Breed II, G37).
+`host_spend(m, cck, access_every)` (1.0.8): an `--extern` routine that replaces a loader or a decruncher in C spends
+the ELAPSED time the original took from entry to return (measured: clocks per decrunched byte, frames per track),
+including the interrupt handlers taken meanwhile - the spend ends when the host's clock reaches entry + cck; time moves
+in steps, the frame's events run and interrupts are taken inside, as in a WAIT_LOOP (`host_elapsed()` = the clock in CCK); `access_every` > 0 adds one CPU access to the slot map
+every so many CCK (the original's loop took slots; the blitter beside it slows down). The routine's own memory effect
+goes before or after the call. `host_trace --reglog-regs 040-076,09c` chooses the registers the host's reglog records
+(the default: DMACON, INTENA, INTREQ, ADKCON, AUDx), the syntax of `trace run --reglog-regs`.
+
 `HOST_VECTOR_HANDLER(name, vec)` makes a handler that jumps through the game's own vector in RAM
 (`host_vec_l3/l4/l5` for $6c/$70/$74 are ready: `-DHOST_L3=host_vec_l3`) - for a game that changes its
 handlers at run time, an intro and a level (1.0.6, Turrican II). Overlays: the module fingerprint (`overlay_fp`, 256 bytes of RAM) is a raw read of the host, not a CPU access - until
