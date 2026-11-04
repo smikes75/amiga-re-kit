@@ -75,3 +75,19 @@ def test_flow_specs_and_cli(tmp_path):
     assert cli.main(['recomp', str(g), '--base', '0x2000', '--auto', '0x2000', '--lib', '--prefix', 'ovA_:2000:2100',
                      '--overlay-module', '2000:4', '-o', str(tmp_path / 'a.c')]) == 0
     assert 'overlay_register(0x' in (tmp_path / 'a.c').read_text()
+
+
+def test_module_translates_its_own_direct_calls():
+    """1.0.11 (Turrican II KIT-GAPS 15): inside an overlay module (--lib --prefix --overlay-module), a direct bsr to an
+    address of the module itself is an ordinary call - its target is walked and translated, not left to overlay_call
+    (which found no function: "unknown routine" when the game reached it)."""
+    from arek.m68k import recomp
+    base = 0x20700
+    img = bytearray(0x200)
+    img[0x000:0x004] = bytes.fromhex('6100009e')                 # $20700 bsr.w $207a0
+    img[0x004:0x006] = bytes.fromhex('4e75')
+    img[0x0a0:0x004 + 0x0a0] = bytes.fromhex('70074e75')         # $207a0 moveq #7,d0 ; rts  (not a root)
+    fl = recomp.flow_from_specs(bytes(img), base, prefix='M05:20700:20900', overlay=['20700:200'], lib=True, module='20700')
+    src, _, entries = recomp.generate(bytes(img), base, auto=[0x20700], flow=fl)
+    assert 0x207a0 in entries, entries
+    assert 'overlay_call(m, 0x207a0u)' not in src and 'f_M05' in src

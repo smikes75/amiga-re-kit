@@ -59,3 +59,19 @@ def test_cli_and_auto_soft(tmp_path, capsys):
                      '-o', str(tmp_path / 'g.c')]) == 0
     err = capsys.readouterr().err
     assert 'root 001300 dropped' in err and 'void f_001100(' in (tmp_path / 'g.c').read_text()
+
+
+def test_auto_soft_drops_a_root_whose_call_tree_reaches_data():
+    """1.0.11 (Turrican II KIT-GAPS 16): a root found by a static scan that calls (bsr) into bytes that are not code is
+    dropped too - not only a root whose own first words are bad; the good root stays."""
+    img = bytearray(0x400)
+    img[0x000:0x004] = bytes.fromhex('70014e75')                 # $1000 good root: moveq #1,d0 ; rts
+    img[0x100:0x104] = bytes.fromhex('61004e75'[:4]) + bytes.fromhex('00fe')   # $1100 bsr.w $1200 (offset $fe from $1102)
+    img[0x104:0x106] = bytes.fromhex('4e75')
+    img[0x200:0x204] = bytes.fromhex('fdfdfdfd')                 # $1200 data
+    with pytest.raises(Unsupported):
+        recomp.generate(bytes(img), 0x1000, auto=[0x1000, 0x1100])
+    rep = {}
+    src, _, entries = recomp.generate(bytes(img), 0x1000, auto=[0x1000, 0x1100], auto_soft=True, report=rep)
+    assert 0x1000 in entries and 0x1100 not in entries and 'void f_001000(' in src
+    assert rep['dropped'] and rep['dropped'][0][0] == 0x1100 and 'reaches $1200' in rep['dropped'][0][1], rep

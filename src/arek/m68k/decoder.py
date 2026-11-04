@@ -551,6 +551,15 @@ class Flow:
     def in_module(self, addr):
         return self.prefix[1] <= addr < self.prefix[2]
 
+    def own_module(self, addr):
+        """1.0.11: ``addr`` lies inside THIS overlay module (a --lib translation with a prefix range): a direct call
+        there is an ordinary call of the module, walked and translated, not an overlay_call (Turrican II KIT-GAPS 15)."""
+        return bool(self.lib and self.prefix and self.prefix[0] and self.prefix[1] <= addr < self.prefix[2])
+
+    def run_time(self, addr):
+        """A target only known at run time: an overlay area, unless it is this module's own code."""
+        return bool(self.overlay_of(addr)) and not self.own_module(addr)
+
     def boundary(self, addr):
         """Translation does not continue into this address."""
         return addr in self.stops or addr in self.rets or addr in self.exits or addr in self.externs
@@ -727,7 +736,7 @@ def walk(data, base, start, lo, hi, flow=NOFLOW, cache=None):
         mode = getattr(getattr(i, 'ea', None), 'mode', None)
         if i.kind == 'bsr' or (i.kind == 'jsr' and mode in FLOW_MODES):
             t = i.target if i.kind == 'bsr' else i.ea.absval
-            if flow.overlay_of(t):                        # a module loaded at run time
+            if flow.run_time(t):                          # a module loaded at run time (not this module's own code)
                 work.append(i.end)
                 continue
             calls.add(t)
@@ -746,7 +755,7 @@ def walk(data, base, start, lo, hi, flow=NOFLOW, cache=None):
                 calls.update(flow.indirect[a])
             elif not stub_for(i.ea):
                 indirect.append((a, 'jsr ' + i.ea.text))
-        elif i.kind == 'jmp' and (a in flow.dynamic or (mode in FLOW_MODES and flow.overlay_of(i.ea.absval))):
+        elif i.kind == 'jmp' and (a in flow.dynamic or (mode in FLOW_MODES and flow.run_time(i.ea.absval))):
             continue                                      # run time: call_addr / overlay_call
         elif i.kind == 'jmp' and mode in FLOW_MODES and a in flow.indirect:   # rewritten operand
             work.extend(flow.indirect[a])

@@ -904,7 +904,7 @@ class Gen:
                 return 'goto L%06x;' % target
         elif start <= target < end:
             return 'goto L%06x;' % target
-        if fl.overlay_of(target):
+        if fl.run_time(target):
             return 'overlay_call(m, 0x%xu); return;' % target
         if target in self.entries:
             return '%s(m); return;' % fl.fname(target)
@@ -1345,7 +1345,7 @@ class Gen:
                 self.br(nxt, start, end, ins)]
 
     def call(self, target):
-        if self.flow.overlay_of(target):
+        if self.flow.run_time(target):
             return 'overlay_call(m, 0x%xu);' % target
         if target in self.entries:
             return '%s(m);' % self.flow.fname(target)
@@ -1558,18 +1558,35 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
         auto = list(auto)
         tree = call_tree(data, base, auto, lo, hi, flow)
         if auto_soft:
+            # 1.0.11 (Turrican II KIT-GAPS 16): a root is dropped when ANY routine its call tree reaches has
+            # undecodable words (a root found by a static scan that leads into data through a bsr), not only when the
+            # root's own walk does; a routine with bad words reached from no root at all cannot exist
             while True:
-                called = set()
-                for e, (ins, calls, bad, ind) in tree.items():
-                    called |= set(calls)
-                dropped = [e for e in auto if e in tree and tree[e][2] and e not in called]
+                badr = {e for e, v in tree.items() if v[2]}
+                if not badr:
+                    break
+                def reach(r0):
+                    seen, work = set(), [r0]
+                    while work:
+                        x = work.pop()
+                        if x in seen or x not in tree:
+                            continue
+                        seen.add(x); work.extend(tree[x][1])
+                    return seen
+                dropped = []
+                for e in list(auto):
+                    hit = reach(e) & badr
+                    if hit:
+                        b = min(hit)
+                        dropped.append((e, b))
                 if not dropped:
                     break
-                for e in dropped:
+                for e, b in dropped:
                     if report is not None:
-                        report['dropped'].append((e, tree[e][2][0][1]))
+                        why = tree[b][2][0][1]
+                        report['dropped'].append((e, why if b == e else 'reaches $%x: %s' % (b, why)))
                     auto.remove(e)
-                tree = call_tree(data, base, auto, lo, hi, flow)
+                tree = call_tree(data, base, auto, lo, hi, flow) if auto else {}
         first, found, seen = None, [], set()
         for e, (ins, calls, bad, ind) in tree.items():
             for site, why in bad + ind:

@@ -44,7 +44,9 @@ goes before or after the call. `host_trace --reglog-regs 040-076,09c` chooses th
 
 `HOST_VECTOR_HANDLER(name, vec)` makes a handler that jumps through the game's own vector in RAM
 (`host_vec_l3/l4/l5` for $6c/$70/$74 are ready: `-DHOST_L3=host_vec_l3`) - for a game that changes its
-handlers at run time, an intro and a level (1.0.6, Turrican II). Overlays: the module fingerprint (`overlay_fp`, 256 bytes of RAM) is a raw read of the host, not a CPU access - until
+handlers at run time, an intro and a level (1.0.6, Turrican II). Overlays: inside a module (`--lib --prefix NAME:LO:HI --overlay-module`), a direct bsr / jsr to its own range is an
+ordinary call - walked and translated (1.0.11); only targets outside it in an overlay area go through `overlay_call`.
+The module fingerprint (`overlay_fp`, 256 bytes of RAM) is a raw read of the host, not a CPU access - until
 1.0.6 it was bus-counted and every `overlay_call` cost emulated time (Turrican II: 7 modules = 9 lines of the frame,
 seen as a loop 2-8 lines slower than the original). Overlays: one area holds ONE module at a time -
 `overlay_call` takes the first registered module whose base lies in the area and whose fingerprint matches, for any
