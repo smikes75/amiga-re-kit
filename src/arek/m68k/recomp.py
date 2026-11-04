@@ -413,8 +413,8 @@ static void run_blit(void) {
     if (!w) w = 64;
     uint32_t apt = bltptr(0x050), bpt = bltptr(0x04c);
     uint32_t cpt = bltptr(0x048), dpt = bltptr(0x054);
-    int16_t amod = CREG[0x064 >> 1], bmod = CREG[0x062 >> 1];
-    int16_t cmod = CREG[0x060 >> 1], dmod = CREG[0x066 >> 1];
+    int16_t amod = (int16_t)(CREG[0x064 >> 1] & 0xfffe), bmod = (int16_t)(CREG[0x062 >> 1] & 0xfffe);   /* 1.0.9: bit 0 of a modulo is ignored by the hardware (Turrican II KIT-GAPS 13: DMOD $21 = $20, the intro logo) */
+    int16_t cmod = (int16_t)(CREG[0x060 >> 1] & 0xfffe), dmod = (int16_t)(CREG[0x066 >> 1] & 0xfffe);
     uint16_t afwm = CREG[0x044 >> 1], alwm = CREG[0x046 >> 1];
     int step = desc ? -2 : 2;
     BZERO = 1;
@@ -449,10 +449,10 @@ static void run_blit(void) {
             if (usec) cpt += step;
             if (used) dpt += step;
         }
-        if (usea) apt += amod;
-        if (useb) bpt += bmod;
-        if (usec) cpt += cmod;
-        if (used) dpt += dmod;
+        if (usea) apt = desc ? apt - amod : apt + amod;   /* 1.0.9: descending mode subtracts the modulo (HRM blitter: "added or, in descending mode, subtracted") */
+        if (useb) bpt = desc ? bpt - bmod : bpt + bmod;
+        if (usec) cpt = desc ? cpt - cmod : cpt + cmod;
+        if (used) dpt = desc ? dpt - dmod : dpt + dmod;
     }
     set_bltptr(0x050, apt); set_bltptr(0x04c, bpt);
     set_bltptr(0x048, cpt); set_bltptr(0x054, dpt);

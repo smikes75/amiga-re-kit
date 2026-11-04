@@ -169,3 +169,7 @@ is proven and what is *not measured*, explicitly.
 Those refusals are features: everything the kit says is backed by a
 measurement, so a document built from its output can be trusted by someone
 who has never seen the game.
+
+The translation runtime's area blitter (run_blit): a modulo is a word quantity, its bit 0 is ignored as on the
+hardware (DMOD $21 acts as $20 - Turrican II's intro logo, 1.0.9); in descending mode the pointers run down a row and
+the modulo is subtracted at its end (HRM), ascending adds it.

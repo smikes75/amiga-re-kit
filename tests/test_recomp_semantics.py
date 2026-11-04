@@ -402,3 +402,25 @@ def test_overlay_fingerprint_is_not_a_cpu_access():
     body = R.RUNTIME[R.RUNTIME.index('static uint64_t overlay_fp'):]
     body = body[:body.index('return h;')]
     assert 'rd8_raw(base + i)' in body and 'h ^= rd8(' not in body
+
+
+def test_blitter_modulo_ignores_bit_0(tmp_path):
+    """1.0.9 (Turrican II KIT-GAPS 13): a modulo is a word quantity - the hardware ignores its bit 0 (DMOD $21 acts as $20;
+    with $21 kept, the intro logo's rows landed a byte off)."""
+    prog = ('33fcaaaa00006000' + '33fcbbbb00006002'                       # two source words, rows of one word
+            + mw(0x040, 0x09f0) + mw(0x042, 0) + mw(0x044, 0xffff) + mw(0x046, 0xffff)
+            + ml(0x050, 0x6000) + ml(0x054, 0x6100) + mw(0x064, 0) + mw(0x066, 3)   # DMOD 3: acts as 2
+            + mw(0x058, (2 << 6) | 1))
+    *_, mem = run(tmp_path, prog, {})
+    assert mem[0x6100:0x6106].hex() == 'aaaa0000bbbb'                  # row 1 at +4 (2 + 2), not at an odd +5
+
+
+def test_blitter_descending_subtracts_the_modulo(tmp_path):
+    """1.0.9: in descending mode the pointers run down a row and the modulo is subtracted at its end (HRM)."""
+    prog = ('33fccccc00005ffe' + '33fcaaaa00006000' + '33fcbbbb00006002'
+            + mw(0x040, 0x09f0) + mw(0x042, 0x0002) + mw(0x044, 0xffff) + mw(0x046, 0xffff)   # DESC
+            + ml(0x050, 0x6002) + ml(0x054, 0x6102) + mw(0x064, 2) + mw(0x066, 2)           # modulo 2: skip a word between rows
+            + mw(0x058, (2 << 6) | 1))
+    *_, mem = run(tmp_path, prog, {})
+    assert mem[0x6102:0x6104].hex() == 'bbbb' and mem[0x60fe:0x6100].hex() == 'cccc'   # row 1 from $5ffe to $60fe
+    assert mem[0x6100:0x6102].hex() == '0000'                                             # the skipped word untouched
