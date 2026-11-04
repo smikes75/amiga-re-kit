@@ -284,7 +284,7 @@ def test_mid_frame_start_keeps_the_coppers_irq_and_a_blit_raises_blit(tmp_path):
     src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN_IRQ, L3_IRQ], timing=True, bus_table=True)
     (tmp_path / 'game.c').write_text(src)
     exe = tmp_path / 'host_trace'
-    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1046u',
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1ffeu',    # never executed: records only at the handler's entry (a spinning loop made GBs)
                     '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', '-DHOST_L3_PC=0x1100u',
                     os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'),
                     '-lm', '-o', str(exe)], check=True)
@@ -323,8 +323,11 @@ PROG_L5 = {
                 'fffffffe',
     MAIN_L5: '4df900dff000'        # lea $dff000,a6
              '3d7cc800009a'        # move.w #$c800,$9a(a6)   INTENA: master + RBF
-             '52784000'            # loop: addq.w #1,$4000
-             '60fa',               #       bra.s loop
+             '30384004'            # loop: move.w $4004,d0   the handler's counter
+             'b0784004'            # w:    cmp.w $4004,d0    a wait loop: one pass of the tick per handler
+             '67fa'                #       beq.s w
+             '52784000'            # tick: addq.w #1,$4000   ($1016)
+             '60f0',               #       bra.s loop
     L5_HANDLER: '52784004'         # addq.w #1,$4004
                 '303900dff01e'     # move.w $dff01e,d0
                 '31c04002'         # move.w d0,$4002
@@ -348,7 +351,7 @@ def test_copper_raises_any_intreq_bit_through_the_games_vector(tmp_path):
     src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN_L5, L5_HANDLER, 0x1300], timing=True, bus_table=True)
     (tmp_path / 'game.c').write_text(src)
     exe = tmp_path / 'host_trace'
-    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x100cu',
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1016u',
                     '-DHOST_ENTRY=f_001000', '-DHOST_L3=host_vec_l3', '-DHOST_L5=host_vec_l5',
                     os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'),
                     '-lm', '-o', str(exe)], check=True)
@@ -367,9 +370,7 @@ def test_copper_raises_any_intreq_bit_through_the_games_vector(tmp_path):
     r = subprocess.run([str(exe), str(st), str(out), '4', '--full'], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert 'irqs 4' in r.stderr, r.stderr                                                   # one level 5 per frame
-    ticks = list(trace.records(str(out)))                                                  # the spinning loop: a record per pass
-    counts = [struct.unpack('>H', x['ranges'][0][0x4004:0x4006])[0] for x in ticks]
-    firsts = [ticks[i] for i in range(1, len(ticks)) if counts[i] != counts[i - 1]]      # the pass right after each handler
+    firsts = list(trace.records(str(out)))                                                 # one record per handler (the wait loop)
     assert len(firsts) >= 3 and all(100 <= x['v'] <= 104 for x in firsts), [(x['frame'], x['v']) for x in firsts]   # at the Copper's line
     seen = [struct.unpack('>H', x['ranges'][0][0x4002:0x4004])[0] for x in firsts]
     assert all(v & 0x0800 and not v & 0x0010 for v in seen), [hex(v) for v in seen]        # RBF pending, no COPER
@@ -496,8 +497,8 @@ PROG_SP = {
     MAIN_SP: '4df900dff000'         # lea $dff000,a6
              '3d7cc020009a'         # move.w #$c020,$9a(a6)   INTENA: master + VERTB
              '4eb900001400'         # jsr $1400               the --extern (a loader replaced in C): spends two frames
-             '52784000'             # tick: addq.w #1,$4000
-             '60fa',                #       bra.s tick
+             '52784000'             # tick: addq.w #1,$4000   (passed once)
+             '60fe',                # bra.s *
     L3_SP: '52784002'               # addq.w #1,$4002         VERTB count
            '33fc002000dff09c'       # move.w #$20,$dff09c     clear VERTB
            '4e73',                  # rte
@@ -546,3 +547,62 @@ def test_extern_spends_the_originals_time_with_interrupts_served(tmp_path):
     assert ticks and ticks[0]['frame'] == 102 and ticks[0]['v'] <= 1, (ticks[0]['frame'], ticks[0]['v'])   # the game resumes two frames later
     assert [x['frame'] for x in irqs[:2]] == [101, 102], [(x['frame'], x['v']) for x in irqs]            # VERTB taken inside the spend
     assert struct.unpack('>H', ticks[0]['ranges'][0][0x4002:0x4004])[0] >= 2                            # the handler ran twice before the first tick
+
+
+MAIN_L2, L2_H, TICK_L2 = 0x1000, 0x1200, 0x1010
+PROG_L2 = {
+    MAIN_L2: '33fcc00800dff09a'    # move.w #$c008,$dff09a INTENA master + PORTS
+             '33fc800800dff09c'    # move.w #$8008,$dff09c INTREQ SET|PORTS (as CIA-A's SP does on a key)
+             '52784000'            # tick: addq.w #1,$4000   (passed once, after the handler)
+             '60fe',               # bra.s *
+    L2_H: '52784002'               # addq.w #1,$4002
+          '33fc000800dff09c'       # move.w #$8,$dff09c    clear PORTS
+          '4e73',                  # rte
+    0x1300: '4e73',
+}
+
+
+def test_level_2_through_the_games_vector(tmp_path):
+    """1.0.12 (Turrican II KIT-GAPS 19): host_vec_l2 jumps through the game's vector $68 - PORTS (the keyboard's SP in
+    CIA-A) reaches the game's level-2 handler."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    img = bytearray(0x2000)
+    for at, hx in PROG_L2.items():
+        img[at:at + len(hx) // 2] = bytes.fromhex(hx)
+    img[0x68:0x6c] = struct.pack('>I', L2_H)
+    img[0x6c:0x70] = struct.pack('>I', 0x1300)
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN_L2, L2_H, 0x1300], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x%xu' % TICK_L2,
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=host_vec_l3', '-DHOST_L2=host_vec_l2',
+                    os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'),
+                    '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    ram[0x1800:0x1804] = bytes.fromhex('fffffffe')
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', 0x0200)
+    creg[0x82:0x84] = struct.pack('>H', 0x1800)
+    (st / 'creg.bin').write_bytes(creg)
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
+    out = tmp_path / 'run.vtr'
+    r = subprocess.run([str(exe), str(st), str(out), '2', '--full'], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    ticks = list(trace.records(str(out)))
+    n = struct.unpack('>H', ticks[-1]['ranges'][0][0x4002:0x4004])[0]
+    assert n == 1 and 'irqs 1' in r.stderr, (n, r.stderr)         # the level-2 handler ran once, through $68
+
+
+def test_engine_key_raises_ports():
+    """1.0.12 (KIT-GAPS 19): the engine's key puts SP into CIA-A ICR AND raises INTREQ PORTS when the game enabled SP."""
+    src = open(os.path.join(HOST, 'arek_host_engine.c')).read()
+    i = src.index('static void e_apply_keys(void)')
+    body = src[i:src.index('\n}', i)]
+    assert 'H_CIAA_ICR |= 0x08' in body and 'h_cia_raise(0)' in body

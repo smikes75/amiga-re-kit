@@ -146,7 +146,7 @@ static void e_apply_keys(void) {
         H_CIAA_PRA = (uint8_t)((H_CIAA_PRA & 0xbf) | (f ? 0 : 0x40));
     }
     int c = E_KEY_CODE;
-    if (c >= 0) { H_CIAA_SDR = (uint8_t)~((c << 1) | (E_KEY_DOWN ? 0 : 1)); H_CIAA_ICR |= 0x08; E_KEY_CODE = -1; }
+    if (c >= 0) { H_CIAA_SDR = (uint8_t)~((c << 1) | (E_KEY_DOWN ? 0 : 1)); H_CIAA_ICR |= 0x08; E_KEY_CODE = -1; h_cia_raise(0); }   /* 1.0.12: SP in ICR raises PORTS when the game enabled it (Turrican II KIT-GAPS 19) */
 }
 static void e_frame_start(void) { e_apply_keys(); }
 /* the frame is drawn (ARD_PIX): its screenshot, its samples into the ring, its record; the page may now read them */

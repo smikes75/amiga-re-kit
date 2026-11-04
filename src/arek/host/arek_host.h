@@ -264,9 +264,12 @@ HOST_ACK_HANDLER(host_ack_audio, 0x0780)
  * $6c / $70 / $74 at run time - an intro and a level with different handlers): call_addr() of the translation reaches
  * the handler as any other entry; the handler's rte returns here (Turrican II). -DHOST_L3=host_vec_l3 etc. */
 #define HOST_VECTOR_HANDLER(name, vec) void name(M68 *m) { call_addr(m, ((uint32_t)rd16_raw((uint32_t)(vec)) << 16) | rd16_raw((uint32_t)(vec) + 2)); }
+HOST_VECTOR_HANDLER(host_vec_l1, 0x64)
+HOST_VECTOR_HANDLER(host_vec_l2, 0x68)             /* 1.0.12: CIA-A / PORTS - the keyboard (Turrican II KIT-GAPS 19) */
 HOST_VECTOR_HANDLER(host_vec_l3, 0x6c)
 HOST_VECTOR_HANDLER(host_vec_l4, 0x70)
 HOST_VECTOR_HANDLER(host_vec_l5, 0x74)
+HOST_VECTOR_HANDLER(host_vec_l6, 0x78)
 static void host_irq(M68 *m, uint32_t pc) {
     uint16_t intena = CREG[0x09a >> 1];
     if (!(intena & 0x4000)) return;

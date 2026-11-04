@@ -724,7 +724,13 @@ def walk(data, base, start, lo, hi, flow=NOFLOW, cache=None):
     seen, work = set(), [start]
     while work:
         a = work.pop()
-        if a in seen or not (lo <= a < hi) or flow.boundary(a):
+        if a in seen or flow.boundary(a):
+            continue
+        if not (base <= a < base + len(data)):        # 1.0.12 (Turrican II KIT-GAPS 18): the flow leaves the image (a fall-through
+            seen.add(a)                               # off its end): not walkable - a frontier, so --auto-soft drops such a root
+            bad.append((a, 'runs past the end of the image'))
+            continue
+        if not (lo <= a < hi):
             continue
         seen.add(a)
         try:

@@ -5,7 +5,8 @@ which needed 1 929 of them for 17 levels):
 - ``slots``: tables of ``bra.w`` slots (a jump table of 4-byte branches, ``jsr (table,pc,d0)``);
 - ``ptr``: longwords in the image that point at the start of an instruction of the code range
   (pointer tables, object records with handler addresses);
-- ``lea``: the target of ``lea``/``pea`` when a slot table starts there (the table's base);
+- ``lea``: the target of ``lea``/``pea`` when a slot table starts there (the table's base), or any decodable
+  target (1.0.12: a routine whose address is passed in a register);
 - ``imm``: ``move.l #addr,...`` with a code address (a handler stored into a structure at run time,
   which the walker never sees - KIT-GAPS G30 of Alien Breed II).
 
@@ -55,6 +56,21 @@ def scan(data, base, lo=None, hi=None, min_slots=4, min_run=1, kinds=('slots', '
     ins = instructions(data, base, lo, hi)
     starts = set(ins)
     roots = {}
+    _code = {}
+
+    def code_at(v):
+        """1.0.12 (Turrican II KIT-GAPS 17): an instruction decodes at v - the linear sweep can be out of step there
+        (data before a routine), so membership in its starts alone missed real routines (a module header's pointer)."""
+        if v in starts:
+            return True
+        if v & 1 or not lo <= v < hi:
+            return False
+        if v not in _code:
+            try:
+                decoder.decode(data, base, v); _code[v] = True
+            except Exception:
+                _code[v] = False
+        return _code[v]
 
     def add(a, kind):
         roots.setdefault(a, set()).add(kind)
@@ -76,7 +92,7 @@ def scan(data, base, lo=None, hi=None, min_slots=4, min_run=1, kinds=('slots', '
             q = p
             while q + 4 <= hi:
                 v = struct.unpack('>I', data[q - base:q - base + 4])[0] & 0xffffff
-                if v not in starts or not lo <= v < hi:
+                if not lo <= v < hi or not code_at(v):
                     break
                 run.append(v)
                 q += 4
@@ -92,11 +108,13 @@ def scan(data, base, lo=None, hi=None, min_slots=4, min_run=1, kinds=('slots', '
             if t is not None and lo <= t < hi and _slot_run(data, base, t, hi) >= min_slots:
                 for k in range(_slot_run(data, base, t, hi)):
                     add(t + 4 * k, 'lea')
+            elif t is not None and code_at(t):
+                add(t, 'lea')                    # 1.0.12: lea/pea of a routine (a handler passed in a register)
         if 'imm' in kinds and i.kind == 'move' and getattr(i, 'sz', None) == decoder.SZ_L:
             src = getattr(i, 'src', None)
             if src is not None and src.kind == 'imm':
                 v = src.imm & 0xffffff
-                if v in starts and lo <= v < hi and v != i.addr:
+                if lo <= v < hi and v != i.addr and code_at(v):
                     add(v, 'imm')
     return roots
 

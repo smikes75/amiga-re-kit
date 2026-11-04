@@ -856,8 +856,8 @@ class Gen:
             nxt = [] if self.inline_target(i) is not None else successors(i)
             if i.end in nxt and (k + 1 >= len(order) or order[k + 1] != i.end):
                 fl = self.flow
-                if i.end in fl.externs or i.end in fl.stops or i.end in fl.rets or i.end in fl.exits:
-                    self.emit('    ' + self.br(i.end, None, None, ins))   # a fall-through into an --extern / stop / ret / exit: no label there (G54)
+                if i.end in fl.externs or i.end in fl.stops or i.end in fl.rets or i.end in fl.exits or i.end not in ins:
+                    self.emit('    ' + self.br(i.end, None, None, ins))   # a fall-through into an --extern / stop / ret / exit (G54) or into another routine (1.0.12, Turrican II KIT-GAPS 18): no label of this function there
                 else:
                     self.emit('    goto L%06x;' % i.end)
         self.emit('    return;')

@@ -75,3 +75,27 @@ def test_auto_soft_drops_a_root_whose_call_tree_reaches_data():
     src, _, entries = recomp.generate(bytes(img), 0x1000, auto=[0x1000, 0x1100], auto_soft=True, report=rep)
     assert 0x1000 in entries and 0x1100 not in entries and 'void f_001000(' in src
     assert rep['dropped'] and rep['dropped'][0][0] == 0x1100 and 'reaches $1200' in rep['dropped'][0][1], rep
+
+
+def test_scan_finds_pointers_and_lea_targets_the_linear_sweep_misses():
+    """1.0.12 (Turrican II KIT-GAPS 17): a module header's long pointing at a routine the linear decode is out of step
+    with (data before it), and a lea of that routine, are roots."""
+    img = bytearray(0x200)
+    img[0x000:0x004] = struct.pack('>I', 0x1106)                  # $1000 header: a pointer to the routine
+    img[0x004:0x008] = bytes.fromhex('47fa0100')                  # $1004 lea $1106(pc),a3
+    img[0x008:0x00a] = bytes.fromhex('4e75')
+    img[0x100:0x106] = bytes.fromhex('203c0000')  + b'\x70'      # $1100 data: move.l #$0000_70.. swallows $1106 in the sweep
+    img[0x106:0x10a] = bytes.fromhex('70054e75')                  # $1106 moveq #5,d0 ; rts
+    r = roots.scan(bytes(img), 0x1000)
+    assert 0x1106 in r and r[0x1106] >= {'ptr', 'lea'}, r.get(0x1106)
+
+
+def test_walk_marks_a_flow_leaving_the_image():
+    """1.0.12 (KIT-GAPS 18): a root whose flow runs off the end of the image (data decoded as code) has a frontier,
+    so --auto-soft drops it instead of the generator emitting a jump to a label that does not exist."""
+    img = bytes.fromhex('8080808080808080')                        # or.l d0,d0 x4, then the end of the image
+    with pytest.raises(Unsupported):
+        recomp.generate(img, 0x1000, auto=[0x1000])
+    rep = {}
+    recomp.generate(img + b'', 0x1000, auto=[0x1000], auto_soft=True, report=rep)
+    assert rep['dropped'] and 'past the end' in rep['dropped'][0][1]
