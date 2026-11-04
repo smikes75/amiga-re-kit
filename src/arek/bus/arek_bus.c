@@ -7,7 +7,7 @@
 void arek_bus_init(ArekBus *b, int hpos, int lines, int maxlines, uint8_t *own, uint16_t *regs, arek_bus_rd16_fn rd16, void *ctx) {
     memset(b, 0, sizeof *b);
     b->hpos = hpos; b->lines = lines; b->maxlines = maxlines; b->own = own; b->regs = regs; b->rd16 = rd16; b->ctx = ctx;
-    b->chipmask = 0x7fffe; b->slotoff = 1; b->cop_int = -1;
+    b->chipmask = 0x7fffe; b->slotoff = 1; b->cop_int = -1; b->cop_irq_n = 0;
     memset(own, 0, (size_t)maxlines * hpos);
 }
 

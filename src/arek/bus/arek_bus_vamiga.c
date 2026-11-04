@@ -16,7 +16,7 @@ typedef struct { uint32_t ptr; int vs, ve, st; } BSpr;   /* st: 0 ceka na POS/CT
  * dalsi krok za 2 takty (vAmiga CopperEvents). Registry, ktere copper zapsal minuly snimek, plati na zacatku dalsiho (copr/copw). */
 void arek_bus_frame_map(ArekBus *b) {
     const uint32_t H = (uint32_t)b->hpos, NL = (uint32_t)(b->lines < b->maxlines ? b->lines : b->maxlines);
-    memset(b->own, 0, (size_t)b->maxlines * H); b->cop_int = -1;   /* cela mapa: radky za koncem snimku drzi pristupy, ktere pretekly (jinak by zustaly obsazene) */
+    memset(b->own, 0, (size_t)b->maxlines * H); b->cop_int = -1; b->cop_irq_n = 0;   /* cela mapa: radky za koncem snimku drzi pristupy, ktere pretekly (jinak by zustaly obsazene) */
     uint16_t R[0x100]; memcpy(R, b->regs, sizeof R);
     for (int i = 0; i < 0x100; i++) if (b->copw[i]) R[i] = b->copr[i];   /* registry, ktere copper psal minuly snimek: hodnota copperu (DIW, BPLCON, DDF, sprity) */
     memset(b->copw, 0, sizeof b->copw);
@@ -81,7 +81,8 @@ void arek_bus_frame_map(ArekBus *b) {
                 L[h] = 24; c2 = b->rd16(b->ctx, cp); cp += 2; cst = 1; cnext = v * H + h + 2;
                 { uint32_t reg = c1 & 0x1fe;
                   if (reg == 0x088) { cp = ((uint32_t)R[0x080 >> 1] << 16 | R[0x082 >> 1]) & b->chipmask; }
-                  else if (reg == 0x09c) { if ((c2 & 0x8010) == 0x8010 && b->cop_int < 0) b->cop_int = v * H + h + b->cop_lat;   /* INTREQ SET|COPER; zda preruseni dojde, rozhodne volajici */ }
+                  else if (reg == 0x09c) { if ((c2 & 0x8010) == 0x8010 && b->cop_int < 0) b->cop_int = v * H + h + b->cop_lat;   /* INTREQ SET|COPER; zda preruseni dojde, rozhodne volajici */
+                      if ((c2 & 0x8000) && (c2 & 0x7fff) && b->cop_irq_n < AREK_BUS_COPIRQ) { b->cop_irq[b->cop_irq_n].t = v * H + h + b->cop_lat; b->cop_irq[b->cop_irq_n].bits = (uint16_t)(c2 & 0x7fff); b->cop_irq_n++; } }   /* 1.0.6: kazdy SET, kterekoli bity */
                   else if (reg == 0x096) { if (c2 & 0x8000) R[0x096 >> 1] |= c2 & 0x7fff; else R[0x096 >> 1] &= ~c2; dma = R[0x096 >> 1]; den = dma & 0x200;
                       if (c2 & 0x8000) b->regs[0x096 >> 1] |= c2 & 0x7fff; else b->regs[0x096 >> 1] &= ~c2; }   /* DMACON je jeden registr: zapis copperu plati i pro blitter a cteni DMACONR */
                   else if (reg >= 0x120 && reg < 0x140) { R[reg >> 1] = c2; int n = (reg - 0x120) >> 2; S[n].ptr = ((uint32_t)R[(0x120 >> 1) + 2 * n] << 16 | R[(0x122 >> 1) + 2 * n]) & b->chipmask; }

@@ -46,6 +46,10 @@ typedef struct ArekBus {
     int slotoff;               /* slot procesoru: takty po zacatku sbernicoveho cyklu (Moira SYNC: 1) */
     double cop_lat;            /* latence preruseni copperu v taktech (pricte se k casu zapisu INTREQ) */
     double cop_int;            /* cte volajici: cas prvniho zapisu INTREQ SET|COPER copperem v tomto snimku (+ cop_lat), -1 = zadny */
+    /* 1.0.6 (Turrican II KIT-GAPS 7): KAZDY zapis copperu MOVE INTREQ,SET|bity v tomto snimku - cas (+ cop_lat) a bity & 0x7fff
+     * (uvod Turricanu II zveda RBF $0800 = uroven 5 copperem); cop_int = cas prvniho s bitem COPER (jako dosud) */
+#define AREK_BUS_COPIRQ 8
+    struct { double t; uint16_t bits; } cop_irq[AREK_BUS_COPIRQ]; int cop_irq_n;
     uint32_t cpu_n, wait_n;    /* cte volajici: pristupy procesoru a takty cekani v tomto snimku */
     /* vnitrni: registry, ktere copper psal minuly snimek (plati na zacatku dalsiho), blitter, rozpracovana instrukce */
     uint16_t copr[0x100]; uint8_t copw[0x100];

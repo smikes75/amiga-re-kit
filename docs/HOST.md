@@ -34,6 +34,11 @@ cc -O2 -I lib -DGAME_SRC='"game.c"' -DTICK_PC=0xc01c72u -DHOST_ENTRY=f_c01c72 -D
 word after DMA on and the end of every block - as a sound driver that chains blocks through AUDxINT needs).
 The host calls a handler directly (`H_ENTER`), never through a pointer, so a browser build with
 `ASYNCIFY_IGNORE_INDIRECT` can sleep in a wait loop inside the handler (Alien Breed II, G37).
+`HOST_VECTOR_HANDLER(name, vec)` makes a handler that jumps through the game's own vector in RAM
+(`host_vec_l3/l4/l5` for $6c/$70/$74 are ready: `-DHOST_L3=host_vec_l3`) - for a game that changes its
+handlers at run time, an intro and a level (1.0.6, Turrican II). Overlays: one area holds ONE module at a time -
+`overlay_call` takes the first registered module whose base lies in the area and whose fingerprint matches, for any
+address of the area; two modules loaded at once (an intro and a music block) need two areas (`--overlay A:n B:m`).
 `HOST_ACK_HANDLER(name, bits)` makes a handler that only acknowledges INTREQ bits, for a level the
 game leaves to Kickstart (`-DHOST_L4=host_ack_audio` is predefined for the audio requests the Paula
 model raises); without it the request would be taken again and again.
@@ -70,6 +75,8 @@ them, SR (`Flags`) and CIA-A; a trace armed at the same stop supplies SR otherwi
    a run that starts after that write (a state taken mid-frame) does not raise that frame's COPER again
    (1.0.5); BLIT when a blit the CPU started (BLTSIZE) ends as the bus model sees it (1.0.5; a blit the Copper
    starts does not set it yet);
+   the Copper's other INTREQ bits (any `MOVE INTREQ,SET|bits` in its list, e.g. RBF = level 5 as an intro's
+   timing interrupt) are raised at their times too (1.0.6; up to 8 writes a frame);
 3. Paula's events up to now, the picture up to the current line;
 4. `h_pc_cb(m, pc)` - the emulator's breakpoint fires here, before an interrupt is accepted, and
    again after the handler's rte;

@@ -314,3 +314,62 @@ def test_mid_frame_start_keeps_the_coppers_irq_and_a_blit_raises_blit(tmp_path):
     later = [x for x in irqs if x['frame'] > 100]
     assert later and all(100 <= x['v'] <= 103 for x in later), [(x['frame'], x['v']) for x in later]
     assert all(v & 0x0010 and not v & 0x0040 for v in seen[2:]), [hex(v) for v in seen]
+
+
+MAIN_L5, L5_HANDLER, COPLIST_L5 = 0x1000, 0x1200, 0x1800
+PROG_L5 = {
+    COPLIST_L5: '6401fffe'         # WAIT line 100
+                '009c8800'         # MOVE INTREQ, SET|RBF (bit 11: level 5) - an intro's timing interrupt by the Copper
+                'fffffffe',
+    MAIN_L5: '4df900dff000'        # lea $dff000,a6
+             '3d7cc800009a'        # move.w #$c800,$9a(a6)   INTENA: master + RBF
+             '52784000'            # loop: addq.w #1,$4000
+             '60fa',               #       bra.s loop
+    L5_HANDLER: '52784004'         # addq.w #1,$4004
+                '303900dff01e'     # move.w $dff01e,d0
+                '31c04002'         # move.w d0,$4002
+                '33fc080000dff09c' # move.w #$800,$dff09c   clear RBF
+                '4e73',            # rte
+    0x1300: '4e73',               # a level-3 handler that never runs (INTENA has no level-3 source)
+}
+
+
+def test_copper_raises_any_intreq_bit_through_the_games_vector(tmp_path):
+    """1.0.6 (Turrican II KIT-GAPS 7): a Copper MOVE INTREQ,SET|RBF raises level 5 at the Copper's line; the host's
+    HOST_VECTOR_HANDLER jumps through the game's vector $74 in RAM (a game that changes its vectors at run time)."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    img = bytearray(0x2000)
+    for at, hx in PROG_L5.items():
+        img[at:at + len(hx) // 2] = bytes.fromhex(hx)
+    img[0x74:0x78] = struct.pack('>I', L5_HANDLER)                  # the game's level-5 vector
+    img[0x6c:0x70] = struct.pack('>I', 0x1300)                      # the level-3 vector (never taken here)
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN_L5, L5_HANDLER, 0x1300], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x100cu',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=host_vec_l3', '-DHOST_L5=host_vec_l5',
+                    os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'),
+                    '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', 0x0280)                     # DMAEN + COPEN
+    creg[0x82:0x84] = struct.pack('>H', COPLIST_L5)
+    (st / 'creg.bin').write_bytes(creg)
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
+    out = tmp_path / 'run.vtr'
+    r = subprocess.run([str(exe), str(st), str(out), '4', '--full'], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert 'irqs 4' in r.stderr, r.stderr                                                   # one level 5 per frame
+    ticks = list(trace.records(str(out)))                                                  # the spinning loop: a record per pass
+    counts = [struct.unpack('>H', x['ranges'][0][0x4004:0x4006])[0] for x in ticks]
+    firsts = [ticks[i] for i in range(1, len(ticks)) if counts[i] != counts[i - 1]]      # the pass right after each handler
+    assert len(firsts) >= 3 and all(100 <= x['v'] <= 104 for x in firsts), [(x['frame'], x['v']) for x in firsts]   # at the Copper's line
+    seen = [struct.unpack('>H', x['ranges'][0][0x4002:0x4004])[0] for x in firsts]
+    assert all(v & 0x0800 and not v & 0x0010 for v in seen), [hex(v) for v in seen]        # RBF pending, no COPER

@@ -71,6 +71,12 @@ def AH(s):
     return v
 
 
+
+def adf_of(conf, which):
+    """--adf: a number N -> conf ADFN (the images named in local.conf), anything else -> a path as given (1.0.6)."""
+    which = str(which)
+    return conf.get('ADF%s' % which) if which.isdigit() else which
+
 def rd(p):
     return Path(p).read_bytes()
 
@@ -343,7 +349,7 @@ def cmd_shot(a):
     from .headless import shot
     conf = _conf(a)
     events = [(int(t), cmd) for t, cmd in a.at or []]
-    adf = conf.get('ADF%d' % a.adf)
+    adf = adf_of(conf, a.adf)
     for t in a.times:
         print(shot.shot(conf, a.prefix, t, events, adf, timeout=a.timeout))
 
@@ -355,7 +361,7 @@ def cmd_bpstate(a):
     regions = [tuple(A(x) for x in r.split(':')) for r in a.region or []]
     meta = bpstate.capture(conf, a.out, a.address, a.npass, a.end, events=events,
                            t_set=a.set_at, ram_len=a.ram_len, regions=regions,
-                           adf=conf.get('ADF%d' % a.adf), timeout=a.timeout, screenshot=a.screenshot)
+                           adf=adf_of(conf, a.adf), timeout=a.timeout, screenshot=a.screenshot)
     print('%s/cpu.json  pc=%06x  frame=%s' % (a.out, meta['pc'], meta['beam']['frame']))
 
 
@@ -1019,7 +1025,7 @@ def build_parser():
     s.add_argument('prefix')
     s.add_argument('times', nargs='+', type=int)
     s.add_argument('--at', nargs=2, action='append', metavar=('T', 'CMD'))
-    s.add_argument('--adf', type=int, default=1)
+    s.add_argument('--adf', default='1', help='which disk: a number N = ADFN of local.conf (default 1), or a path to an image (1.0.6)')
     s.add_argument('--conf', default='local.conf')
     s.add_argument('--timeout', type=int, default=600, help='seconds of wall time before giving up')
     s.set_defaults(fn=cmd_shot)
@@ -1032,7 +1038,7 @@ def build_parser():
     s.add_argument('--at', nargs=2, action='append', metavar=('T', 'CMD'))
     s.add_argument('--ram-len', type=A, default=524288)
     s.add_argument('--region', action='append', metavar='BASE:LENGTH')
-    s.add_argument('--adf', type=int, default=1)
+    s.add_argument('--adf', default='1', help='which disk: a number N = ADFN of local.conf (default 1), or a path to an image (1.0.6)')
     s.add_argument('--conf', default='local.conf')
     s.add_argument('--timeout', type=int, default=900, help='seconds of wall time before giving up')
     s.add_argument('--screenshot', action='store_true', help='also the picture at the stop (stable.raw/png)')

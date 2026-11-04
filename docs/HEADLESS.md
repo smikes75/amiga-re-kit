@@ -333,3 +333,5 @@ boundary. Registers and clock are captured *before* the export, so they
 are exact; slow RAM dumps and cycle traces are unaffected. The Superfrog
 project carries an additional `spypeek`-based probe patch for cycle-exact
 mid-blit exports; it is not part of this kit yet.
+
+`--adf` of `arek shot` / `arek bpstate`: a number N = the image ADFN of local.conf (default 1), or a path to an image (1.0.6).

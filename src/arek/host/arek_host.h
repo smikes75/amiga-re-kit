@@ -43,6 +43,7 @@ static uint16_t H_INTREQ = 0;            /* Paula INTREQ (read back as INTREQR) 
 static long   H_FRAME = 0;               /* frames since the host started */
 static long   H_FRAME0 = 0;              /* the original's frame number at the start (records, shots) */
 static int    H_COP_DONE = 0;            /* the copper's interrupt of this frame already raised */
+static int    H_COP_IDX = 0;             /* 1.0.6: how many of the bus model's cop_irq[] of this frame were raised (any INTREQ bits the Copper sets, Turrican II KIT-GAPS 7) */
 static int    H_BLIT_PEND = 0;           /* 1.0.5: a blit the CPU started is running; INTREQ BLIT when it ends (Turrican II KIT-GAPS 3) */
 static int    H_IRQ_DEPTH = 0;
 static uint8_t H_CIAA_PRA = 0xfe;        /* $BFE001: bits 6/7 = fire port 0/1 (0 = pressed), bit 1 = LED output */
@@ -112,7 +113,8 @@ static void host_init(double t0) {
     arek_glue_init(HOST_HPOS, H_LINES, HOST_MAXLINES, OWN, CREG, h_rd16cb, 0);
     arek_glue_frame(H_LINES);
     arek_glue_set_time(t0);
-    { ArekBus *b = arek_glue_bus(); if (b->cop_int >= 0 && t0 >= b->cop_int) H_COP_DONE = 1; }   /* 1.0.5: a start past the copper's INTREQ write of this frame (the state carries that COPER) - no second one (Turrican II KIT-GAPS 2) */
+    { ArekBus *b = arek_glue_bus(); if (b->cop_int >= 0 && t0 >= b->cop_int) H_COP_DONE = 1;
+      H_COP_IDX = 0; while (H_COP_IDX < b->cop_irq_n && b->cop_irq[H_COP_IDX].t <= t0) H_COP_IDX++; }   /* 1.0.5: a start past the copper's INTREQ write of this frame (the state carries that COPER) - no second one (Turrican II KIT-GAPS 2) */
     arek_paula_init(&H_PAULA, arek_glue_bus(), h_sample, 0);
     H_PAULA.irq_cb = h_audio_irq;
     arek_paula_frame(&H_PAULA, (double)H_FRAME0 * H_LINES * HOST_HPOS);
@@ -222,13 +224,14 @@ static void host_events(void) {
         ARD_LAST = H_LINES - 1;
         arek_glue_frame(H_LINES);
         arek_paula_frame(&H_PAULA, H_PAULA.frame_base + len);
-        H_FRAME++; H_COP_DONE = 0; H_NEXTMAP = 0;
+        H_FRAME++; H_COP_DONE = 0; H_COP_IDX = 0; H_NEXTMAP = 0;
         if (H_VBL_LAT <= 0) H_INTREQ |= 0x0020; else H_VERTB_PEND = 1;
         if (h_frame_cb) h_frame_cb();
     }
     if (H_VERTB_PEND && h_now() >= H_VBL_LAT) { H_INTREQ |= 0x0020; H_VERTB_PEND = 0; }
     ArekBus *b = arek_glue_bus();
     if (!H_COP_DONE && b->cop_int >= 0 && h_now() >= b->cop_int) { H_INTREQ |= 0x0010; H_COP_DONE = 1; }
+    while (H_COP_IDX < b->cop_irq_n && h_now() >= b->cop_irq[H_COP_IDX].t) { H_INTREQ |= b->cop_irq[H_COP_IDX].bits; H_COP_IDX++; }   /* 1.0.6: the Copper's other INTREQ bits (e.g. RBF: level 5) at their times*/
     if (H_BLIT_PEND && !arek_bus_bbusy(b, h_now())) { H_INTREQ |= 0x0040; H_BLIT_PEND = 0; }   /* 1.0.5: the blit finished (as BBUSY sees it) */
 }
 
@@ -257,6 +260,13 @@ static void h_enter_post(void) { H_IRQ_DEPTH--; }
 static void h_rte(M68 *m) { uint32_t sp = m->a[7], sr = rd16_raw(sp); sr_set(m, sr, 1); m->a[7] = sp + 6; }
 #define HOST_ACK_HANDLER(name, bits) void name(M68 *m) { H_INTREQ &= (uint16_t)~(bits); h_rte(m); }
 HOST_ACK_HANDLER(host_ack_audio, 0x0780)
+/* 1.0.6: HOST_VECTOR_HANDLER(name, vec) = a handler that jumps through the game's own vector in RAM (the game changes
+ * $6c / $70 / $74 at run time - an intro and a level with different handlers): call_addr() of the translation reaches
+ * the handler as any other entry; the handler's rte returns here (Turrican II). -DHOST_L3=host_vec_l3 etc. */
+#define HOST_VECTOR_HANDLER(name, vec) void name(M68 *m) { call_addr(m, ((uint32_t)rd16_raw((uint32_t)(vec)) << 16) | rd16_raw((uint32_t)(vec) + 2)); }
+HOST_VECTOR_HANDLER(host_vec_l3, 0x6c)
+HOST_VECTOR_HANDLER(host_vec_l4, 0x70)
+HOST_VECTOR_HANDLER(host_vec_l5, 0x74)
 static void host_irq(M68 *m, uint32_t pc) {
     uint16_t intena = CREG[0x09a >> 1];
     if (!(intena & 0x4000)) return;
