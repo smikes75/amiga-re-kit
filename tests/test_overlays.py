@@ -91,3 +91,20 @@ def test_module_translates_its_own_direct_calls():
     src, _, entries = recomp.generate(bytes(img), base, auto=[0x20700], flow=fl)
     assert 0x207a0 in entries, entries
     assert 'overlay_call(m, 0x207a0u)' not in src and 'f_M05' in src
+
+
+def test_module_branch_into_resident_code_is_external():
+    """1.0.13 (Turrican II KIT-GAPS 20, a 1.0.12 regression): a module's jmp / bra to resident code below its image is an
+    external target (a routine of the main translation), not 'runs past the end of the image' - only a fall-through off
+    the image's end is."""
+    from arek.m68k import recomp
+    base = 0x20700
+    img = bytearray(0x100)
+    img[0x000:0x006] = bytes.fromhex('4ef90001f04c')            # $20700 jmp $1f04c   (the resident music player)
+    img[0x010:0x016] = bytes.fromhex('4eb80011a') + b'' if False else bytes.fromhex('4eb8011a4e75')   # $20710 jsr $11a.w ; rts
+    fl = recomp.flow_from_specs(bytes(img), base, prefix='M00:20700:20800', overlay=['20700:100'], lib=True, module='20700')
+    src, _, entries = recomp.generate(bytes(img), base, auto=[0x20700, 0x20710], flow=fl)
+    assert 'f_01f04c(m)' in src and 'f_00011a(m)' in src
+    rep = {}
+    _, _, entries = recomp.generate(bytes(img), base, auto=[0x20700, 0x20710], flow=fl, auto_soft=True, report=rep)
+    assert rep['dropped'] == [] and {0x20700, 0x20710} <= set(entries)

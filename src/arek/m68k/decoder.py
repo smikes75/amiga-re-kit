@@ -724,13 +724,7 @@ def walk(data, base, start, lo, hi, flow=NOFLOW, cache=None):
     seen, work = set(), [start]
     while work:
         a = work.pop()
-        if a in seen or flow.boundary(a):
-            continue
-        if not (base <= a < base + len(data)):        # 1.0.12 (Turrican II KIT-GAPS 18): the flow leaves the image (a fall-through
-            seen.add(a)                               # off its end): not walkable - a frontier, so --auto-soft drops such a root
-            bad.append((a, 'runs past the end of the image'))
-            continue
-        if not (lo <= a < hi):
+        if a in seen or not (lo <= a < hi) or flow.boundary(a):
             continue
         seen.add(a)
         try:
@@ -777,7 +771,11 @@ def walk(data, base, start, lo, hi, flow=NOFLOW, cache=None):
                 pass                                      # returns behind the inline data
             elif not stub_for(i.ea):
                 indirect.append((a, 'jmp ' + i.ea.text))
-        work.extend(successors(i))
+        nxt = successors(i)
+        if i.end in nxt and i.end >= base + len(data):   # 1.0.13 (Turrican II KIT-GAPS 18, 20): FALLING THROUGH off the end of the
+            bad.append((i.end, 'runs past the end of the image'))   # image is a frontier; a branch to code outside it (resident code,
+            nxt = [t for t in nxt if t != i.end]         # another area) stays an external target, as before 1.0.12
+        work.extend(nxt)
     return ins, calls, bad, indirect
 
 
