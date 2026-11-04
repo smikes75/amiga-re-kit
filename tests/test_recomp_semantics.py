@@ -424,3 +424,33 @@ def test_blitter_descending_subtracts_the_modulo(tmp_path):
     *_, mem = run(tmp_path, prog, {})
     assert mem[0x6102:0x6104].hex() == 'bbbb' and mem[0x60fe:0x6100].hex() == 'cccc'   # row 1 from $5ffe to $60fe
     assert mem[0x6100:0x6102].hex() == '0000'                                             # the skipped word untouched
+
+
+@pytest.mark.parametrize('hx, length, text', [
+    ('003c0005', 4, 'ori.b #5,ccr'), ('023c00fa', 4, 'andi.b #250,ccr'), ('0a3c0001', 4, 'eori.b #1,ccr'),
+    ('007c0700', 4, 'ori.w #1792,sr'), ('027cf8ff', 4, 'andi.w #63743,sr'),
+])
+def test_immediate_to_ccr_sr_is_four_bytes(hx, length, text):
+    """1.0.10 (Turrican II KIT-GAPS 14): ori/andi/eori #imm,CCR|SR is 4 bytes - the decoder read another word as an
+    immediate destination (6 bytes, 'ori.b #5,#250'), the walk went on misaligned and the generator refused."""
+    from arek.m68k import decoder
+    i = decoder.decode_at(bytes.fromhex(hx + '4e75'), 0x1000, 0x1000) if hasattr(decoder, 'decode_at') else None
+    if i is None:
+        tree = decoder.call_tree(bytes.fromhex(hx + '4e75'), 0x1000, [0x1000], 0x1000, 0x1006)
+        ins = tree[0x1000][0]
+        i = ins[0x1000]
+        assert 0x1000 + length in ins and ins[0x1000 + length].text == 'rts'
+    assert i.text == text
+
+
+def test_immediate_to_ccr_sets_the_flags(tmp_path):
+    """1.0.10: ori #$1f,ccr sets X N Z V C, andi #$fe,ccr clears C, eori #4,ccr flips Z (move sr,abs keeps the flags)."""
+    prog = ('44fc0000' '003c001f'
+            '40f900004000'          # move sr,$4000
+            '023c00fe'              # andi #$fe,ccr      C off
+            '40f900004002'
+            '0a3c0004'              # eori #4,ccr        Z off
+            '40f900004004')
+    *_, mem = run(tmp_path, prog, {})
+    v = [int.from_bytes(mem[0x4000 + 2 * k:0x4002 + 2 * k], 'big') & 0x1f for k in range(3)]
+    assert v == [0x1f, 0x1e, 0x1a], [hex(x) for x in v]

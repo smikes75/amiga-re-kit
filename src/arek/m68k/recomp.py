@@ -970,6 +970,12 @@ class Gen:
             elif nm in ('addi', 'subi'):
                 f = 'f_add' if nm == 'addi' else 'f_sub'
                 L.append(i.ea.write(i.sz, '%s(m, 0x%xu, %s, %d)' % (f, i.imm, i.ea.read(i.sz), i.sz)))
+            elif getattr(i.ea, 'sr', None):                # 1.0.10: ori/andi/eori #,ccr (.b: the flags) / #,sr (.w: the whole SR)
+                opc = {'ori': '|', 'andi': '&', 'eori': '^'}[nm]
+                if i.ea.sr == 'ccr':
+                    L.append('sr_set(m, (sr_get(m) & 0xff00u) | ((sr_get(m) %s 0x%xu) & 0xffu), 0);' % (opc, i.imm))
+                else:
+                    L.append('sr_set(m, (sr_get(m) %s 0x%xu) & 0xffffu, 1);' % (opc, i.imm))
             else:
                 opc = {'ori': '|', 'andi': '&', 'eori': '^'}[nm]
                 L.append(i.ea.write(i.sz, 'f_logic(m, %s %s 0x%xu, %d)'

@@ -263,7 +263,11 @@ def decode(data, base, addr):
         imm = r.w() if sz != SZ_L else r.l()
         if sz == SZ_B:
             imm &= 0xff
-        e = ea(sz, need='' if to_sr else 'da')
+        if to_sr:                                     # 1.0.10: the destination is CCR (.b) or SR (.w) - no extension word
+            e = EA('imm', text='ccr' if sz == SZ_B else 'sr', mode=7, areg=4)   # (Turrican II KIT-GAPS 14: 003c 0005 read as 6 bytes)
+            e.sr = 'ccr' if sz == SZ_B else 'sr'
+        else:
+            e = ea(sz, need='da')
         return Insn(addr, r.pc, 'alui', name=name, sz=sz, imm=imm, ea=e,
                     text='%s.%s #%d,%s' % (name, SZNAME[sz], imm, e.text))
     # --- 0001/0010/0011: MOVE / MOVEA
