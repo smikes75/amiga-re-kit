@@ -393,3 +393,12 @@ def test_driver_loads_the_custom_registers_of_a_capture(tmp_path):
     (tmp_path / 'creg.bin').write_bytes(creg)
     d, *_ = run(tmp_path, '303900dff01c', {}, env={'AREK_CREG': str(tmp_path / 'creg.bin')})   # move.w $dff01c,d0
     assert d[0] == 0x4020
+
+
+def test_overlay_fingerprint_is_not_a_cpu_access():
+    """1.0.7 (Turrican II KIT-GAPS 9): overlay_fp hashes the module's bytes with raw reads - a bus-counted rd8 made every
+    overlay_call cost emulated time (256 accesses per registered module: lines of the game's frame)."""
+    from arek.m68k import recomp as R
+    body = R.RUNTIME[R.RUNTIME.index('static uint64_t overlay_fp'):]
+    body = body[:body.index('return h;')]
+    assert 'rd8_raw(base + i)' in body and 'h ^= rd8(' not in body

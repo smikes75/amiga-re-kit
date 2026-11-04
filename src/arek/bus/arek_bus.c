@@ -21,7 +21,12 @@ void arek_bus_frame(ArekBus *b, int lines) {
 /* Moira (procesor vAmigy): SYNC(2) = 1 takt, pristup (Agnus: volny slot?), SYNC(2). Procesor si slot bere az po udalostech Agnusu
  * v taktu (blitter je vidi jako volne); po 2 taktech cekani blitter bez BLTPRI ustoupi (bls). */
 double arek_bus_access(ArekBus *b, double tt) {
-    const uint32_t cap = (uint32_t)(b->maxlines * b->hpos);
+    /* 1.0.7 (Turrican II KIT-GAPS 10): a wait for a free slot may run past the frame end by at most one line (the rows the
+     * caller premapped): time must not flow further inside the model - the caller rolls the frame, and a blit that
+     * holds the bus (BLTPRI) goes on in the next frame's real map, where its slots are recorded. Before, the wait ran to
+     * the end of the overflow rows: the blit finished there unrecorded and the CPU re-entered the new frame lines later. */
+    uint32_t cap = (uint32_t)(b->maxlines * b->hpos);
+    { uint32_t lim = (uint32_t)(b->lines * b->hpos) + (uint32_t)b->hpos; if (lim < cap) cap = lim; }
     uint32_t t = (uint32_t)tt; if ((double)t < tt) t++; t += b->slotoff;
     arek_bus_blt_advance(b, t);
     if (t < cap && b->own[t]) {

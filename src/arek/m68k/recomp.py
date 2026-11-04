@@ -652,7 +652,7 @@ void overlay_unknown_hook(M68 *m, uint32_t base, uint32_t entry, uint64_t fp);
 static uint32_t rd8(uint32_t a);
 static uint64_t overlay_fp(uint32_t base, uint32_t n) {
     uint64_t h = 0xcbf29ce484222325ull;
-    for (uint32_t i = 0; i < n; i++) { h ^= rd8(base + i); h *= 0x100000001b3ull; }
+    for (uint32_t i = 0; i < n; i++) { h ^= rd8_raw(base + i); h *= 0x100000001b3ull; }   /* 1.0.7: the fingerprint is the host's look, not a CPU access (it cost emulated time at every overlay_call - Turrican II KIT-GAPS 9) */
     return h;
 }
 '''

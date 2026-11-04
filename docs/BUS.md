@@ -179,3 +179,10 @@ the end of the frame; `sample_cb` gets every byte * volume with its absolute tim
 | CPU | its slot 1 cycle after the bus cycle starts (Moira SYNC), an access 2 slots, internal cycles = (clocks - pre - 4 * accesses) / 2 slots | Moira, Alien Breed |
 | BLS | after 2 slots of CPU waiting the blitter yields without BLTPRI | vAmiga, Alien Breed |
 | the CPU takes its slot after the Agnus events of the cycle | the blitter sees CPU slots as free | Alien Breed (replay: otherwise no match) |
+
+The frame map follows the Copper's own jumps: MOVE COPJMP1 ($088) restarts at COP1LC, MOVE COPJMP2 ($08A) at COP2LC (1.0.7, Turrican II's intro).
+
+A CPU access waiting for a free slot (a blit holding the bus with BLTPRI) stops at most one line past the frame end:
+the host rolls the frame and the blit goes on in the next frame's real DMA map, where its slots are recorded (1.0.7,
+Turrican II's intro: a 9 280-word blit started at line 262 ends ~line 32 of the next frame; before, the wait ran to the
+end of the host's overflow rows, the blit finished there unrecorded and the CPU re-entered the new frame 32 lines late).

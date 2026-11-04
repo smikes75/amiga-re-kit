@@ -373,3 +373,76 @@ def test_copper_raises_any_intreq_bit_through_the_games_vector(tmp_path):
     assert len(firsts) >= 3 and all(100 <= x['v'] <= 104 for x in firsts), [(x['frame'], x['v']) for x in firsts]   # at the Copper's line
     seen = [struct.unpack('>H', x['ranges'][0][0x4002:0x4004])[0] for x in firsts]
     assert all(v & 0x0800 and not v & 0x0010 for v in seen), [hex(v) for v in seen]        # RBF pending, no COPER
+
+
+MAIN_BX, TICK_BX = 0x1000, 0x104e
+PROG_BX = {
+    MAIN_BX: '4df900dff000'        # lea $dff000,a6
+             '3d7c84400096'        # move.w #$8440,$96(a6)   DMACON SET|BLTPRI|BLTEN
+             '3d7c09f00040'        # BLTCON0 A -> D
+             '3d7c00000042'        # BLTCON1
+             '3d7cffff0044'        # BLTAFWM
+             '3d7cffff0046'        # BLTALWM
+             '2d7c000100000050'    # BLTAPT = $10000
+             '2d7c000200000054'    # BLTDPT = $20000
+             '3d7c00000064'        # BLTAMOD
+             '3d7c00000066'        # BLTDMOD
+             '3d7c74140058'        # BLTSIZE $7414: 464 lines x 20 words = 9 280 words (Turrican II's intro)
+             '082e000e0002'        # w: btst #14,$2(a6)      DMACONR BBUSY
+             '66f8'                #    bne.s w
+             '31ee00044000'        # tick: move.w $4(a6),$4000   VPOSR when BBUSY cleared
+             '31ee00064002'        #       move.w $6(a6),$4002   VHPOSR
+             '60fe',               # loop: bra.s loop
+    0x1300: '4e73',                # a level-3 handler that never runs
+}
+
+
+def test_blit_crossing_the_frame_end_goes_on_in_the_next_frame(tmp_path):
+    """1.0.7 (Turrican II KIT-GAPS 10): a 9 280-word blit started at line 262 (BLTPRI on) runs past the frame end; the
+    blitter must keep its slots in the next frame and BBUSY must clear ~32 lines in, as in the original - not 200 lines later."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    img = bytearray(0x2000)
+    for at, hx in PROG_BX.items():
+        img[at:at + len(hx) // 2] = bytes.fromhex(hx)
+    img[0x6c:0x70] = struct.pack('>I', 0x1300)
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN_BX, 0x1300], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x104eu',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=host_vec_l3',
+                    os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'),
+                    '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', 0x0200)                     # DMAEN; the program adds BLTEN + BLTPRI
+    creg[0x82:0x84] = struct.pack('>H', 0x1800)                     # COP1LC: an empty list
+    ram[0x1800:0x1804] = bytes.fromhex('fffffffe')
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'creg.bin').write_bytes(creg)
+    t0 = 262 * 227                                                  # the start: line 262 of frame 100, BLTSIZE right away
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 %d 0 1000\nfe 0 0 0 0 5500\n100\n' % t0)
+    out = tmp_path / 'run.vtr'
+    r = subprocess.run([str(exe), str(st), str(out), '3', '--full', '--own', str(tmp_path / 'own.bin')], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    ticks = [x for x in trace.records(str(out)) if x['pc'] == TICK_BX]
+    assert ticks, r.stderr
+    done = ticks[0]                                                 # the first pass after BBUSY cleared
+    # 9 280 words x 2 slots = 18 560 slots; ~50 lines of frame 100 take ~11 200, the rest ends ~line 32-45 of frame 101
+    assert done['frame'] == 101 and done['v'] < 80, (done['frame'], done['v'], done['h'])
+    own = (tmp_path / 'own.bin').read_bytes()
+    rec = 8 + 313 * 227                                             # H_FRAME (long) + the frame's own map (313 lines)
+    frames = {}
+    for i in range(0, len(own) - rec + 1, rec):
+        frames[struct.unpack('<q', own[i:i + 8])[0]] = own[i + 8:i + rec]
+    assert 1 in frames, sorted(frames)                              # H_FRAME 1 = the second frame of the run (frame 101)
+    second = frames[1]
+    bl = second.count(25)
+    assert 6000 < bl < 9000, bl                                     # the rest of the blit: ~7 300 slots in the next frame
+    assert second[:32 * 227].count(25) > 6000 and second[40 * 227:].count(25) == 0   # in lines 0-32, nothing after

@@ -36,7 +36,9 @@ The host calls a handler directly (`H_ENTER`), never through a pointer, so a bro
 `ASYNCIFY_IGNORE_INDIRECT` can sleep in a wait loop inside the handler (Alien Breed II, G37).
 `HOST_VECTOR_HANDLER(name, vec)` makes a handler that jumps through the game's own vector in RAM
 (`host_vec_l3/l4/l5` for $6c/$70/$74 are ready: `-DHOST_L3=host_vec_l3`) - for a game that changes its
-handlers at run time, an intro and a level (1.0.6, Turrican II). Overlays: one area holds ONE module at a time -
+handlers at run time, an intro and a level (1.0.6, Turrican II). Overlays: the module fingerprint (`overlay_fp`, 256 bytes of RAM) is a raw read of the host, not a CPU access - until
+1.0.6 it was bus-counted and every `overlay_call` cost emulated time (Turrican II: 7 modules = 9 lines of the frame,
+seen as a loop 2-8 lines slower than the original). Overlays: one area holds ONE module at a time -
 `overlay_call` takes the first registered module whose base lies in the area and whose fingerprint matches, for any
 address of the area; two modules loaded at once (an intro and a music block) need two areas (`--overlay A:n B:m`).
 `HOST_ACK_HANDLER(name, bits)` makes a handler that only acknowledges INTREQ bits, for a level the
@@ -75,6 +77,7 @@ them, SR (`Flags`) and CIA-A; a trace armed at the same stop supplies SR otherwi
    a run that starts after that write (a state taken mid-frame) does not raise that frame's COPER again
    (1.0.5); BLIT when a blit the CPU started (BLTSIZE) ends as the bus model sees it (1.0.5; a blit the Copper
    starts does not set it yet);
+   a blit crossing the frame end keeps running in the next frame (the CPU's slot wait stops one line past the end, 1.0.7);
    the Copper's other INTREQ bits (any `MOVE INTREQ,SET|bits` in its list, e.g. RBF = level 5 as an intro's
    timing interrupt) are raised at their times too (1.0.6; up to 8 writes a frame);
 3. Paula's events up to now, the picture up to the current line;

@@ -81,6 +81,7 @@ void arek_bus_frame_map(ArekBus *b) {
                 L[h] = 24; c2 = b->rd16(b->ctx, cp); cp += 2; cst = 1; cnext = v * H + h + 2;
                 { uint32_t reg = c1 & 0x1fe;
                   if (reg == 0x088) { cp = ((uint32_t)R[0x080 >> 1] << 16 | R[0x082 >> 1]) & b->chipmask; }
+                  else if (reg == 0x08a) { cp = ((uint32_t)R[0x084 >> 1] << 16 | R[0x086 >> 1]) & b->chipmask; }   /* 1.0.7: COPJMP2 (Turrican II KIT-GAPS 8: the intro jumps to a second list) */
                   else if (reg == 0x09c) { if ((c2 & 0x8010) == 0x8010 && b->cop_int < 0) b->cop_int = v * H + h + b->cop_lat;   /* INTREQ SET|COPER; zda preruseni dojde, rozhodne volajici */
                       if ((c2 & 0x8000) && (c2 & 0x7fff) && b->cop_irq_n < AREK_BUS_COPIRQ) { b->cop_irq[b->cop_irq_n].t = v * H + h + b->cop_lat; b->cop_irq[b->cop_irq_n].bits = (uint16_t)(c2 & 0x7fff); b->cop_irq_n++; } }   /* 1.0.6: kazdy SET, kterekoli bity */
                   else if (reg == 0x096) { if (c2 & 0x8000) R[0x096 >> 1] |= c2 & 0x7fff; else R[0x096 >> 1] &= ~c2; dma = R[0x096 >> 1]; den = dma & 0x200;

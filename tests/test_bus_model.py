@@ -72,6 +72,13 @@ int main(int argc, char **argv) {
         int v = atoi(argv[3]); uint8_t *L = own + v * 227;
         printf("line %d:", v); for (int h = 0; h < 227; h++) printf(" %d", L[h]); printf("\n");
         printf("cop_int %.1f\n", B.cop_int);
+    } else if (!strcmp(mode, "cop2")) {                       /* 1.0.7: COPJMP2 - the list continues in the second list */
+        uint32_t a2 = 0x2000;
+        at = 0x1000; cop(&at, 0x0084, 0x0000); cop(&at, 0x0086, 0x2000); cop(&at, 0x008a, 0x0000);   /* COP2LC = $2000, COPJMP2 */
+        cop(&at, 0xc807, 0xfffe); cop(&at, 0x009c, 0x8010); cop(&at, 0xffff, 0xfffe);                  /* linear continuation: WAIT 200, INTREQ (must not run) */
+        cop(&a2, 0x6407, 0xfffe); cop(&a2, 0x009c, 0x8010); cop(&a2, 0xffff, 0xfffe);                  /* the second list: WAIT 100, INTREQ SET|COPER */
+        arek_bus_frame(&B, 312);
+        printf("cop_int %.1f\n", B.cop_int);
     } else if (!strcmp(mode, "cpu")) {
         double t = atof(argv[3]);
         double t2 = arek_bus_insn(&B, t, 12, 1, 0);           /* move.l d0,(a0): 1 prefetch */
@@ -469,3 +476,11 @@ def test_cpu_write_beats_the_coppers_earlier_write(tmp_path):
     new = [int(x) for x in subprocess.run([str(tmp_path / 'h'), 'cpu'], capture_output=True, text=True, check=True).stdout.split()]
     assert old[0] > 20000 and old[1] == old[0]                   # without the report the map keeps list A
     assert new[0] == old[0] and new[1] == 0                      # with it: list B, no bitplane slots
+
+
+def test_copjmp2_continues_in_the_second_list(harness):
+    """1.0.7 (Turrican II KIT-GAPS 8): a Copper MOVE COPJMP2 restarts the Copper at COP2LC; the frame map followed only
+    COPJMP1 and ran the first list on linearly."""
+    out = harness('8380', 'cop2')
+    t = float(out.split('cop_int')[1].split()[0])
+    assert 100 * 227 <= t < 101 * 227, out                      # the INTREQ write of the second list at line 100, not line 200
