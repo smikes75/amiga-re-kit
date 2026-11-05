@@ -20,7 +20,8 @@
  *
  * STATE.bin: `arek host pack` of a state folder (arek host state): "AREKSTATE1", chip RAM, slow RAM, the custom
  * registers, state.txt. ENGINE_DYNAMIC: when HOST_ENTRY returns, the run goes on at the return address its rts popped
- * (call_addr; a level loop that returns to a dispatcher). ENGINE_SRC: the project's file with its extern routines
+ * (call_addr; a level loop that returns to a dispatcher). ENGINE_FRAME_RECORD(n) (1.0.16): a function of the project called
+ * when frame n is done, before it is published (the page sees engine_done() > n only after it). ENGINE_SRC: the project's file with its extern routines
  * (AHD_EXTERN) and hooks, included after the host. No game data: the state and the disks come from the page. */
 #include <setjmp.h>
 #include <stdint.h>
@@ -158,6 +159,10 @@ static void e_frame_done(void) {
     for (int i = 0; i < ARA_N; i++) { int w = (G_AW + i) % G_AUDN; G_AUD[2 * w] = ARA_BUF[2 * i]; G_AUD[2 * w + 1] = ARA_BUF[2 * i + 1]; }
     G_AW = (G_AW + ARA_N) % G_AUDN; __atomic_store_n(&G_AWT, G_AWT + ARA_N, __ATOMIC_SEQ_CST); ARA_N = 0;
     if (G_HASHON) g_hash_now();
+#ifdef ENGINE_FRAME_RECORD
+    ENGINE_FRAME_RECORD(n);                               /* 1.0.16: the project's record of frame n (a scene record for wb-scene) into
+                                                             its own ring slot n % engine_nfr(), BEFORE the frame is published */
+#endif
     __atomic_store_n(&G_DONE, n + 1, __ATOMIC_SEQ_CST);  /* the game sleeps at its next wait loop (a thread: here) */
 #ifdef ENGINE_THREAD
     g_pace();
@@ -245,6 +250,7 @@ API int engine_waiting(void) { return G_WAIT; }
 API int engine_ended(void) { return G_END; }
 API uint32_t engine_error(void) { return G_ERR; }
 API int engine_done(void) { return __atomic_load_n(&G_DONE, __ATOMIC_SEQ_CST); }
+API int engine_nfr(void) { return G_NFR; }              /* 1.0.16: the ring's length - a project's own record ring uses the same */
 API void engine_allow(int n) { __atomic_store_n(&G_ALLOW, n, __ATOMIC_SEQ_CST);
 #ifdef ENGINE_THREAD
     g_wake_allow();

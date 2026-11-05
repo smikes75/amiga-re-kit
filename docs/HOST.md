@@ -247,3 +247,13 @@ test builds both (`tests/test_host_engine.py`, emcc and node when installed).
 - Not modelled: NTSC, the blitter's line mode on the bus, Paula's audio interrupts (a host that
   needs AUDx INTREQ bits sets them itself), the CIA timers and TOD (a game that seeds its random
   numbers from CIA-B TOD gets the value from the capture: `docs/METHOD.md` §5), disk DMA.
+
+### A scene record from the threaded engine (1.0.16)
+
+`-DENGINE_FRAME_RECORD=my_record` (with `--define` of `arek host engine`): the project's `void my_record(int n)` in its
+`--src` file runs once per finished frame, after the picture and the samples and BEFORE the frame is published - the
+page sees `engine_done() > n` only when record n is complete. The project keeps its own ring of `engine_nfr()` (32)
+records in the wasm memory (shared with the page in the threaded build), exports its address with a KEEPALIVE
+function, and the page reads record `n % engine_nfr()` through `HEAPU8` for every frame it hands to `scene.frame()`.
+What a record holds is the wb-scene contract (docs/WB-RECIPE.md): the clean window, its palette rows, the camera and
+limits, the map cells and atlas, the objects with ids and pass times, the sprites, the HUD.

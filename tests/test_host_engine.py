@@ -187,3 +187,24 @@ def test_cia_timers_past_2_31_e_ticks_in_wasm(tmp_path):
                        capture_output=True, text=True, timeout=180)
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip().splitlines()[-1] == want
+
+
+def test_engine_frame_record_hook(tmp_path):
+    """1.0.16 (Turrican II M9): ENGINE_FRAME_RECORD(n) - the project's function runs once per finished frame, before the
+    frame is published, so a scene record of frame n is complete when the page sees engine_done() > n."""
+    if not bus.compiler():
+        pytest.skip('no C compiler')
+    build_state(tmp_path)
+    (tmp_path / 'externs.c').write_text(EXTERNS + """
+static int REC_N = 0, REC_LAST = -1, REC_ORDER_OK = 1;
+static void my_record(int n) { if (n != REC_LAST + 1) REC_ORDER_OK = 0; REC_LAST = n; REC_N++;
+    wr16_raw(0x4100, (uint16_t)REC_N); wr16_raw(0x4102, (uint16_t)REC_ORDER_OK); }
+""")
+    out = tmp_path / 'native'
+    host.engine_build(str(out), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', native=True, src=str(tmp_path / 'externs.c'),
+                      defines=['HOST_L4=f_001180', 'ENGINE_FRAME_RECORD=my_record'])
+    r = subprocess.run([str(out / 'arek_host_engine'), str(tmp_path / 'state.bin'), '5', '--dump', str(tmp_path / 'chip.bin')],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    chip = (tmp_path / 'chip.bin').read_bytes()
+    assert struct.unpack('>HH', chip[0x4100:0x4104]) == (5, 1)       # five frames, each recorded in order before publishing
