@@ -1,7 +1,7 @@
 # WB-RECIPE - the display layer of the kit for a new game, on one page (kit 1.0)
 
 The canon `WB-PLYNULOST.md` says WHY every piece is as it is, with the measurements behind it. This page says WHAT a
-game writes. The contract is frozen at kit 1.0: wb-takt 1.4, wb-obraz 1.6, wb-scene 2.1 (kit 1.0.2), wb-obraz 1.7 (kit 1.0.3), wb-zvuk
+game writes. The contract is frozen at kit 1.0: wb-takt 1.4, wb-obraz 1.6, wb-scene 2.1 (kit 1.0.2), wb-obraz 1.7 (kit 1.0.3), wb-scene 2.2 (kit 1.0.17: window.palTop), wb-menu 1.0 + wb.css (kit 1.0.17: the Workbench bar), wb-zvuk
 1.1, WBLONGRUN 1.5; it changes only for a gap a game measures (KIT-GAPS), never for a new idea - those wait after 1.0.
 (Revised with Alien Breed SE92's notes from its migration, R1-R15.)
 
@@ -44,7 +44,7 @@ the thread computes on without a permit under 15 ms of reserve. Without shared m
 | field | what | rule |
 |---|---|---|
 | `cam`, `limits` | the game's camera and where it may go | the view clamps; a narrow map is centred on a whole pixel |
-| `window.idx`, `pal` | the CLEAN window: indices (255 = none), a palette row per line | without the objects and sprites the game blits - from a restore bitmap or a clean buffer |
+| `window.idx`, `pal` | the CLEAN window: indices (255 = none), a palette row per line | without the objects and sprites the game blits - from a restore bitmap or a clean buffer; `palTop` (2.2): `pal` may hold extra rows for the margins, `palTop` of them above the window - a margin row takes `clamp(wy - winY + palTop, 0, rows - 1)`, so a copper gradient continues past the window; without it the margins take the edge rows |
 | `window.over` | what the game drew over the window and the record cannot name | `WBSCENE.unexplained(rec, gameIdx)` finds it - give it only the objects the GAME drew, not the page's additions; one layer per record, not interpolated; what the game clips (an object cut at the window's edge) is the game's, over cannot hide it |
 | `map` | atlas (up to 1024 slots of 16 x 16 in a 512 x 512 texture) + cells (0xffff = no tile: black, not the palette's colour 0 - give that colour its own slot), `gen`, `dirty` slots | the margins beyond the window; the kit uploads every frame's dirty slots |
 | `objects[]` | `id`, `x, y` the LOGICAL position, `ox, oy` the drawing's offset, `w, h, idx`, `pass` | interpolated between PASSES; `steady` for one the camera tracks (a player that is a blitter object) |
@@ -79,6 +79,34 @@ geometry, the CRT, one canvas under the CRT layer).
     arek web replay URL --hz 50,60,120,144 --frames 300 --route 1:120,2:60,0:120
     scene.read() against WBSCENE.reference(composition)   # 0 mismatches at any time, any scale
     # (the reference is a CPU composition of the whole band - run the check on its own, not during a smoothness measurement: it drops a frame)
+
+## The Workbench bar (wb-menu.js + wb.css, kit 1.0.17)
+
+The bar of Alien Breed II and Superfrog on arek.fun: Project / Display / Game / Sound / ? at the top, the menus
+suspend the game while open, requesters for About and Help, a notice line. `arek web copy` brings both files (a
+page's own copy is kept; `--force` replaces it). The page writes the markup, the module only opens and closes it:
+
+```html
+<link rel="stylesheet" href="wb.css">
+<main id="shell">
+  <nav id="wbbar" aria-label="Main menu"><span class="wbname">Game · rebuild</span>
+    <div class="wbmenu"><button id="menu-project" class="wbtitle" type="button" aria-expanded="false">Project</button>
+      <div id="project-panel" class="wbpanel" hidden><button class="wbitem" type="button" data-close-menu>Start game</button></div></div>
+    <!-- Display / Game / Sound the same; the Display and Sound panels hold WBNASTAVENI's sections -->
+    <div id="wbstatus"><output id="status"></output><output id="wbnotice" hidden></output></div>
+    <button id="help-open" class="wbtitle" type="button">?</button><span id="run-state">Enhanced</span><span class="wbgadget"></span></nav>
+  <div id="stage"><div class="game"><canvas id="screen"></canvas><canvas class="crt-layer"></canvas></div></div>
+  <div id="help-shade" class="requester-shade" hidden><section class="wbwin requester"><div class="wbwtitle"><h2>Help</h2>
+    <button type="button" data-close-dialog>×</button></div><p>…</p></section></div>   <!-- requesters inside #shell -->
+</main>
+<script src="wb-menu.js"></script>
+```
+
+```js
+const shell = new WbMenu.Shell(document.getElementById('shell'), { suspend: () => { menuPause = true; }, restore: () => { menuPause = false; canvas.focus(); } });
+document.getElementById('help-open').onclick = () => shell.openDialog('help-shade');
+// the game's keys: none while shell.busy or WbMenu.editable(e.target); shell.message('Saved') for a short notice
+```
 
 ## What the kit does not do (yet)
 

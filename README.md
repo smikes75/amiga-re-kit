@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.16 on PyPI, 2549 tests. Extracted from five game
+- **The kit:** version 1.0.17 on PyPI, 2554 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -47,7 +47,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2549 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2554 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -184,6 +184,7 @@ asks for (see `examples/profile.example.json`).
 | `host/` (`arek host copy`) | the host of a translation: time from the bus model, the beam, interrupts 1-6, CIA-A with the E clock, Paula, the picture line by line in C (`arek_display.h`, 0 px against the emulator), the trace driver (`arek_host_trace.c`), `arek host state` from a capture, disk images at run time (`arek_host_disk.h`), a data disk the game writes (`arek_host_datadisk.h`), the web engine (`arek_host_engine.c`, Emscripten ASYNCIFY, `arek host engine`, held against its native build by `arek_host_engine_check.js`) (`docs/HOST.md`) | Alien Breed II |
 | `bus/arek_bus_paula.h` | Paula's audio DMA for the bus model: the channels' slots and output bytes, exact against the emulator (`arek selftest audio`) | Alien Breed II |
 | `web/wb-nastaveni.js`, `web/wb-zvuk.js` | the shared Display / Sound menu of the rebuilds (same ids, ranges, defaults per mode, storage, optional zoom snapping to the whole-device-pixel zooms; the game adds its items and texts) and the sound contract 1.1: one stereo-width rule, 20 ms gain ramps, the Amiga 500's filters from the schematic in prescribed digital forms, test hooks for `arek web test` §6 | Alien Breed, Superfrog |
+| `web/wb-menu.js`, `web/wb.css` | the Workbench 1.3 bar of a rebuild's page (Project / Display / Game / Sound / ?): an open menu or requester suspends the game, Esc and the arrow keys, a notice line; the markup is the page's (docs/WB-RECIPE.md) | Alien Breed II, Superfrog |
 | `web/wb-takt.js` | the clock of a page (canon C): the game's frames allowed by the display's clock, the lock on a k x 50 Hz display, the timeline of the frames, the picture behind the game with pairs for the interpolation and extrapolation, keys at the event; the synthetic page `smooth-demo.html` runs on it | Alien Breed II, Superfrog (Sonnet) |
 | `web/wb-zvuk-worklet.js`, `web/wb-zvuk-out.js` | Paula's output into Web Audio (canon D): an AudioWorklet over a ring of stereo int16 - the engine's ring in shared memory with written / read counters (a stalled main thread does not interrupt the sound, the engine computes on when the reserve runs low) or the game's frames by messages; the reserve, dropouts and output latency for the hooks | Alien Breed II, Superfrog (Sonnet) |
 | `web/wb-touch.js` | touch controls for a page: a virtual stick and buttons (fire, the page's keys), shown on touch devices or with `?touch`; `WBTOUCH.bits()` as the keyboard's bits, its own styles | Alien Breed II |

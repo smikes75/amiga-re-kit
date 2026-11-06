@@ -1,0 +1,51 @@
+/* wb.css 1.0 - the Workbench 1.3 shell of a rebuild's page (amiga-re-kit 1.0.17, with wb-menu.js): the bar, the panels, the
+   requesters, the stage, the CRT layer of wb-obraz, the rows of wb-nastaveni (wb-touch.js brings its own style); looks only, no game data. */
+:root{--wb-blue:#0055aa;--wb-white:#fff;--wb-black:#000020;--wb-orange:#ff8800;--bar-height:28px}
+*{box-sizing:border-box}body{margin:0;background:#000;color:var(--wb-white);font:bold 14px/1.5 "Courier New",ui-monospace,monospace}
+[hidden]{display:none!important}button,input,select{font:inherit}button,a,summary{cursor:pointer}
+#shell{height:100dvh;min-height:200px;display:flex;flex-direction:column;background:#000;padding-top:var(--bar-height)}
+#shell:fullscreen{width:100vw;height:100dvh}
+#wbbar{position:fixed;top:0;left:0;right:0;z-index:20;height:var(--bar-height);display:flex;align-items:stretch;background:var(--wb-white);color:var(--wb-blue);border-bottom:2px solid var(--wb-blue);white-space:nowrap;user-select:none}
+.wbname{padding:2px 12px 0 8px}.wbmenu{flex-shrink:0}.wbtitle{height:100%;padding:0 10px;background:none;border:0;color:inherit}
+.wbtitle:hover,.wbtitle[aria-expanded=true]{background:var(--wb-blue);color:var(--wb-white)}
+.wbtitle.ghost{opacity:.5}.wbpanel{position:fixed;top:var(--bar-height);min-width:min(300px,calc(100vw - 8px));max-width:calc(100vw - 8px);max-height:calc(100dvh - var(--bar-height) - 8px);overflow:auto;padding:4px 0;background:var(--wb-white);color:var(--wb-blue);border:2px solid var(--wb-blue);box-shadow:4px 4px 0 #000;font-size:13px;white-space:normal}
+.wbwide{width:400px}.wbitem{display:block;width:100%;padding:2px 14px;border:0;background:none;color:inherit;font:inherit;text-align:left;text-decoration:none}
+.wbitem:hover,.wbitem:focus-visible{background:var(--wb-blue);color:var(--wb-white)}
+.wbitem[aria-pressed=true]::before{content:"✓ ";}.wbitem[aria-pressed=false]::before{content:"  ";white-space:pre}
+button:disabled{opacity:.45;cursor:default}.wbitem:disabled:hover{background:none;color:inherit}
+.wbpanel label,.wbrow{display:flex;align-items:center;gap:8px;padding:3px 14px}
+.wbpanel label:hover{background:#dde8f4}.wbpanel label select{margin-left:auto;max-width:235px;min-width:0}.wbpanel input[type=range]{min-width:70px;flex:1;width:130px}
+.wbpanel select,.wbpanel button:not(.wbitem),.wbwin button{border:1px solid var(--wb-blue);border-radius:0;background:var(--wb-white);color:var(--wb-blue)}
+input[type=checkbox]{accent-color:var(--wb-blue)}.wbnote{display:block;margin:4px 0;padding:0 14px;font-size:12px;line-height:1.45;white-space:normal;overflow-wrap:anywhere}
+.wbpanel hr{border:0;border-top:2px dotted var(--wb-blue);margin:5px 8px}fieldset{border:0;padding:0;margin:0}kbd{float:right;margin-left:16px;font:inherit}
+.zoom-buttons{display:flex;flex-wrap:wrap;gap:4px;padding:2px 14px}.zoom-buttons button{padding:0 5px}.zoom-buttons button[aria-pressed=true]{background:var(--wb-blue);color:var(--wb-white)}
+.wbpanel summary{padding:2px 14px}.wbpanel details[open]{border-top:1px dotted var(--wb-blue)}
+#wbstatus{display:flex;align-items:center;flex:1;min-width:0;margin-left:auto;padding:0 10px;font-size:12px}#wbstatus output{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#wbstatus:has(#wbnotice:not([hidden])) #status{display:none}#run-state{padding:3px 8px;font-size:12px}.wbgadget{width:24px;flex-shrink:0;border-left:2px solid var(--wb-blue);position:relative}.wbgadget::before,.wbgadget::after{content:"";position:absolute;width:9px;height:6px;border:2px solid var(--wb-blue)}.wbgadget::before{left:3px;top:5px;background:var(--wb-blue)}.wbgadget::after{left:7px;top:10px;background:var(--wb-white)}
+#stage{flex:1;min-height:0;min-width:0;display:grid;grid-template-columns:minmax(0,1fr);place-items:safe center;padding:12px;overflow:auto}
+.game{position:relative;width:610px;max-width:100%;line-height:0}.game canvas{display:block;width:100%;height:auto;image-rendering:pixelated;border:1px solid #888;background:#000;outline:0}
+/* CRT (WB-OBRAZ-CRT.md 2): the scanlines and the R/G/B mask are a second canvas .crt-layer in device pixels (WBOBRAZ.drawCrt;
+   a CSS gradient blurred over two display rows in Chromium at dpr 1.25 / 1.5), ::after is only the vignette; --crt-on = the
+   opacity (blended during a mode change), the layer starts inside the canvas's 1 px frame (--crt-border). */
+.game .crt-layer{border:0;background:none;width:auto;position:absolute;left:var(--crt-border,1px);top:var(--crt-border,1px);pointer-events:none;image-rendering:pixelated;opacity:var(--crt-on,0);transition:opacity .36s ease-in-out}
+.game::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:var(--crt-on,0);transition:opacity .36s ease-in-out;box-shadow:inset 0 0 42px rgba(0,0,0,var(--crt-edge,.5))}
+.game.mode-changing .crt-layer,.game.mode-changing::after{transition:none}
+.game[data-crt=fine]{--crt-edge:.25}.game[data-crt=standard]{--crt-edge:.5}.game[data-crt=strong]{--crt-edge:.65}
+.wbwin{width:420px;max-width:calc(100vw - 24px);background:var(--wb-white);color:var(--wb-blue);border:2px solid var(--wb-blue);box-shadow:4px 4px 0 #000;text-align:center}
+.wbwtitle{display:flex;align-items:center;justify-content:space-between;margin:0;padding:2px 8px;background:var(--wb-blue);color:var(--wb-white);font-size:14px;text-align:left}.wbwtitle h2{margin:0;font:inherit}.wbwtitle button{padding:0 6px}.wbwin p{padding:0 14px}.wbwin .primary{padding:7px 14px;background:var(--wb-orange);color:var(--wb-black);border:2px solid var(--wb-black);box-shadow:2px 2px 0 #000}.primary:active{transform:translate(1px,1px)}
+.requester-shade{position:fixed;inset:0;z-index:30;display:flex;align-items:safe center;justify-content:center;padding:16px;background:#0008}.requester{width:520px;max-height:calc(100dvh - 32px);overflow:auto;text-align:left}.requester .wbitem{font-size:13px;border:0}.requester .wbitem:hover,.requester .wbitem:focus-visible{color:var(--wb-white);background:var(--wb-blue)}.requester .wbitem:disabled{background:none;color:var(--wb-blue)}
+#hud{padding:8px 14px;font-size:12px}.hud-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.hud-energy{grid-column:1/-1;display:flex;gap:8px;align-items:center}.hud-energy progress{flex:1;min-width:40px;accent-color:var(--wb-blue)}.hud-state,.hud-notice{margin:5px 0}
+:focus-visible{outline:2px solid var(--wb-orange);outline-offset:1px}
+@media(max-width:760px){#wbstatus,#run-state,.wbgadget{display:none}.wbname{padding-right:6px}.wbtitle{padding:0 7px}}
+@media(max-width:760px){#wbstatus:has(#wbnotice:not([hidden])){display:block;position:fixed;top:var(--bar-height);left:4px;right:4px;margin:0;padding:2px 6px;background:var(--wb-white);border:2px solid var(--wb-blue);pointer-events:none}}
+@media(max-width:480px){:root{--bar-height:52px}#wbbar{flex-wrap:wrap;align-content:flex-start}.wbname{flex-basis:100%;height:23px;padding-top:0}.wbmenu{height:27px;flex:1}.wbtitle{width:100%;padding:0 3px;font-size:12px}#stage{padding:6px}.wbpanel label{padding-left:8px;padding-right:8px}}
+@media(prefers-reduced-motion:reduce){.game::after,.game .crt-layer{transition:none}}
+/* the Display / Sound menus of wb-nastaveni.js: rows like the panel's items, the section legend hidden (the bar names it) */
+.wb-nastaveni-display>legend,.wb-nastaveni-sound>legend{display:none}.wb-nastaveni-row{display:flex;align-items:center;gap:8px;padding:3px 14px}.wb-nastaveni-row:hover{background:#dde8f4}
+.wb-nastaveni-row.wb-menu-check{flex-direction:row-reverse;justify-content:flex-end}.wb-nastaveni-row.wb-menu-check input[type=checkbox]{margin-left:0}
+.wbpanel .wb-nastaveni-row label{padding:0;flex:none;display:block}.wbpanel .wb-nastaveni-row select{margin-left:auto;max-width:235px;min-width:0}
+.wbpanel .wb-nastaveni-row input[type=range]{min-width:70px;flex:1;width:130px}.wb-nastaveni-row input[type=checkbox]{margin-left:auto}
+.wb-nastaveni-value{min-width:3.4em;text-align:right;font-variant-numeric:tabular-nums}
+.wbpanel .wb-nastaveni-defaults{display:block;width:100%;margin-top:4px;padding:2px 14px;border:0;background:none;color:inherit;font:inherit;text-align:left}
+.wbpanel .wb-nastaveni-defaults:hover,.wbpanel .wb-nastaveni-defaults:focus-visible{background:var(--wb-blue);color:var(--wb-white)}
+.wb-nastaveni-extras{border-top:2px dotted var(--wb-blue);margin:5px 8px 0;padding-top:4px}

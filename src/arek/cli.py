@@ -557,16 +557,18 @@ def cmd_web(a):
     if a.what == 'copy':
         dest = Path(a.target or '.')
         dest.mkdir(parents=True, exist_ok=True)
-        kept = []
-        from .web import FILES as WEB_FILES
+        kept, own_bar = [], []
+        from .web import FILES as WEB_FILES, SHELL as WEB_SHELL
         for name in WEB_FILES:
             out = dest / name
             if out.exists() and not a.force and b'amiga-re-kit' not in out.read_bytes()[:4096]:
-                kept.append(out)            # the game's own file under a kit name: never overwrite it
+                (own_bar if name in WEB_SHELL else kept).append(out)   # the game's own file under a kit name: never overwrite it
                 continue
             shutil.copyfile(web / name, out)
             print('%s  sha256 %s' % (out, hashlib.sha256(out.read_bytes()).hexdigest()))
         print('(wb-obraz %s)' % _wb_version(web))
+        if own_bar:                         # the page's own Workbench bar (the games wrote it before the kit had one): fine
+            print("kept the page's own Workbench bar (--force replaces it with the kit's): %s" % ', '.join(str(k) for k in own_bar))
         if kept:
             print('kept, not a kit file (--force overwrites): %s' % ', '.join(str(k) for k in kept))
             return 1

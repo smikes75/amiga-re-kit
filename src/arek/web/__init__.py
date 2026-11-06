@@ -1,4 +1,5 @@
 """The web side of a rebuild: the reference files of the display and sound contracts, the shared menu, the
+Workbench bar (wb-menu.js + wb.css), the
 seal, the ATN! decruncher and the content key for a page, the touch controls (``arek web copy``), the payload of a
 game's files for ``arek web seal --payload`` (``payload_atn``), a development server that serves a bundle with the
 disks of local.conf (``arek web serve``, localhost only; ``--isolated`` adds the COOP/COEP headers an engine with
@@ -12,7 +13,9 @@ import os
 import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FILES = ('wb-obraz.js', 'wb-seal.js', 'wb-nastaveni.js', 'wb-zvuk.js', 'wb-atn.js', 'wb-content.js', 'wb-touch.js', 'wb-takt.js', 'wb-zvuk-out.js', 'wb-zvuk-worklet.js', 'wb-scene.js', 'wb-datadisk.js')
+FILES = ('wb-obraz.js', 'wb-seal.js', 'wb-nastaveni.js', 'wb-zvuk.js', 'wb-atn.js', 'wb-content.js', 'wb-touch.js', 'wb-takt.js', 'wb-zvuk-out.js', 'wb-zvuk-worklet.js', 'wb-scene.js', 'wb-datadisk.js', 'wb-menu.js', 'wb.css')
+# the Workbench bar (1.0.17, Turrican II KIT-GAP 25): the games wrote these two first; a page's own copy is kept without an error
+SHELL = ('wb-menu.js', 'wb.css')
 CONTENT_KIND = 'arek-atn-files-1'
 
 

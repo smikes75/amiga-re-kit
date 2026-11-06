@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.1.1' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.2' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -97,6 +97,25 @@ def test_reference_composition_rules():
         return [c.f, c.cam, c.objs[0].x, c.sprs[0].x, S.reference(c).length]; })()"""))
     assert r == [0.5, [2, 0], 2, 4, 4 * 2 * 2 * 2 * 4]                                  # half way: camera, object and the sprite's world x interpolated
 
+
+
+def test_margin_palette_rows_with_pal_top():
+    """2.2 (Turrican II KIT-GAP 24): without palTop the margins above and below the window take the edge row's palette
+    (unchanged); with palTop the palette holds rows for the margins too and a margin row takes its own row
+    clamp(wy - winY + palTop, 0, rows - 1) - a copper gradient continues into the margins instead of a flat band."""
+    body = """(() => { const rows = %d, top = %s; const pal = new Uint8Array(rows * 32 * 4); for (let r = 0; r < rows; r++) for (let i = 0; i < 32; i++) { pal[(r * 32 + i) * 4] = i * 10; pal[(r * 32 + i) * 4 + 1] = r; pal[(r * 32 + i) * 4 + 3] = 255; }
+        const win = { w: 4, h: 2, idx: new Uint8Array(8).fill(1), pal, palTop: top };
+        const map = { gen: 1, atlas: new Uint8Array(256).fill(2), nslots: 1, dirty: null, cols: 8, rows: 8, cells: new Uint16Array(64).fill(0), origin: [0, 0] };
+        const rec = { n: 1, t: 0, cam: [0, 3], limits: { x0: 0, x1: 0, y0: 3, y1: 3 }, window: win, map, objects: [], sprites: [] };
+        const c = S.compose([rec], 0, { S: 1, extX: 0, extY: 3 }, {}, null); const px = S.reference(c);
+        return [c.H, [0, 1, 2, 3, 4, 5, 6, 7].map((y) => px[(y * c.W) * 4 + 1]), [0, 3, 4, 7].map((y) => px[(y * c.W) * 4])]; })()"""
+    r = js(body % (2, 'undefined'))
+    assert r[0] == 8 and r[1] == [0, 0, 0, 0, 1, 1, 1, 1]          # the old rule: the edge rows' palette above and below
+    assert r[2] == [20, 10, 10, 20]                                  # the margins show the map (idx 2), the window idx 1
+    r = js(body % (8, '3'))
+    assert r[1] == [0, 1, 2, 3, 4, 5, 6, 7]                          # every band row its own palette row
+    r = js(body % (6, '2'))
+    assert r[1] == [0, 0, 1, 2, 3, 4, 5, 5]                          # fewer margin rows than the margin: clamped at both ends
 
 def test_screen_sprites_over_layer_and_pass_guard():
     """1.1: a sprite with screen = true stays in the view's corner whatever the clamp does (KIT-GAPS 40); window.over is
@@ -284,7 +303,7 @@ def _run_page(url_tail, fn, browser='chromium'):
         srv.shutdown()
 
 
-@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1'])
+@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1'])
 def test_gpu_equals_the_reference(tail):
     """The GPU band against the CPU reference of the same composition, pixel for pixel, while the camera moves and the
     objects interpolate (as Alien Breed II checked its WebGL path: 0 of 60 M pixels)."""
