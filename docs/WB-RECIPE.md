@@ -1,7 +1,7 @@
 # WB-RECIPE - the display layer of the kit for a new game, on one page (kit 1.0)
 
 The canon `WB-PLYNULOST.md` says WHY every piece is as it is, with the measurements behind it. This page says WHAT a
-game writes. The contract is frozen at kit 1.0: wb-takt 1.4, wb-obraz 1.6, wb-scene 2.1 (kit 1.0.2), wb-obraz 1.7 (kit 1.0.3), wb-scene 2.2 (kit 1.0.17: window.palTop), wb-menu 1.0 + wb.css (kit 1.0.17: the Workbench bar), wb-zvuk
+game writes. The contract is frozen at kit 1.0: wb-takt 1.4, wb-obraz 1.6, wb-scene 2.1 (kit 1.0.2), wb-obraz 1.7 (kit 1.0.3), wb-scene 2.2 (kit 1.0.17: window.palTop), wb-menu 1.0 + wb.css (kit 1.0.17: the Workbench bar), wb-scene 2.3 (kit 1.0.18: palAnchor, objects with the ground), wb-zvuk
 1.1, WBLONGRUN 1.5; it changes only for a gap a game measures (KIT-GAPS), never for a new idea - those wait after 1.0.
 (Revised with Alien Breed SE92's notes from its migration, R1-R15.)
 
@@ -44,10 +44,10 @@ the thread computes on without a permit under 15 ms of reserve. Without shared m
 | field | what | rule |
 |---|---|---|
 | `cam`, `limits` | the game's camera and where it may go | the view clamps; a narrow map is centred on a whole pixel |
-| `window.idx`, `pal` | the CLEAN window: indices (255 = none), a palette row per line | without the objects and sprites the game blits - from a restore bitmap or a clean buffer; `palTop` (2.2): `pal` may hold extra rows for the margins, `palTop` of them above the window - a margin row takes `clamp(wy - winY + palTop, 0, rows - 1)`, so a copper gradient continues past the window; without it the margins take the edge rows |
+| `window.idx`, `pal` | the CLEAN window: indices (255 = none), a palette row per line | without the objects and sprites the game blits - from a restore bitmap or a clean buffer; `palTop` (2.2): `pal` may hold extra rows for the margins, `palTop` of them above the window - a margin row takes `clamp(wy - winY + palTop, 0, rows - 1)`, so a copper gradient continues past the window; without it the margins take the edge rows; the Scene option `palAnchor: 'screen'` (2.3) keeps the palette rows on the screen rows of the game's camera between frames (a gradient fixed to the screen does not saw under a vertical scroll), the default `'window'` moves them with frame B's picture |
 | `window.over` | what the game drew over the window and the record cannot name | `WBSCENE.unexplained(rec, gameIdx)` finds it - give it only the objects the GAME drew, not the page's additions; one layer per record, not interpolated; what the game clips (an object cut at the window's edge) is the game's, over cannot hide it |
 | `map` | atlas (up to 1024 slots of 16 x 16 in a 512 x 512 texture) + cells (0xffff = no tile: black, not the palette's colour 0 - give that colour its own slot), `gen`, `dirty` slots | the margins beyond the window; the kit uploads every frame's dirty slots |
-| `objects[]` | `id`, `x, y` the LOGICAL position, `ox, oy` the drawing's offset, `w, h, idx`, `pass` | interpolated between PASSES; `steady` for one the camera tracks (a player that is a blitter object) |
+| `objects[]` | `id`, `x, y` the LOGICAL position, `ox, oy` the drawing's offset, `w, h, idx`, `pass` | interpolated between PASSES; `steady` for one the camera tracks (a player that is a blitter object): it stays on the screen; the others go with the ground in whole device pixels, with or without `subpixel` (2.3) |
 | `sprites[]` | `k`, `id`, `x, y` the hardware position, `h, idx` | interpolated between frames; `screen: true` for one fixed on the screen; `freshSprites` draws them from the newest frame; only occurrences the hardware would SHOW - a sprite parked beyond the display window (HSTART past the window) stays out, the kit does not clip to the DIW |
 | `hud` | `top / bottom: { h, rgba, split }`, `under` | widened or narrowed by the splits - a split is the column that REPEATS (the cut column itself, 0-based), not the one before it; `under` when a sprite may reach into the HUD rows; the colour channels (RGB 50-150 %) and the palette belong to the record's `pal` - the page recolours the palette, not the frames |
 

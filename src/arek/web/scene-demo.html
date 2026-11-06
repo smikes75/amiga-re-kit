@@ -71,6 +71,7 @@ let lean = 0;                                                              // 1.
 let schedule = null;                                                       // 1.5 (arek web replay): [[frame, mask], ...] - the keys by game frame
 const opts = { pairOlder: parseInt(Q.get('pair') || '0', 10) };
 if (Q.get('mean') === '1') opts.camMean = { tau: 20 };
+if (Q.get('palscreen') === '1') opts.palAnchor = 'screen';                // 2.3 (KIT-GAP 27): the palette rows on the screen rows
 if (Q.get('fine') === '1') opts.subpixel = true;                          // 1.5: the playfield shifted by the fraction of a device pixel
 const UNDER = Q.get('under') === '1';                                     // 1.4: the sprites above the HUD rows; the frog's head reaches into the top HUD
 const screen = document.getElementById('screen'), O = WBOBRAZ;

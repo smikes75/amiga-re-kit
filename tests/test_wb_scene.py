@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.2' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.3' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -116,6 +116,41 @@ def test_margin_palette_rows_with_pal_top():
     assert r[1] == [0, 1, 2, 3, 4, 5, 6, 7]                          # every band row its own palette row
     r = js(body % (6, '2'))
     assert r[1] == [0, 0, 1, 2, 3, 4, 5, 5]                          # fewer margin rows than the margin: clamped at both ends
+
+
+def test_palette_rows_on_the_screen():
+    """2.3 (Turrican II KIT-GAP 27): a palette row per line and the camera 4 px a frame down; between the frames the
+    default (palAnchor 'window') moves the rows with frame B's picture and jumps back at every new frame - a copper
+    gradient saws; palAnchor 'screen' keeps a band row on the same palette row (the game's screen row)."""
+    body = """(() => { const pal = new Uint8Array(8 * 32 * 4); for (let r = 0; r < 8; r++) for (let i = 0; i < 32; i++) { pal[(r * 32 + i) * 4] = i * 10; pal[(r * 32 + i) * 4 + 1] = r; pal[(r * 32 + i) * 4 + 3] = 255; }
+        const map = { gen: 1, atlas: new Uint8Array(256).fill(2), nslots: 1, dirty: null, cols: 8, rows: 8, cells: new Uint16Array(64).fill(0), origin: [0, 0] };
+        const rec = (n, t, y) => ({ n, t, cam: [0, y], limits: { x0: 0, x1: 0, y0: 0, y1: 100 }, window: { w: 4, h: 8, idx: new Uint8Array(32).fill(1), pal }, map, objects: [], sprites: [] });
+        const fr = [rec(1, 0, 8), rec(2, 20, 12), rec(3, 40, 16)], out = [];
+        for (const t of [20, 25, 30, 35]) { const c = S.compose(fr, t, { S: %s, extX: 0, extY: 0 }, { palAnchor: %s }, null); const px = S.reference(c); out.push(px[(%d * c.W * %s) * 4 + 1]); }
+        return out; })()"""
+    assert js(body % ('1', "'window'", 3, '1')) == [0, 0, 1, 2]       # frame 2 at y 12..19: band row 3 shows world 11..14 - the rows of B's picture
+    assert js(body % ('1', "'screen'", 3, '1')) == [3, 3, 3, 3]       # the screen row 3 of the game's camera, all the way
+    assert js(body % ('3', "'screen'", 10, '3')) == [3, 3, 3, 3]      # device row 10 at S 3 is band row 3
+
+
+def test_objects_stand_on_the_ground_without_subpixel():
+    """2.3 (Turrican II KIT-GAP 28): the camera between 4 and 5 at S 3, an object standing at world x 20 and a mark of the
+    ground at world x 10 - the ground moves by floor(cam * S), the object went by round((x - cam) * S) and shook by a
+    device pixel against it (0 0 -1 -1 0 ...); now it goes with the ground; a steady object stays on the screen."""
+    body = """(() => { const pal = new Uint8Array(32 * 4 * 2); for (let r = 0; r < 2; r++) for (let i = 0; i < 32; i++) { pal[(r * 32 + i) * 4] = i * 10; pal[(r * 32 + i) * 4 + 3] = 255; }
+        const win = (cx) => { const idx = new Uint8Array(80).fill(1); idx[10 - cx] = 5; idx[40 + 10 - cx] = 5; return { w: 40, h: 2, idx, pal }; };
+        const rec = (n, t, cx, steady) => ({ n, t, cam: [cx, 0], limits: { x0: 0, x1: 100, y0: 0, y1: 0 }, window: win(cx), map: null, sprites: [],
+            objects: [{ id: 7, w: 1, h: 1, idx: new Uint8Array([3]), x: steady ? cx + 10 : 20, y: 0, pass: t, steady }] });
+        const out = [];
+        for (let t = 0; t <= 20; t += 2) { const fr = [rec(1, 0, 4, %s), rec(2, 20, 5, %s)]; const c = S.compose(fr, t, { S: %s, extX: 0, extY: 0 }, {}, null); const px = S.reference(c), W = Math.round(c.W * %s);
+            let mark = -1, obj = -1; for (let x = 0; x < W; x++) { const R = px[x * 4]; if (R === 50 && mark < 0) mark = x; if (R === 30 && obj < 0) obj = x; }
+            out.push([obj - mark, obj]); }
+        return out; })()"""
+    for S in ('3', '2', '1.5'):
+        r = js(body % ('false', 'false', S, S))
+        assert len({d for d, _ in r}) == 1, (S, r)                     # the object never moves against the ground
+    r = js(body % ('true', 'true', '3', '3'))
+    assert len({o for _, o in r}) == 1 and r[0][1] == 30, r            # steady: the camera tracks it, it stays on the screen
 
 def test_screen_sprites_over_layer_and_pass_guard():
     """1.1: a sprite with screen = true stays in the view's corner whatever the clamp does (KIT-GAPS 40); window.over is
@@ -303,7 +338,7 @@ def _run_page(url_tail, fn, browser='chromium'):
         srv.shutdown()
 
 
-@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1'])
+@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1', '?s=2&paltop=1&palscreen=1', '?s=1.9943&fine=1&paltop=1&palscreen=1'])
 def test_gpu_equals_the_reference(tail):
     """The GPU band against the CPU reference of the same composition, pixel for pixel, while the camera moves and the
     objects interpolate (as Alien Breed II checked its WebGL path: 0 of 60 M pixels)."""

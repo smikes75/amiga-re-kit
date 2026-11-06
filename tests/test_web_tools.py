@@ -86,6 +86,35 @@ def _get(port, path):
     return r.status, dict((k.lower(), v) for k, v in r.getheaders()), body
 
 
+def test_serve_takes_a_burst_of_connections(tmp_path):
+    """1.0.18 (Turrican II KIT-GAP 26): a page opens ~20 scripts at once; socketserver's backlog of 5 reset the rest on
+    macOS / Chromium. 40 connections made before the server accepts any all get their file."""
+    import socket
+    (tmp_path / 'a.js').write_text('x')
+    srv = web.serve(tmp_path, 0)
+    assert isinstance(srv, web.Server) and srv.request_queue_size >= 128
+    port, socks = srv.server_address[1], []
+    try:
+        for _ in range(40):                                   # all queued in the backlog: nothing accepts yet
+            c = socket.create_connection(('127.0.0.1', port), timeout=5)
+            c.sendall(b'GET /a.js HTTP/1.0\r\nHost: x\r\n\r\n')
+            socks.append(c)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        for c in socks:
+            data = b''
+            while True:
+                part = c.recv(4096)
+                if not part:
+                    break
+                data += part
+            assert data.startswith(b'HTTP/1.0 200') and data.endswith(b'x'), data[:40]
+    finally:
+        for c in socks:
+            c.close()
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_serve_isolated_sends_the_headers(tmp_path):
     (tmp_path / 'index.html').write_text('<p>x</p>')
     (tmp_path / 'd.adf').write_bytes(b'\x01' * 1024)

@@ -74,6 +74,14 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+class Server(http.server.ThreadingHTTPServer):
+    """The development server of `arek web serve` / `web demo` (1.0.18, Turrican II KIT-GAP 26): a listen backlog of 128
+    instead of socketserver's 5 - a page with ~20 scripts and styles opens them at once, and on macOS / Chromium the
+    sixth connection got ERR_CONNECTION_RESET (a script missing, `arek web smooth` timing out)."""
+    request_queue_size = 128
+    daemon_threads = True
+
+
 def serve(site, port=8930, conf=None, host='127.0.0.1', isolated=False):
     """A server for a bundle folder that also serves the disks of ``conf`` (local.conf) as
     ``/local-disks/disk1.adf``, ``disk2.adf``, ... (keys ADF1, ADF2, ...), on localhost only, so a page can load
@@ -85,7 +93,7 @@ def serve(site, port=8930, conf=None, host='127.0.0.1', isolated=False):
         if k.startswith('ADF') and k[3:].isdigit() and conf[k]:
             disks['/local-disks/disk%s.adf' % k[3:]] = conf[k]
     handler = type('Handler', (_Handler,), {'disks': disks, 'isolated': isolated})
-    srv = http.server.ThreadingHTTPServer((host, port), functools.partial(handler, directory=str(site)))
+    srv = Server((host, port), functools.partial(handler, directory=str(site)))
     srv.disks = disks
     return srv
 

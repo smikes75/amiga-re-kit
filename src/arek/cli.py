@@ -661,7 +661,8 @@ def cmd_web(a):
         import functools
         import http.server
         handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(web))
-        srv = http.server.ThreadingHTTPServer(('127.0.0.1', a.port), handler)
+        from .web import Server
+        srv = Server(('127.0.0.1', a.port), handler)
         print('http://127.0.0.1:%d/demo.html  (wb-obraz %s; Ctrl+C to stop)' % (a.port, _wb_version(web)), flush=True)
         try:
             srv.serve_forever()
