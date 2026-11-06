@@ -89,9 +89,10 @@ function step() {
   const t = takt.stamp(done), pass = done & 1 ? t : null;               // the 25 Hz loop moves the objects on odd frames
   if (pass !== null) for (const o of objs) { const d = OBJ[o.id - 1]; o.x += d.vx * 2; o.y += d.vy * 2; if (o.x < 0 || o.x > COLS * 16 - 24) d.vx = -d.vx; if (o.y < 0 || o.y > ROWS * 16 - 16) d.vy = -d.vy; }
   if (pass !== null) { takt.pass(t); scene.lastPass = t; }
+  // 2.4: a third sprite standing in the world at (400, 150) (KIT-GAP 29), only while the hardware would show it
   scene.frame({ n: done, t, pass: scene.lastPass || t, cam: cam.slice(), limits, window: { w: W0, h: H0, idx: cleanWindow(cam[0], cam[1]), pal: PAL, palTop: PALTOP === null ? undefined : PALTOP, over: overLayer(done) }, map,
     objects: objs.filter((o) => !(OBJ[o.id - 1].blink && (done & 1))).map((o) => ({ id: o.id, w: OBJ[o.id - 1].w, h: OBJ[o.id - 1].h, idx: OBJ[o.id - 1].idx, x: o.x, y: o.y, steady: o.id === 2 })),   // 1.6: object 2 stays on whole pixels under ?fine=1
-    sprites: [{ k: 0, h: 24, idx: SPR, x: 152 + lean, y: UNDER ? -EXTY - 6 : 88 }, { k: 1, h: 10, idx: BADGE, x: 4, y: 4, screen: true }], hud: { top: { h: HUD, rgba: HUDT, split: [60, 180, 260] }, bottom: { h: HUD, rgba: HUDB, split: [160] }, under: UNDER } });
+    sprites: [{ k: 0, h: 24, idx: SPR, x: 152 + lean, y: UNDER ? -EXTY - 6 : 88 }, { k: 1, h: 10, idx: BADGE, x: 4, y: 4, screen: true }].concat(400 - cam[0] > -16 && 400 - cam[0] < W0 ? [{ k: 2, h: 10, idx: BADGE, x: 400 - cam[0], y: 150 - cam[1] }] : []), hud: { top: { h: HUD, rgba: HUDT, split: [60, 180, 260] }, bottom: { h: HUD, rgba: HUDB, split: [160] }, under: UNDER } });
 }
 const view = { W, H, S, extX: EXTX, extY: EXTY, x0: 0, y0: HUD * S };
 function layout() { pr.size(view.W, view.H + 2 * HUD, view.S, 1, window.devicePixelRatio || 1); }

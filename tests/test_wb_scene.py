@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.3' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.4' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -151,6 +151,29 @@ def test_objects_stand_on_the_ground_without_subpixel():
         assert len({d for d, _ in r}) == 1, (S, r)                     # the object never moves against the ground
     r = js(body % ('true', 'true', '3', '3'))
     assert len({o for _, o in r}) == 1 and r[0][1] == 30, r            # steady: the camera tracks it, it stays on the screen
+
+
+def test_anchor_per_pair_for_sprites_and_objects():
+    """2.4 (Turrican II KIT-GAP 29): a sprite standing in the world went by round((x - cam) * S) against the ground's
+    floor(cam * S) and shook by a device pixel (S 3: 0 0 -1 -1 0 0 -1 0 0 -1 0); now the anchor is decided per pair and
+    axis: the same world position in both frames = with the ground, the same screen position = on the screen - so the
+    player sprite stays on the screen while the camera tracks it and goes with the ground while the camera coasts; an
+    object moving with the camera stays on the screen without a steady flag."""
+    body = """(() => { const pal = new Uint8Array(32 * 4 * 2); for (let r = 0; r < 2; r++) for (let i = 0; i < 32; i++) { pal[(r * 32 + i) * 4] = i * 10; pal[(r * 32 + i) * 4 + 3] = 255; }
+        const win = (cx) => { const idx = new Uint8Array(80).fill(1); idx[10 - cx] = 5; idx[40 + 10 - cx] = 5; return { w: 40, h: 2, idx, pal }; };
+        const spr = new Uint8Array(16).fill(255); spr[0] = 4;
+        const rec = (n, t, cx, hw) => ({ n, t, cam: [cx, 0], limits: { x0: 0, x1: 100, y0: 0, y1: 0 }, window: win(cx), map: null,
+            objects: [{ id: 7, w: 1, h: 1, idx: new Uint8Array([3]), x: %s, y: 0, pass: t }], sprites: [{ k: 0, h: 1, idx: spr, x: hw, y: 0 }] });
+        const out = [];
+        for (let t = 0; t <= 20; t += 2) { const fr = [rec(1, 0, 4, %s), rec(2, 20, 5, %s)]; const c = S.compose(fr, t, { S: %s, extX: 0, extY: 0 }, {}, null); const px = S.reference(c), W = Math.round(c.W * %s);
+            let mark = -1, obj = -1, sp = -1; for (let x = 0; x < W; x++) { const R = px[x * 4]; if (R === 50 && mark < 0) mark = x; if (R === 30 && obj < 0) obj = x; if (R === 40 && sp < 0) sp = x; }
+            out.push([sp - mark, sp, obj - mark, obj]); }
+        return out; })()"""
+    for S in ('2', '3', '4'):                                           # the #29 setup
+        r = js(body % ('20', '26', '25', S, S))                       # the sprite at world 30 = hardware 30 - cam, the object at 20
+        assert len({d for d, _, _, _ in r}) == 1 and len({d for _, _, d, _ in r}) == 1, (S, r)   # sprite and object never move against the ground
+    r = js(body % ('cx + 10', '12', '12', '3', '3'))                     # the camera tracks both: the hardware position holds, the object moves with cx
+    assert len({x for _, x, _, _ in r}) == 1 and r[0][1] == 36 and len({x for _, _, _, x in r}) == 1 and r[0][3] == 30, r   # both stay on the screen, no steady flag
 
 def test_screen_sprites_over_layer_and_pass_guard():
     """1.1: a sprite with screen = true stays in the view's corner whatever the clamp does (KIT-GAPS 40); window.over is
@@ -352,7 +375,7 @@ def test_gpu_equals_the_reference(tail):
     if not gl:
         pytest.skip('no WebGL2 in this Chromium')
     for r in res:
-        assert r['bad'] == 0 and r['pixels'] > 100000 and r['objs'] >= 2 and r['sprs'] == 2 and r['glErr'] == 0, r   # the frog and the screen-fixed badge; no GL error since the page's first draw (KIT-GAPS 50)
+        assert r['bad'] == 0 and r['pixels'] > 100000 and r['objs'] >= 2 and r['sprs'] >= 2 and r['glErr'] == 0, r   # the frog, the screen-fixed badge and (while in the window) the sprite standing in the world; no GL error since the page's first draw (KIT-GAPS 50)
         assert ('fine' in tail) == (r['glued'] >= 1), r                                                              # 1.6: under the shift the objects (but the steady one) went with the ground
 
 
