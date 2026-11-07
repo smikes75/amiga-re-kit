@@ -52,11 +52,11 @@ d1e1	{}	16	adda.l -(a1),a0
 5f9f	{}	20	subq.l #7,(a7)+
 5ca4	{}	22	addq.l #6,-(a4)
 9300	{}	4	subx.b d0,d1
-df0a	{}	18	addx.b -(a2,-(a7
+df0a	{}	18	addx.b -(a2),-(a7)
 9f46	{}	4	subx.w d6,d7
-d94f	{}	18	addx.w -(a7,-(a4
+d94f	{}	18	addx.w -(a7),-(a4)
 db82	{}	8	addx.l d2,d5
-9b8c	{}	30	subx.l -(a4,-(a5
+9b8c	{}	30	subx.l -(a4),-(a5)
 ce3900100010	{}	16	and.b $100010.l,d7
 ba3900100010	{}	16	cmp.b $100010.l,d5
 8b3900100010	{}	20	or.b d5,$100010.l

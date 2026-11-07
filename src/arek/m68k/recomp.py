@@ -935,9 +935,13 @@ class Gen:
         elif k == 'nop':
             L.append(';')
         elif k == 'move':
-            pre(i.src, i.dst)
+            # 1.0.23 (Xenon 2 KIT-GAP 3): the source is read BEFORE the destination's address is formed - the 68000
+            # (and Moira's execMove: readOp, then writeOp) - so move.l (4,a1),(a1)+ reads a1+4, not a1+8, and
+            # move.l a1,-(a1) stores the old a1
+            pre(i.src)
             t = 'v%06x' % i.addr
             L.append('uint32_t %s = %s;' % (t, i.src.read(i.sz)))
+            pre(i.dst)
             if not i.movea:
                 L.append('%s = f_logic(m, %s, %d);' % (t, t, i.sz))
             L.append(i.dst.write(i.sz, t))
@@ -1045,9 +1049,10 @@ class Gen:
             L.append('f_cmp(m, %s, %s, %d);' % (i.src.read(i.sz), i.dst.read(i.sz), i.sz))
         elif k == 'bcd':
             sub = 1 if i.sub else 0
-            if i.mem:
-                L.append('m->a[%d] -= %d; m->a[%d] -= %d;' % (i.ry, 2 if i.ry == 7 else 1, i.rx, 2 if i.rx == 7 else 1))
-                L.append('wr8(m->a[%d], f_bcd(m, rd8(m->a[%d]), rd8(m->a[%d]), %d));' % (i.rx, i.ry, i.rx, sub))
+            if i.mem:                                  # 1.0.23: the source address kept before -(Ax) (abcd -(a0),-(a0))
+                s_ = 'xs%06x' % i.addr
+                L.append('m->a[%d] -= %d; uint32_t %s = m->a[%d]; m->a[%d] -= %d;' % (i.ry, 2 if i.ry == 7 else 1, s_, i.ry, i.rx, 2 if i.rx == 7 else 1))
+                L.append('wr8(m->a[%d], f_bcd(m, rd8(%s), rd8(m->a[%d]), %d));' % (i.rx, s_, i.rx, sub))
             else:
                 L.append('setd(m, %d, 0, f_bcd(m, m->d[%d], m->d[%d], %d));' % (i.rx, i.ry, i.rx, sub))
         elif k == 'shift':
@@ -1140,11 +1145,12 @@ class Gen:
             if i.mem:
                 def n(reg):                            # -(a7).b keeps the stack even
                     return 2 if i.sz == SZ_W else (4 if i.sz == SZ_L else (2 if reg == 7 else 1))
-                L.append('m->a[%d] -= %d; m->a[%d] -= %d;' % (i.ry, n(i.ry), i.rx, n(i.rx)))
+                s_ = 'xs%06x' % i.addr                 # 1.0.23: the source address kept before -(Ax) (addx.l -(a0),-(a0))
+                L.append('m->a[%d] -= %d; uint32_t %s = m->a[%d]; m->a[%d] -= %d;' % (i.ry, n(i.ry), s_, i.ry, i.rx, n(i.rx)))
                 rd = {SZ_B: 'rd8', SZ_W: 'rd16', SZ_L: 'rd32'}[i.sz]
                 wr = {SZ_B: 'wr8', SZ_W: 'wr16', SZ_L: 'wr32'}[i.sz]
-                L.append('%s(m->a[%d], %s(m, %s(m->a[%d]), %s(m->a[%d]), %d));'
-                         % (wr, i.rx, f, rd, i.ry, rd, i.rx, i.sz))
+                L.append('%s(m->a[%d], %s(m, %s(%s), %s(m->a[%d]), %d));'
+                         % (wr, i.rx, f, rd, s_, rd, i.rx, i.sz))
             else:
                 dn = {SZ_B: '(uint8_t)m->d[%d]', SZ_W: '(uint16_t)m->d[%d]',
                       SZ_L: 'm->d[%d]'}[i.sz]

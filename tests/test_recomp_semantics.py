@@ -454,3 +454,34 @@ def test_immediate_to_ccr_sets_the_flags(tmp_path):
     *_, mem = run(tmp_path, prog, {})
     v = [int.from_bytes(mem[0x4000 + 2 * k:0x4002 + 2 * k], 'big') & 0x1f for k in range(3)]
     assert v == [0x1f, 0x1e, 0x1a], [hex(x) for x in v]
+
+
+SAME_AN = [
+    # (hex, regs, ram_init, check address, expected bytes there, register, its value after) - 1.0.23, Xenon 2 KIT-GAP 3:
+    # the 68000 reads the source BEFORE it forms the destination's address (Moira: readOp, then writeOp)
+    ('22e90004', {'a1': 0x2000}, {0x2004: bytes.fromhex('11223344'), 0x2008: bytes.fromhex('55667788')},
+     0x2000, '11223344', 'a1', 0x2004),                         # move.l (4,a1),(a1)+ reads a1+4, not a1+8
+    ('2329fff6', {'a1': 0x2010}, {0x2006: bytes.fromhex('aabbccdd'), 0x2002: bytes.fromhex('99999999')},
+     0x200c, 'aabbccdd', 'a1', 0x200c),                         # move.l (-10,a1),-(a1) reads a1-10, not a1-14
+    ('2311', {'a1': 0x2004}, {0x2004: bytes.fromhex('cafebabe')},
+     0x2000, 'cafebabe', 'a1', 0x2000),                         # move.l (a1),-(a1)
+    ('2309', {'a1': 0x2004}, {},
+     0x2000, '00002004', 'a1', 0x2000),                         # move.l a1,-(a1) stores the old a1
+    ('30f00002', {'a0': 0x2000, 'd0': 4}, {0x2006: bytes.fromhex('beef'), 0x2008: bytes.fromhex('1111')},
+     0x2000, 'beef', 'a0', 0x2002),                             # move.w (2,a0,d0.w),(a0)+
+    ('d188', {'a0': 0x2008}, {0x2004: bytes.fromhex('00000005'), 0x2000: bytes.fromhex('00000010')},
+     0x2000, '00000015', 'a0', 0x2000),                         # addx.l -(a0),-(a0): source a0-4, destination a0-8
+    ('9349', {'a1': 0x2004}, {0x2002: bytes.fromhex('0003'), 0x2000: bytes.fromhex('0010')},
+     0x2000, '000d', 'a1', 0x2000),                             # subx.w -(a1),-(a1)
+    ('c309', {'a1': 0x2002}, {0x2001: bytes.fromhex('15'), 0x2000: bytes.fromhex('27')},
+     0x2000, '42', 'a1', 0x2000),                               # abcd -(a1),-(a1): 27 + 15 = 42 (BCD)
+    ('8309', {'a1': 0x2002}, {0x2001: bytes.fromhex('15'), 0x2000: bytes.fromhex('42')},
+     0x2000, '27', 'a1', 0x2000),                               # sbcd -(a1),-(a1): 42 - 15 = 27 (BCD)
+]
+
+
+@pytest.mark.parametrize('hexcode, regs, ram_init, at, want, reg, after', SAME_AN)
+def test_source_read_before_the_destination_moves_the_same_register(tmp_path, hexcode, regs, ram_init, at, want, reg, after):
+    d, a, f, ram = run(tmp_path, hexcode, regs, ram_init=ram_init)
+    assert ram[at:at + len(want) // 2].hex() == want
+    assert (a if reg[0] == 'a' else d)[int(reg[1])] == after

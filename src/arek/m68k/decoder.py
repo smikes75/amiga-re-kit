@@ -436,9 +436,9 @@ def decode(data, base, addr):
         if hi in (9, 0xd) and direction and mode in (0, 1) and sz2 != 3:
             return Insn(addr, r.pc, 'addx', sz=sz2, sub=(hi == 9), rx=dreg, ry=reg,
                         mem=(mode == 1),
-                        text='%sx.%s %s%d,%s%d' % ('sub' if hi == 9 else 'add', SZNAME[sz2],
-                                                   '-(a' if mode == 1 else 'd', reg,
-                                                   '-(a' if mode == 1 else 'd', dreg))
+                        text='%sx.%s %s,%s' % ('sub' if hi == 9 else 'add', SZNAME[sz2],     # 1.0.23: '-(a1),-(a1)' (the closing parentheses were missing)
+                                               ('-(a%d)' if mode == 1 else 'd%d') % reg,
+                                               ('-(a%d)' if mode == 1 else 'd%d') % dreg))
         if direction and hi != 0xb:                  # Dn,<ea>: memory alterable
             need = 'ma'
         elif name in ('or', 'and'):                  # <ea>,Dn: data

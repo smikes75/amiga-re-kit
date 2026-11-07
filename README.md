@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.22 on PyPI, 2570 tests. Extracted from five game
+- **The kit:** version 1.0.23 on PyPI, 2579 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -47,7 +47,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2570 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2579 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -114,7 +114,7 @@ arek trace   compare build/orig.vtr build/native.vtr --best-shift 3   # long par
 arek trace   bus build/bus.bin --frame 8600            # who had the chip bus in every slot (buslog patch)
 arek trace   run build/s.vtr --arm 3 --end 176 --shots build/f --shot-frames 8600:8619   # 20 frames, one run
 arek trace   run build/w.vtr --arm 3 --end 200 --break 0xc01b06 --poke c01b06:c00faa=00000002  # write into the machine, go on
-arek selftest inputs                                   # is this VAHeadless frame exact? (synthetic disk; 1.0.22: the mouse too - m<dx>:<dy>, B / C)
+arek selftest inputs                                   # is this VAHeadless frame exact? (synthetic disk; 1.0.23: the mouse too - m<dx>:<dy>, B / C)
 arek selftest mouse                                    # RetroShell `mouse1 move dx=5 dy=-3` moves the JOY0DAT counters (vamiga-mouse-899da5d.patch)
 
 # 4b. many scenarios at once (arek.parity.suite): state (traces), picture (--shots), sound (--reglog)
