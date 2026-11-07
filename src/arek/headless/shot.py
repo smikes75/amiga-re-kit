@@ -6,7 +6,9 @@ assumed about the game. ``events`` is ``[(t_seconds, 'retroshell command')]``
 - joystick / key presses that drive the game to the state you want to see.
 RetroShell spells them ``joystick2 press 1`` / ``joystick2 unpress 1`` (port in the
 name, button number), ``joystick2 pull left|right|up|down`` / ``joystick2 release x|y``,
-``mouse1 press left|right``, ``keyboard press KEYCODE`` (docs/HEADLESS.md).
+``mouse1 press left|right``, ``mouse1 move dx=DX dy=DY`` (1.0.22: the counters by whole steps, negative = left / up;
+key=value because RetroShell reads a bare ``-3`` as a flag),
+``keyboard press KEYCODE`` (docs/HEADLESS.md).
 
 Why ``denise set FRAME_SKIPPING 0``: in warp mode Denise swaps buffers only
 every 17th frame, so the screenshot would lag the RAM state by up to 16
@@ -29,6 +31,8 @@ class HeadlessError(RuntimeError):
 
 _SPACED = re.compile(r'^(joystick|mouse)\s+\d')
 _NAMED_BUTTON = re.compile(r'^joystick\d\s+(press|unpress)\s+\D')
+_MOUSE_MOVE = re.compile(r'^mouse\d\s+move\s+(.*)$')
+_MOUSE_MOVE_OK = re.compile(r'^dx=-?\d+\s+dy=-?\d+$')
 
 
 def check_event(cmd):
@@ -39,6 +43,9 @@ def check_event(cmd):
                             '"mouse1 press left"' % cmd)
     if _NAMED_BUTTON.match(c):
         raise HeadlessError('%r: a joystick button is a number, e.g. "joystick2 press 1"' % cmd)
+    m = _MOUSE_MOVE.match(cmd)
+    if m and not _MOUSE_MOVE_OK.match(m.group(1).strip()):
+        raise HeadlessError('%r: mouse movement is "mouse1 move dx=5 dy=-3" (key=value: RetroShell reads a bare -3 as a flag; kit 1.0.22, vamiga-mouse-899da5d.patch)' % cmd)
     return cmd
 
 

@@ -1,0 +1,90 @@
+--- a/Core/Peripherals/Mouse/Mouse.h
++++ b/Core/Peripherals/Mouse/Mouse.h
+@@ -238,6 +238,11 @@
+     // Emulates a mouse movement
+     void setXY(double x, double y);
+     void setDxDy(double dx, double dy);
++    // amiga-re-kit: move the JOYxDAT counters by dx, dy steps at once (RetroShell `mouse1 move`, VAHL_INPUTS m<dx>:<dy>)
++    void moveBy(long dx, long dy);
++    // amiga-re-kit: a button state effective in this frame (no Sticky minimum duration), for frame-exact inputs
++    void setLeftButtonNow(bool value);
++    void setRightButtonNow(bool value);
+ 
+     // Presses or releases a mouse button
+     void setLeftButton(bool value);
+--- a/Core/Peripherals/Mouse/Mouse.cpp
++++ b/Core/Peripherals/Mouse/Mouse.cpp
+@@ -263,6 +263,33 @@
+ }
+ 
+ void
++Mouse::moveBy(long dx, long dy)
++{
++    targetX += (double)dx;
++    targetY += (double)dy;
++    mouseX = targetX;
++    mouseY = targetY;
++    port.setDevice(ControlPortDevice::MOUSE);
++    port.updateMouseXY((i64)targetX, (i64)targetY);
++}
++
++void
++Mouse::setLeftButtonNow(bool value)
++{
++    leftButton.init();
++    leftButton.set(value, agnus.pos.frame);
++    port.setDevice(ControlPortDevice::MOUSE);
++}
++
++void
++Mouse::setRightButtonNow(bool value)
++{
++    rightButton.init();
++    rightButton.set(value, agnus.pos.frame);
++    port.setDevice(ControlPortDevice::MOUSE);
++}
++
++void
+ Mouse::setLeftButton(bool value)
+ {
+     logmsg(LOG_PRT, "setLeftButton(%d)\n", value);
+--- a/Core/Misc/RetroShell/CommanderConsole.cpp
++++ b/Core/Misc/RetroShell/CommanderConsole.cpp
+@@ -749,6 +749,20 @@
+                 
+                 auto &port = (values[0] == 0) ? amiga.controlPort1 : amiga.controlPort2;
+                 port.mouse.pressAndReleaseRight();
++                
++            }, .payload = {i}
++        });
++
++        // amiga-re-kit: relative movement in counter steps (a game reads them in JOYxDAT); negative = left / up
++        root.add({
++            
++            .tokens = { cmd, "move" },
++            .chelp  = { "Moves the mouse by dx, dy counter steps: mouse1 move dx=5 dy=-3 (negative = left / up)" },
++            .args   = { { .name = { "dx", "Horizontal steps" }, .flags = rs::keyval }, { .name = { "dy", "Vertical steps" }, .flags = rs::keyval } },
++            .func   = [this] (std::ostream &os, const Arguments &args, const std::vector<isize> &values) {
++                
++                auto &port = (values[0] == 0) ? amiga.controlPort1 : amiga.controlPort2;
++                port.mouse.moveBy(std::stol(args.at("dx")), std::stol(args.at("dy")));
+                 
+             }, .payload = {i}
+         });
+--- a/Core/Components/CPU/CPU.cpp
++++ b/Core/Components/CPU/CPU.cpp
+@@ -339,6 +339,14 @@
+     if (f != fPrev) j.trigger(f ? GamePadAction::PRESS_FIRE : GamePadAction::RELEASE_FIRE);
+     if (sp && !spPrev) amiga.keyboard.press(KeyCode(0x40));
+     if (!sp && spPrev) amiga.keyboard.release(KeyCode(0x40));
++    // the mouse on port 1: m<dx>:<dy> = the counters move by dx, dy steps in this frame; B / C = the left / right button held
++    static int mouseOff = -1; if (mouseOff < 0) mouseOff = getenv("VAHL_MOUSE_OFF") != nullptr;   // the kit finds this name in the binary: the build has the mouse patch
++    if (!mouseOff) { auto &mo = amiga.controlPort1.mouse; size_t mp = k.find('m');
++      if (mp != std::string::npos) { long dx = 0, dy = 0; if (sscanf(k.c_str() + mp + 1, "%ld:%ld", &dx, &dy) == 2 && (dx || dy)) mo.moveBy(dx, dy); }
++      bool b = k.find('B') != std::string::npos, bPrev = vahl_prev_keys.find('B') != std::string::npos;
++      bool c = k.find('C') != std::string::npos, cPrev = vahl_prev_keys.find('C') != std::string::npos;
++      if (b != bPrev) mo.setLeftButtonNow(b);
++      if (c != cPrev) mo.setRightButtonNow(c); }
+     vahl_prev_keys = k;
+ }
+ 

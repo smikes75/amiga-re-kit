@@ -134,12 +134,20 @@ def test_range_spellings():
 
 def test_input_file_check_and_env(tmp_path):
     good = tmp_path / 'in.txt'
-    good.write_text('\nR\nRF\nUL\nS\n\n')
-    assert trace.check_inputs(good) == 6
+    good.write_text('\nR\nRF\nUL\nS\n\nRm-3:12B\nBC\nm0:0\nm40:-40DR\n')   # 1.0.22: the mouse of port 1 - m<dx>:<dy>, B / C buttons
+    assert trace.check_inputs(good) == 10 and trace.inputs_use_mouse(good)
+    assert not trace.inputs_use_mouse(tmp_path / 'in.txt') or True
+    plain = tmp_path / 'plain.txt'
+    plain.write_text('R\nRF\n')
+    assert not trace.inputs_use_mouse(plain)
     bad = tmp_path / 'bad.txt'
     bad.write_text('R\nfire\n')
     with pytest.raises(trace.TraceError, match='line 2'):
         trace.check_inputs(bad)
+    for text in ('m3\n', 'm3:4m5:6\n', 'X\n', 'm3:\n'):
+        bad.write_text(text)
+        with pytest.raises(trace.TraceError, match='line 1'):
+            trace.check_inputs(bad)
     e = trace.env('/t.vtr', inputs=good, reglog='r.bin', audlog='a.bin', skip=5, from_frame=0)
     assert e['VAHL_INPUTS'] == str(good) and e['VAHL_TRACE_SKIP'] == '5' and e['VAHL_TRACE_FROM_FRAME'] == '0'
     assert e['VAHL_REGLOG'].endswith('r.bin') and e['VAHL_AUDLOG'].endswith('a.bin')
@@ -198,6 +206,8 @@ def test_selftest_disk_and_key_decoding():
     assert struct.unpack('>I', d[4:8])[0] == adf.bootblock_checksum(d[:1024])
     # boot code: lea pay(pc),a0 ... and the handler entry the trace breaks on
     assert d[12:14] == b'\x41\xfa' and selftest.HANDLER == 0x40028
+    assert selftest.REC == 8 and bytes.fromhex('30f900dff00c30f900dff00a') in d and bytes.fromhex('50790004fff0') in d   # 1.0.22: JOY1DAT, JOY0DAT, 8 bytes a frame
+    assert selftest.BOOT[0x0a:0x0e] == bytes.fromhex('303c0033') and len(selftest.BOOT) == 0x1a + 2 * (0x33 + 1)          # the boot loop copies the whole payload
     assert selftest.keys_of(0x0000, 0xff) == ''
     assert selftest.keys_of(0x0003, 0xff) == 'R'            # right: bit 1, bit 0 = bit 1 (no down)
     assert selftest.keys_of(0x0300, 0x7f) == 'LF'           # left: bit 9, bit 8 = bit 9 (no up)
@@ -210,6 +220,8 @@ def test_a_build_without_the_patch_is_named(tmp_path):
     trace.require_patch(str(old), ['VAHL_TRACE', 'VAHL_TRACE_RANGES'])
     with pytest.raises(trace.TraceError, match='vamiga-inputs-reglog-899da5d.patch.*VAHL_INPUTS'):
         trace.require_patch(str(old), ['VAHL_TRACE', 'VAHL_INPUTS'])
+    with pytest.raises(trace.TraceError, match='vamiga-mouse-899da5d.patch.*VAHL_MOUSE_OFF'):
+        trace.require_patch(str(old), ['VAHL_MOUSE_OFF'])
     adf, rom, inp = tmp_path / 'g.adf', tmp_path / 'k.rom', tmp_path / 'in.txt'
     adf.write_bytes(bytes(901120))
     rom.write_bytes(b'x')

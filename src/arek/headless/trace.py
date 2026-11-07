@@ -14,7 +14,8 @@ Needs a VAHeadless built with one of the trace patches:
     address.
 ``vamiga-inputs-reglog-899da5d.patch`` (on top of trace-ranges)
     ``VAHL_INPUTS=<file>``: input per frame - line k holds the keys of frame k
-    (``R L U D F S`` = right, left, up, down, fire on joystick 2, space), applied
+    (``R L U D F S`` = right, left, up, down, fire on joystick 2, space; 1.0.22: ``B`` / ``C`` =
+    the left / right button of the mouse on port 1 held, ``m<dx>:<dy>`` = its counters move by dx, dy steps in that frame), applied
     at the first breakpoint hit of each frame with v < 100 (put the breakpoint in
     the VBL handler). Frame exact; RetroShell ``wait 1 frames`` waits 1.4 frames
     on average. ``VAHL_REGLOG``: every write to DMACON, INTENA, INTREQ, ADKCON and
@@ -49,6 +50,7 @@ Record layout (little endian, as the host writes it)::
 
 The patch only reads (``spypeek``); a trace never changes the run it records.
 """
+import re
 import os
 import struct
 import zlib
@@ -193,20 +195,29 @@ def ranges_arg(ranges):
     return ','.join('%x:%x%s' % (r[0], r[1], 'h' if len(r) > 2 and r[2] else '') for r in ranges)
 
 
-INPUT_KEYS = set('RLUDFS')
+INPUT_KEYS = set('RLUDFSBC')
+INPUT_MOUSE = re.compile(r'm(-?\d+):(-?\d+)')   # 1.0.22: the mouse of port 1 moves by dx, dy counter steps in the frame
 
 
 def check_inputs(path):
-    """An input file: one line per frame, only the letters R L U D F S (any order,
-    empty = nothing held). Returns the number of frames."""
+    """An input file: one line per frame, the letters R L U D F S (joystick 2 and space) and, since 1.0.22, B / C (the
+    left / right button of the mouse on port 1 held) and one ``m<dx>:<dy>`` (its counters move by dx, dy steps in that
+    frame) in any order; empty = nothing held. Returns the number of frames."""
     n = 0
     with open(path) as f:
         for n, line in enumerate(f, 1):
-            bad = set(line.strip()) - INPUT_KEYS
+            rest = INPUT_MOUSE.sub('', line.strip(), count=1)
+            bad = set(rest) - INPUT_KEYS
             if bad:
-                raise TraceError('%s line %d: %r - only R L U D F S (one line per frame)'
+                raise TraceError('%s line %d: %r - only R L U D F S B C and one m<dx>:<dy> (one line per frame)'
                                  % (path, n, ''.join(sorted(bad))))
     return n
+
+
+def inputs_use_mouse(path):
+    """Does the input file move the mouse or hold its buttons (needs vamiga-mouse-899da5d.patch in the build)?"""
+    with open(path) as f:
+        return any(INPUT_MOUSE.search(line) or 'B' in line or 'C' in line for line in f)
 
 
 def env(path, ranges=None, length=None, inputs=None, reglog=None, audlog=None, skip=None,
@@ -423,7 +434,8 @@ PATCH_OF = {'VAHL_TRACE': 'vamiga-trace*.patch', 'VAHL_TRACE_RANGES': 'vamiga-tr
             'VAHL_TRACE_FROM_FRAME': 'vamiga-inputs-reglog-899da5d.patch',
             'VAHL_BUSLOG': 'vamiga-buslog-899da5d.patch', 'VAHL_BUSLOG_FRAMES': 'vamiga-buslog-899da5d.patch',
             'VAHL_REGLOG_REGS': 'vamiga-shots-regset-899da5d.patch', 'VAHL_SHOTS': 'vamiga-shots-regset-899da5d.patch',
-            'VAHL_SHOTS_FRAMES': 'vamiga-shots-regset-899da5d.patch', 'VAHL_POKE': 'vamiga-poke-899da5d.patch'}
+            'VAHL_SHOTS_FRAMES': 'vamiga-shots-regset-899da5d.patch', 'VAHL_POKE': 'vamiga-poke-899da5d.patch',
+            'VAHL_MOUSE_OFF': 'vamiga-mouse-899da5d.patch'}   # 1.0.22: the mouse in VAHL_INPUTS and `mouse1 move` (the env switches it off)
 
 
 def require_patch(vahl, variables):
@@ -455,6 +467,8 @@ def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None,
     needed = [k for k in e if k != 'VAHL_TRACE_LEN']
     if any(len(r) > 2 and r[2] for r in ranges or ()):
         needed.append('VAHL_TRACE_SKIP')            # hashed ranges came with the inputs/reglog patch
+    if inputs and inputs_use_mouse(inputs):
+        needed.append('VAHL_MOUSE_OFF')             # 1.0.22: mouse tokens need the mouse patch, else they are silently ignored
     if conf.get('VAHL') and os.path.isfile(conf['VAHL']):
         require_patch(conf['VAHL'], needed)
     if os.path.exists(out):

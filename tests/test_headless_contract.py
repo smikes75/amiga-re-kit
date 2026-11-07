@@ -29,14 +29,14 @@ def test_shot_script():
 
 
 @pytest.mark.parametrize('cmd', ['joystick 1 press fire', 'mouse 1 press left', 'joystick2 press fire',
-                                 'joystick1 unpress fire'])
+                                 'joystick1 unpress fire', 'mouse1 move 5 -3', 'mouse1 move 0 50', 'mouse1 move dx=5'])
 def test_shot_script_refuses_input_spellings_retroshell_rejects(cmd):
-    with pytest.raises(shot.HeadlessError, match='joystick2 press 1|a number'):
+    with pytest.raises(shot.HeadlessError, match='joystick2 press 1|a number|mouse1 move dx=5 dy=-3'):
         shot.build_script({'ROM': '/r'}, '/a.adf', [(1, cmd)], 2, '/o.png')
 
 
 @pytest.mark.parametrize('cmd', ['joystick2 press 1', 'joystick2 unpress 1', 'joystick2 pull left',
-                                 'joystick2 release x', 'mouse1 press left', 'keyboard press 64'])
+                                 'joystick2 release x', 'mouse1 press left', 'keyboard press 64', 'mouse1 move dx=5 dy=-3', 'mouse2 move dx=-128 dy=0'])
 def test_shot_script_takes_the_measured_spellings(cmd):
     assert cmd in shot.build_script({'ROM': '/r'}, '/a.adf', [(1, cmd)], 2, '/o.png')
 

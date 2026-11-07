@@ -7,7 +7,9 @@ sprite DMA switched off for a few lines, a Copper MOVE in a 6-plane line) is run
 to its idle loop, RAM and the screenshot are captured and compared pixel by pixel.
 
 ``inputs(conf)``: are inputs applied frame by frame? It runs its disk with ``VAHL_INPUTS``
-and checks that every frame saw exactly the keys of its line.
+and checks that every frame saw exactly the keys of its line - and, since 1.0.22, the mouse of port 1: its
+counters in JOY0DAT moved by the ``m<dx>:<dy>`` of the line, its left button (CIA-A PRA bit 6) held on ``B``.
+``mouse(conf)``: RetroShell ``mouse1 move dx=DX dy=DY`` moves the counters by DX, DY at once.
 
 ``audio(conf)``: does the Paula model (``arek_bus_paula.h``) agree with this emulator? Its disk
 (``selftest_audio.s``: four channels with different periods, lengths and volumes switched on and
@@ -21,7 +23,7 @@ with stack traffic between them) runs with ``VAHL_BUSLOG``; the model's fixed DM
 compared with the log slot by slot and every blit is replayed over the recorded map.
 The disk only needs the Kickstart ROM from ``local.conf``. Its boot block copies a
 payload to $40000 and jumps there; the payload installs a level-3 handler at
-$40028 that stores JOY1DAT and CIA-A PRA of each frame at $50000 + 4·n (n at
+$40028 that stores JOY1DAT, JOY0DAT and CIA-A PRA of each frame at $50000 + 8·n (n at
 $4FFF0) and returns. Source (GNU as, -m68000)::
 
     boot:   lea pay(%pc),%a0 ; lea 0x40000,%a1 ; move.w #(payend-pay)/2-1,%d0
@@ -30,7 +32,7 @@ $4FFF0) and returns. Source (GNU as, -m68000)::
             move.l #handler,0x6c ; clr.w 0x4fff0 ; move.w #0xc020,0x9a(%a6)
     loop:   bra.s loop
     handler: movem.l %d1/%a0,-(%sp) ; move.w 0x4fff0,%d1 ; lea 0x50000,%a0 ; adda.w %d1,%a0
-            move.w 0xdff00c,(%a0)+ ; move.b 0xbfe001,(%a0) ; addq.w #4,0x4fff0
+            move.w 0xdff00c,(%a0)+ ; move.w 0xdff00a,(%a0)+ ; move.b 0xbfe001,(%a0) ; addq.w #8,0x4fff0
             move.w #0x20,0xdff09c ; move.w #0x20,0xdff09c ; movem.l (%sp)+,%d1/%a0 ; rte
 """
 import os
@@ -43,9 +45,11 @@ from . import trace
 
 HANDLER = 0x40028
 BOOT = bytes.fromhex(
-    '41fa001843f900040000303c003032d851c8fffc4ef9000400004df900dff0003d7c7fff009a3d7c7fff009c'
+    '41fa001843f900040000303c003332d851c8fffc4ef9000400004df900dff0003d7c7fff009a3d7c7fff009c'
     '21fc00040028006c42790004fff03d7cc020009a60fe48e7408032390004fff041f900050000d0c130f900df'
-    'f00c10b900bfe00158790004fff033fc002000dff09c33fc002000dff09c4cdf01024e73')
+    'f00c30f900dff00a10b900bfe00150790004fff033fc002000dff09c33fc002000dff09c4cdf01024e73')
+REC = 8                                                      # bytes per frame record: JOY1DAT, JOY0DAT, CIA-A PRA, pad
+MOUSE = ('', 'm3:0', 'm0:-2', 'm-7:5', 'm40:-40', 'm1:1', 'm-128:127', 'm0:0', 'B', 'm2:2B', 'BC')   # the mouse tokens of the test
 KEYS = ('', 'R', 'L', 'U', 'D', 'F', 'RF', 'UL', 'DR')
 
 
@@ -128,36 +132,73 @@ def keys_of(joy, cia):
     return ''.join(k for k, on in zip('RLUDF', (r, l, u, dn, not cia & 0x80)) if on)
 
 
-def inputs(conf, frames=240, seed=7, timeout=300, keep=None):
-    """Run the self-test; returns ``{'frames': n, 'match': n, 'mismatch': [(k, want, got)]}``."""
+def inputs(conf, frames=240, seed=7, timeout=300, keep=None, mouse=True):
+    """Run the self-test; returns ``{'frames': n, 'match': n, 'mismatch': [(k, want, got)], 'mouse_match': n,
+    'mouse_mismatch': [(k, want, got)]}`` - the mouse part (1.0.22) compares JOY0DAT with the sum of the lines' steps
+    and CIA-A PRA bit 6 with the held left button."""
     tmp = keep or tempfile.mkdtemp(prefix='arek-selftest')
     path = os.path.join(tmp, 'selftest.adf')
     with open(path, 'wb') as f:
         f.write(disk())
     rnd = random.Random(seed)
     lines = [KEYS[(k // 3) % len(KEYS)] if k % 17 else rnd.choice(KEYS) for k in range(frames + 60)]
+    if mouse:
+        lines = [l + (MOUSE[(k // 5) % len(MOUSE)] if k % 13 else rnd.choice(MOUSE)) for k, l in enumerate(lines)]
     inp = os.path.join(tmp, 'inputs.txt')
     with open(inp, 'w') as f:
         f.write('\n'.join(lines) + '\n')
     out = os.path.join(tmp, 'selftest.vtr')
     seconds = 6 + frames / 50.0
     trace.capture(conf, out, [], 6, int(seconds) + 1, breaks=[HANDLER],
-                  ranges=[(0x4fff0, 4), (0x50000, 4 * (frames + 400))], adf=path, timeout=timeout, inputs=inp)
+                  ranges=[(0x4fff0, 4), (0x50000, REC * (frames + 400))], adf=path, timeout=timeout, inputs=inp)
     recs = list(trace.records(out))
     if len(recs) < 2:
         raise trace.TraceError('the handler at $%x was not hit - see %s.log' % (HANDLER, out))
     buf = recs[-1]['ranges'][0x50000]
-    bad, n = [], 0
+    bad, mbad, n, cx, cy = [], [], 0, 0, 0
     for k, rec in enumerate(recs[:-1]):
         c = struct.unpack('>H', rec['ranges'][0x4fff0][:2])[0]
-        if c + 3 > len(buf):
+        if c + 5 > len(buf):
             break
         want = ''.join(ch for ch in 'RLUDF' if ch in lines[k])
-        got = keys_of(struct.unpack('>H', buf[c:c + 2])[0], buf[c + 2])
+        got = keys_of(struct.unpack('>H', buf[c:c + 2])[0], buf[c + 4])
         n += 1
         if got != want:
             bad.append((k, want, got))
-    return {'frames': n, 'match': n - len(bad), 'mismatch': bad[:20], 'dir': tmp}
+        m = trace.INPUT_MOUSE.search(lines[k])
+        if m:
+            cx += int(m.group(1)); cy += int(m.group(2))
+        mwant = (((cy & 0xff) << 8) | (cx & 0xff), 'B' in lines[k])
+        mgot = (struct.unpack('>H', buf[c + 2:c + 4])[0], not buf[c + 4] & 0x40)
+        if k < 4:                                          # the port's fire line reads low in the first frames after power-on (measured)
+            mgot = (mgot[0], mwant[1])
+        if mouse and mgot != mwant:
+            mbad.append((k, '%04x %s' % (mwant[0], 'B' if mwant[1] else '-'), '%04x %s' % (mgot[0], 'B' if mgot[1] else '-')))
+    return {'frames': n, 'match': n - len(bad), 'mismatch': bad[:20], 'mouse_match': n - len(mbad), 'mouse_mismatch': mbad[:20], 'dir': tmp}
+
+
+def mouse(conf, timeout=300, keep=None, dx=5, dy=-3):
+    """RetroShell ``mouse1 move dx=DX dy=DY`` (1.0.22): the counters in JOY0DAT move by DX, DY once, at the command's time.
+    Returns ``{'frames': n, 'before': joy0, 'after': joy0, 'moved': (dx, dy), 'ok': bool}``."""
+    tmp = keep or tempfile.mkdtemp(prefix='arek-selftest')
+    path = os.path.join(tmp, 'selftest.adf')
+    with open(path, 'wb') as f:
+        f.write(disk())
+    out = os.path.join(tmp, 'mouse.vtr')
+    trace.capture(conf, out, [(8, 'mouse1 move dx=%d dy=%d' % (dx, dy))], 6, 11, breaks=[HANDLER],
+                  ranges=[(0x4fff0, 4), (0x50000, REC * 600)], adf=path, timeout=timeout)
+    recs = list(trace.records(out))
+    if len(recs) < 2:
+        raise trace.TraceError('the handler at $%x was not hit - see %s.log' % (HANDLER, out))
+    buf, vals = recs[-1]['ranges'][0x50000], []
+    for rec in recs[:-1]:
+        c = struct.unpack('>H', rec['ranges'][0x4fff0][:2])[0]
+        if c + 5 > len(buf):
+            break
+        vals.append(struct.unpack('>H', buf[c + 2:c + 4])[0])
+    first, last = vals[0], vals[-1]
+    moved = ((last - first) & 0xff, ((last >> 8) - (first >> 8)) & 0xff)
+    return {'frames': len(vals), 'before': first, 'after': last, 'moved': moved, 'ok': moved == (dx & 0xff, dy & 0xff) and len(set(vals)) == 2, 'dir': tmp}
 
 
 BUS_LOOP, BUS_COPLIST, BUS_SPR0, BUS_NUL = 0x40042, 0x400de, 0x40196, 0x4021e

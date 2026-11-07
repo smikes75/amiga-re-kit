@@ -41,6 +41,11 @@ track 80; reads of sector 1 succeed; the same disk and loader work on
 899da5d). The ROM `trackdisk.device` path was not affected in that test.
 Which upstream commit between the two fixed it is not known. Use 899da5d.
 
+**The kit's build (2026-11-07, kit 1.0.22):** all seven patches in the order headless, trace-ranges, inputs-reglog,
+buslog, shots-regset, poke, mouse; `arek selftest inputs|display|bus|audio|mouse` all exact on it. Name it by its
+features (`VAHeadless-899da5d-kit-mouse`) and record its sha256 next to every measurement; a build without the mouse
+patch ignores mouse tokens silently, which is why `arek trace run --inputs` with mouse tokens refuses it.
+
 **Which build do I have?** Both commits print `vAmiga Headless v5.0b2`; only
 the build date in the banner differs. Measure it instead: break right after
 the game's own loader returns (`arek bpstate --address <return>`) and compare
@@ -61,6 +66,7 @@ Optional patches on top of the headless one:
 | `vamiga-shots-regset-899da5d.patch` | 899da5d + the four above | `VAHL_SHOTS` + `VAHL_SHOTS_FRAMES`: the picture of every frame in a window, the run goes on; `VAHL_REGLOG_REGS`: which registers `VAHL_REGLOG` records (from the Alien Breed project's requests) |
 | `vamiga-poke-899da5d.patch` | 899da5d + the five above | `VAHL_POKE`: write into the machine's memory when a frame begins or at the first breakpoint hit at a PC, then go on (`arek trace run --poke`); also fixes the frame number of `VAHL_SHOTS` pictures (they were labelled one too high) and makes `VAHL_REGLOG` see the Copper's colour writes |
 | `vamiga-buslog-899da5d.patch` | 899da5d + headless + trace-ranges + inputs-reglog | `VAHL_BUSLOG` (+ `VAHL_BUSLOG_FRAMES=first:last`): the owner of every DMA slot of every line, CPU waits with their PC, every blit with its registers and end (`arek trace bus`) |
+| `vamiga-mouse-899da5d.patch` | 899da5d + the six above (apply last) | RetroShell `mouse1 move dx=DX dy=DY` and, in `VAHL_INPUTS`, `m<dx>:<dy>` (the mouse of port 1 moves by dx, dy counter steps in the frame) and `B` / `C` (its left / right button held) - kit 1.0.22, Xenon 2's crack menu driven by the mouse |
 | `vamiga-inputs-reglog-899da5d.patch` | 899da5d + headless + trace-ranges | `VAHL_INPUTS` (input per frame, frame exact), `VAHL_REGLOG` (DMACON/INTENA/INTREQ/ADKCON/AUDx writes), `VAHL_AUDLOG` (Paula output samples), `VAHL_TRACE_SKIP`, `VAHL_TRACE_FROM_FRAME`, hashed ranges `start:lenh` (from the Alien Breed project) |
 | `vamiga-regtrace.patch` | c59425d | ring buffer of every custom register write (WASM builds) |
 | `vamiga-wasm.patch` | c59425d | WebAssembly build without the emulation thread |
@@ -112,6 +118,7 @@ Other masters may need the three hunks transplanted by hand; they are small.
   | `joystick2 press 1` / `joystick2 unpress 1` | fire button down / up (button number; port 2 = the game port, port 1 = the mouse port) |
   | `joystick2 pull left\|right\|up\|down` / `joystick2 release x\|y` | push / centre an axis |
   | `mouse1 press left\|right` | a mouse button |
+  | `mouse1 move dx=DX dy=DY` | the mouse counters move by DX, DY steps at once (negative = left / up; a game reads them in JOY0DAT; key=value, a bare `-3` is a flag to RetroShell) - kit 1.0.22, `vamiga-mouse-899da5d.patch` |
   | `keyboard press 64` | a raw Amiga keycode (`$40` = space) |
 
   `joystick 1 press fire` is a syntax error, `joystick2 press fire` "not a

@@ -25,7 +25,7 @@
                      (run: --inputs FILE --reglog F --audlog F --skip N --from-frame F)
     arek diff        DIR_A DIR_B [--range LO HI]
     arek render      CAPTURE [--ram F --cop A] [--png OUT] [--compare RAW]
-    arek selftest    inputs|display|bus|audio [--vahl BINARY]   (needs only the Kickstart ROM)
+    arek selftest    inputs|display|bus|audio|mouse [--vahl BINARY]   (needs only the Kickstart ROM)
     arek profile     PROFILE [--by clocks|calls|bytes] [--top N] [--frame F]
     arek cover       RUN.cov [RUN2.cov ...] OUT.cover.json [--top N]  (recomp --cover: what the runs never executed)
     arek host        copy DIR | state CAPTURE OUT [--trace T.vtr]   (the host of a translation, docs/HOST.md)
@@ -731,11 +731,18 @@ def cmd_selftest(a):
         if r['pixels']:
             raise RuntimeError('the display model and this emulator disagree (files in %s)' % r['dir'])
         return
-    r = selftest.inputs(conf, frames=a.frames, timeout=a.timeout)
-    print('%s: inputs %d/%d frames exact%s' % (conf['VAHL'], r['match'], r['frames'],
-                                               '' if not r['mismatch'] else ', first wrong: %s' % (r['mismatch'][:3],)))
-    if r['mismatch'] or not r['frames']:
-        raise RuntimeError('VAHL_INPUTS is not frame exact with this build (files in %s)' % r['dir'])
+    if a.what == 'mouse':
+        r = selftest.mouse(conf, timeout=a.timeout)
+        print('%s: mouse1 move dx=5 dy=-3 -> JOY0DAT %04x to %04x in %d frames: %s' % (conf['VAHL'], r['before'], r['after'], r['frames'], 'exact' if r['ok'] else 'WRONG (moved %s)' % (r['moved'],)))
+        if not r['ok']:
+            raise RuntimeError('RetroShell mouse1 move is not in this build (vamiga-mouse-899da5d.patch; files in %s)' % r['dir'])
+        return
+    r = selftest.inputs(conf, frames=a.frames, timeout=a.timeout, mouse=not a.no_mouse)
+    print('%s: inputs %d/%d frames exact%s; mouse %d/%d%s' % (conf['VAHL'], r['match'], r['frames'],
+                                               '' if not r['mismatch'] else ', first wrong: %s' % (r['mismatch'][:3],),
+                                               r['mouse_match'], r['frames'], '' if not r['mouse_mismatch'] else ', first wrong: %s' % (r['mouse_mismatch'][:3],)))
+    if r['mismatch'] or r['mouse_mismatch'] or not r['frames']:
+        raise RuntimeError('VAHL_INPUTS is not frame exact with this build (files in %s; --no-mouse for a build without vamiga-mouse-899da5d.patch)' % r['dir'])
 
 
 def cmd_trace(a):
@@ -1093,7 +1100,7 @@ def build_parser():
     s.add_argument('--range', dest='ranges', nargs='*', default=[], metavar='START:LEN[h]',
                    help='hex; LENh = only an FNV-1a 64 hash of the range; without it VTR1 = chip RAM. '
                         'compare: only these spans')
-    s.add_argument('--inputs', help='run: input per frame (lines of R L U D F S), applied at the first '
+    s.add_argument('--inputs', help='run: input per frame (lines of R L U D F S, B / C mouse buttons, m<dx>:<dy> mouse steps), applied at the first '
                    'breakpoint hit of each frame in the VBL - frame exact')
     s.add_argument('--reglog', help='run: write DMACON/INTENA/INTREQ/ADKCON/AUDx writes here')
     s.add_argument('--audlog', help='run: write every Paula output sample here')
@@ -1256,8 +1263,9 @@ def build_parser():
     s.set_defaults(fn=cmd_web)
 
     s = sp.add_parser('selftest', help='check a VAHeadless build on a synthetic disk: inputs frame by frame, display model, bus model, Paula model')
-    s.add_argument('what', choices=['inputs', 'display', 'bus', 'audio'])
+    s.add_argument('what', choices=['inputs', 'display', 'bus', 'audio', 'mouse'])
     s.add_argument('--c', action='store_true', help='display: the C renderer (arek_display.h) instead of arek.display')
+    s.add_argument('--no-mouse', action='store_true', help='inputs: skip the mouse tokens (a build without vamiga-mouse-899da5d.patch)')
     s.add_argument('--conf', default='local.conf', help='needs ROM (and VAHL unless --vahl)')
     s.add_argument('--vahl', help='the binary to test instead of VAHL from the conf')
     s.add_argument('--frames', type=int, default=240)
