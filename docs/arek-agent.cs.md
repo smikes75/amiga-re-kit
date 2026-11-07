@@ -29,7 +29,7 @@ zprávy kterémukoli programovacímu agentovi.
   (`ADF2=` pro druhou disketu). Cestu si vyžádej od uživatele; neprohledávej kvůli ní disk.
 - MCP: `.mcp.json` v projektu s obsahem
   `{ "mcpServers": { "arek": { "command": "arek-mcp" } } }` ti dá stejné přístroje jako
-  nástroje (26). Nejdřív zavolej `kit_info`.
+  nástroje (29). Nejdřív zavolej `kit_info`.
 - Volitelně, pro měření proti běžící hře: bezhlavé sestavení vAmigy (`docs/HEADLESS.md`
   v kitu) a Kickstart ROM, který uživatel vlastní; `VAHL=` a `ROM=` v `local.conf`. Bez nich
   kroky 0 až 4 níže fungují také.
@@ -59,6 +59,12 @@ zprávy kterémukoli programovacímu agentovi.
 6. **Ověř proti skutečné hře.** `arek shot` pořizuje deterministické snímky ve známých
    snímcích se skriptovaným vstupem; `arek trace` zaznamenává registry, vstupy a provoz na
    sběrnici; `arek render` vykreslí snímek z chip RAM, aby šel porovnat pixel po pixelu.
+
+## Znalostní báze a celá hra
+
+Když je nastavená znalostní báze dřívějších rebuildů (`AREK_KB`), než něco obejdeš, hledej v ní (`arek kb search`)
+slovy toho, co vidíš, a po každém milníku navrhni, co ses naučil (`arek kb add`). Když je cílem celá hra v prohlížeči,
+čti dál `docs/REBUILD-PLAYBOOK.md`.
 
 ## Co odevzdat
 

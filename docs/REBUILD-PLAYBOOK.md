@@ -7,6 +7,21 @@ each one needs from the kit, and the lessons three rebuilds paid for - Alien Bre
 here was measured in one of them; nothing in this page is game data, and every address a new game needs is measured
 again. An agent starting a new game reads this page after `arek-agent.md` and before writing its own plan.
 
+## The knowledge base (kit 1.0.25)
+
+When a knowledge base is set up (`AREK_KB`: `arek kb search`, `get`, `add`; the same as the MCP tools `kb_search`, `kb_get`,
+`kb_add`), it is part of the method:
+
+- **before working around a problem**, `arek kb search` with the words of what you see (the log line, the divergence, the
+  address); a record of another game that matches is a lead - its fact is a hypothesis for your game, re-measure it;
+- **after every milestone**, `arek kb add` what you learned that the next game can use: a problem and how it was found and
+  solved, a game or engine fact with its measurement, a procedure. One lesson per record, English, short, no game data;
+- **a kit gap** goes to `docs/KIT-GAPS.md` and to the kit session as before; when the kit fixes it, its record says the
+  version (`status: fixed`, `fixed_in`).
+
+Proposals land in the base's inbox and become records after review. A brief that measures a model on a clean start
+(no knowledge of other games) leaves `AREK_KB` unset.
+
 ## The milestones
 
 | | milestone | done when | the trap the rebuilds met |

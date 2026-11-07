@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.24 on PyPI, 2582 tests. Extracted from five game
+- **The kit:** version 1.0.25 on PyPI, 2587 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -47,7 +47,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2582 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2587 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -114,7 +114,7 @@ arek trace   compare build/orig.vtr build/native.vtr --best-shift 3   # long par
 arek trace   bus build/bus.bin --frame 8600            # who had the chip bus in every slot (buslog patch)
 arek trace   run build/s.vtr --arm 3 --end 176 --shots build/f --shot-frames 8600:8619   # 20 frames, one run
 arek trace   run build/w.vtr --arm 3 --end 200 --break 0xc01b06 --poke c01b06:c00faa=00000002  # write into the machine, go on
-arek selftest inputs                                   # is this VAHeadless frame exact? (synthetic disk; 1.0.24: the mouse too - m<dx>:<dy>, B / C)
+arek selftest inputs                                   # is this VAHeadless frame exact? (synthetic disk; 1.0.25: the mouse too - m<dx>:<dy>, B / C)
 arek selftest mouse                                    # RetroShell `mouse1 move dx=5 dy=-3` moves the JOY0DAT counters (vamiga-mouse-899da5d.patch)
 
 # 4b. many scenarios at once (arek.parity.suite): state (traces), picture (--shots), sound (--reglog)
@@ -184,6 +184,7 @@ asks for (see `examples/profile.example.json`).
 | `arek.m68k.cover`, `arek.fuzz` | coverage of a translation run (`recomp --cover`: one bit per translated instruction, `arek cover` lists what never ran) and deterministic random joystick input (`arek fuzz`, one file for `trace run --inputs` and the rebuild) - where a long random run stalls, a bug hides | Superfrog |
 | `arek.bus` (`src/arek/bus/*.c`) | the Amiga bus per DMA slot: who owns each slot, the blitter cycle by cycle, the CPU by the accesses of its instructions - on which instruction an interrupt lands, when a blit ends, whether the original overran the frame; `arek_bus_vamiga.c` is MPL-2.0 (derived from vAmiga) | Alien Breed |
 | `arek.m68k.timing.bus` | bus cycles n(r/w) of every instruction, opcode and extension words included - what a model of the Amiga bus per DMA slot needs beyond the clock count | Alien Breed |
+| `arek.kb` (`arek kb`, MCP `kb_search` / `kb_get` / `kb_add`) | the knowledge base of the rebuilds: records of what was measured and learned (symptom, cause, check, resolution, evidence), searched by the words of the log an agent sees; the base is a folder of the user's (`AREK_KB`), the kit only reads, searches and proposes | all the rebuilds |
 | `docs/REBUILD-PLAYBOOK.md`, `host/arek_host_engine_node.js` | the method of the whole-game rebuilds (milestones, the start from the disks without a Kickstart, module discovery, the page's events at exact frames, the scene record, the public build checklist) and the Node harness that drives the wasm engine for a project's measurements | Alien Breed II, Superfrog, Turrican II |
 | `host/` (`arek host copy`) | the host of a translation: time from the bus model, the beam, interrupts 1-6, CIA-A with the E clock, Paula, the picture line by line in C (`arek_display.h`, 0 px against the emulator), the trace driver (`arek_host_trace.c`), `arek host state` from a capture, disk images at run time (`arek_host_disk.h`), a data disk the game writes (`arek_host_datadisk.h`), the web engine (`arek_host_engine.c`, Emscripten ASYNCIFY, `arek host engine`, held against its native build by `arek_host_engine_check.js`) (`docs/HOST.md`) | Alien Breed II |
 | `bus/arek_bus_paula.h` | Paula's audio DMA for the bus model: the channels' slots and output bytes, exact against the emulator (`arek selftest audio`) | Alien Breed II |
@@ -224,7 +225,7 @@ Claude Code (`.mcp.json` in your project, or `claude mcp add arek -- arek-mcp`):
 {"mcpServers": {"arek": {"command": "arek-mcp"}}}
 ```
 
-The server exposes 26 tools (`kit_info`, `adf_info`, `adf_map`, `adf_ls`, `adf_file`, `scan_packed`, `unpack`,
+The server exposes 29 tools (`kit_info`, `kb_search`, `kb_get`, `kb_add`, `adf_info`, `adf_map`, `adf_ls`, `adf_file`, `scan_packed`, `unpack`,
 `hunk_load`, `disassemble`, `walk`, `hwscan`, `recomp`, `xref`, `copper`,
 `headless_shot`, `headless_bpstate`, `trace_records`, `diff_captures`, `ram_at`, …).
 `kit_info` returns the version and the SHA-256 of the decoder and recompiler;

@@ -45,6 +45,32 @@ def _addr(x):
 
 # ------------------------------------------------------------------ kit
 @mcp.tool()
+def kb_search(query: str, game: str = '', kind: str = '', status: str = '', limit: int = 8, inbox: bool = False) -> list:
+    """Search the private knowledge base of the rebuilds (AREK_KB) BEFORE working around a problem: query with the
+    words of what you see (a log line, a divergence, 'host_trace diverges after N passes'). Filters: game (a slug or an
+    engine), kind (symptom | fact | procedure | game), status. A fact from another game is a hypothesis: re-measure it."""
+    from . import kb
+    return kb.search(kb.load(inbox=inbox), query, game=game or None, kind=kind or None, status=status or None, limit=limit)
+
+
+@mcp.tool()
+def kb_get(id: str, inbox: bool = False) -> dict:
+    """One record of the knowledge base by its id: the header fields and the sections (Symptom, Cause, Check,
+    Resolution, Evidence)."""
+    from . import kb
+    r = kb.get(kb.load(inbox=inbox), id)
+    return {k: v for k, v in r.items() if k != 'body'}
+
+
+@mcp.tool()
+def kb_add(text: str, source: str) -> str:
+    """Propose a record (its full Markdown text with the --- header; docs: the base's README) into inbox/<source>/;
+    it becomes a record after review. One measured lesson per record, English, no game data (no dumps)."""
+    from . import kb
+    return kb.add(text, source)
+
+
+@mcp.tool()
 def kit_info() -> dict:
     """Version of the kit and SHA-256 of its decoder and recompiler sources -
     record it with every measurement (an editable install can carry

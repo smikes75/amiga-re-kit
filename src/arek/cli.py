@@ -26,6 +26,8 @@
     arek diff        DIR_A DIR_B [--range LO HI]
     arek render      CAPTURE [--ram F --cop A] [--png OUT] [--compare RAW]
     arek selftest    inputs|display|bus|audio|mouse [--vahl BINARY]   (needs only the Kickstart ROM)
+    arek kb          search QUERY [--game G] [--kind K] | get ID | add FILE --source S | check | promote INBOX_PATH | stats
+                     (the private knowledge base of the rebuilds: AREK_KB or --kb FOLDER)
     arek profile     PROFILE [--by clocks|calls|bytes] [--top N] [--frame F]
     arek cover       RUN.cov [RUN2.cov ...] OUT.cover.json [--top N]  (recomp --cover: what the runs never executed)
     arek host        copy DIR | state CAPTURE OUT [--trace T.vtr]   (the host of a translation, docs/HOST.md)
@@ -382,6 +384,40 @@ def cmd_diff(a):
     regs = contract.diff_regs(x, y)
     if regs:
         print('registers: ' + ', '.join('%s %08x->%08x' % (k, v[0], v[1]) for k, v in sorted(regs.items())))
+
+
+def cmd_kb(a):
+    from . import kb
+    if a.what == 'check':
+        r = kb.check(a.kb)
+        for p, why in r['problems']:
+            print('%s: %s' % (p, why))
+        print('%d records, %d proposals in the inbox, %d problems' % (r['records'], r['inbox'], len(r['problems'])))
+        return 1 if r['problems'] else 0
+    if a.what == 'add':
+        if not a.target or not a.source:
+            raise ValueError('arek kb add FILE --source SLUG')
+        print(kb.add(open(a.target, encoding='utf-8').read(), a.source, a.kb))
+        return 0
+    if a.what == 'promote':
+        print(kb.promote(a.target, a.kb))
+        return 0
+    recs = kb.load(a.kb, inbox=a.inbox)
+    if a.what == 'stats':
+        print(json.dumps(kb.stats(recs), indent=1))
+    elif a.what == 'get':
+        r = kb.get(recs, a.target)
+        print('# %s  (%s)\n' % (r['path'], r.get('status')) + kb.render(r))
+    else:
+        q = ' '.join([a.target or ''] + (a.rest or []))
+        hits = kb.search(recs, q, game=a.game, kind=a.kind, status=a.status, limit=a.limit)
+        if a.json:
+            print(json.dumps(hits, indent=1))
+        for h in ([] if a.json else hits):
+            print('%5.1f  %-40s %-9s %-10s %s\n       %s\n' % (h['score'], h['id'], h['kind'], h['status'], h['title'], h['snippet'][:180]))
+        if not hits and not a.json:
+            print('nothing found')
+    return 0
 
 
 def cmd_init(a):
@@ -1271,6 +1307,20 @@ def build_parser():
     s.add_argument('--frames', type=int, default=240)
     s.add_argument('--timeout', type=int, default=300)
     s.set_defaults(fn=cmd_selftest)
+
+    s = sp.add_parser('kb', help='the private knowledge base of the rebuilds: search by the symptom, get a record, propose one, check it')
+    s.add_argument('what', choices=['search', 'get', 'add', 'check', 'promote', 'stats'])
+    s.add_argument('target', nargs='?', help='search: the query (the words of the log you see); get: the id; add: the file; promote: inbox/<source>/<id>.md')
+    s.add_argument('rest', nargs='*', help='search: more query words')
+    s.add_argument('--kb', help='the base folder (default $AREK_KB)')
+    s.add_argument('--game', help='search: only records of this game (or engine)')
+    s.add_argument('--kind', choices=['symptom', 'fact', 'procedure', 'game'])
+    s.add_argument('--status', choices=['open', 'fixed', 'verified', 'hypothesis', 'superseded'])
+    s.add_argument('--limit', type=int, default=8)
+    s.add_argument('--inbox', action='store_true', help='search / get / stats: include the proposals not yet reviewed')
+    s.add_argument('--source', help='add: the slug of the game or session proposing it')
+    s.add_argument('--json', action='store_true')
+    s.set_defaults(fn=cmd_kb)
 
     s = sp.add_parser('init', help='create a project skeleton with local.conf')
     s.add_argument('dir', nargs='?', default='.')

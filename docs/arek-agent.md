@@ -31,7 +31,7 @@ first message of any coding agent.
   for it.
 - MCP: a `.mcp.json` in the project with
   `{ "mcpServers": { "arek": { "command": "arek-mcp" } } }` gives you the same instruments
-  as tools (26). Call `kit_info` first.
+  as tools (29). Call `kit_info` first.
 - Optional, for measurements against the running game: a headless vAmiga build
   (`docs/HEADLESS.md` in the kit) and a Kickstart ROM the user owns; `VAHL=` and `ROM=` in
   `local.conf`. Without them, steps 0 to 4 below still work.
@@ -63,6 +63,9 @@ first message of any coding agent.
    `arek render` draws a frame from chip RAM so it can be compared pixel for pixel.
 
 ## A whole game (the rebuilds)
+
+When a knowledge base of earlier rebuilds is set up (`AREK_KB`), search it (`arek kb search`) with the words of what
+you see before working around a problem, and propose what you learned (`arek kb add`) after each milestone.
 
 When the goal is the whole game in the browser (static recompilation + the kit's host, engine and display stack), read
 `docs/REBUILD-PLAYBOOK.md` next: the milestones M0-M9, the start from the disks without a Kickstart, module discovery,

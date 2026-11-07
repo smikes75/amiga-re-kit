@@ -245,9 +245,10 @@ test builds both (`tests/test_host_engine.py`, emcc and node when installed).
   sprite the rule explains.
 - Kit self-tests on this host's models: `arek selftest bus` 0 disagreements, `arek selftest audio`
   0 disagreements and every sample exact, `arek selftest display --c` 0 pixels.
-- Not modelled: NTSC, the blitter's line mode on the bus, Paula's audio interrupts (a host that
-  needs AUDx INTREQ bits sets them itself), the CIA timers and TOD (a game that seeds its random
-  numbers from CIA-B TOD gets the value from the capture: `docs/METHOD.md` §5), disk DMA.
+- Not modelled: NTSC, the blitter's line mode on the bus, the CIA TOD counters (a game that seeds its
+  random numbers from CIA-B TOD gets the value from the capture: `docs/METHOD.md` §5; a build
+  from the disks answers it through `HOST_CIA_READ`), disk DMA. Paula's audio interrupts (kit 0.7.1) and
+  the CIA timers (kit 0.7.2) are modelled, see above.
 
 ### The Node harness (1.0.20, `arek_host_engine_node.js`)
 
