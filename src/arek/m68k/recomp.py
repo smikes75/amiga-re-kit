@@ -636,6 +636,26 @@ static void unknown_call(uint32_t a) { unknown_hook(a); }
 #else
 static void unknown_call(uint32_t a) { fprintf(stderr, "unknown routine %06x\n", a); exit(4); }
 #endif
+#define RD32_RAW(a) (((uint32_t)rd16_raw(a) << 16) | rd16_raw((a) + 2))
+/* 1.0.24: after a call - a callee that popped more returns this routine too (sp0 check); a callee that returned in C
+   without popping its return address (an unknown target whose hook returned) leaves no stack behind: it is popped
+   here, so the run goes on as if the target were an empty routine (and the caller's rts is not mistaken for a jump) */
+#define CALL_END(sp0, ret) do { if (m->a[7] > (sp0)) return; if (m->a[7] == (sp0) - 4 && RD32_RAW((sp0) - 4) == (ret)) m->a[7] = (sp0); } while (0)
+void call_addr(M68 *m, uint32_t a);
+/* 1.0.24: an rts that does not return to the C caller - the routine pushed a target (pea X / move.l X,-(a7)) or
+   replaced its return address, and the 68000 jumps to the long at (a7). The target runs through call_addr; when it
+   returns without having popped the routine's own return address (a7 still at or below e0), the chain goes on at the
+   long it popped (two pushed targets), as the engine's ENGINE_DYNAMIC loop does. A target that changed nothing (an
+   unknown routine under UNKNOWN_HOOK) ends it. */
+static void rts_jump(M68 *m, uint32_t e0) {
+    uint32_t t = RD32_RAW(m->a[7]); m->a[7] += 4;
+    for (;;) {
+        uint32_t before = m->a[7];
+        call_addr(m, t);
+        if (m->a[7] > e0 || m->a[7] == before) return;
+        t = RD32_RAW(m->a[7] - 4);
+    }
+}
 static uint32_t INLINE_RET = 0;     /* where a routine with data after its call returned to */
 
 /* Overlays: code the program loads at run time into an area. Each translated module registers under the FNV-1a 64 of
@@ -847,6 +867,8 @@ class Gen:
         idx = {a: k for k, a in enumerate(order)}
         self.emit('/* vstup $%06x, %d instrukci z grafu toku */' % (entry, len(ins)))
         self.emit('%s(M68 *m) {' % self.func_head(entry))
+        if any(x.kind == 'rts' for x in ins.values()):
+            self.emit('    uint32_t e0 = m->a[7], r0 = RD32_RAW(e0);   /* 1.0.24: rts checks the stack against these */')
         if order and order[0] != entry:
             self.emit('    goto L%06x;' % entry)
         for k, a in enumerate(order):
@@ -873,10 +895,21 @@ class Gen:
         self.emit('}')
         self.emit()
 
+    def _has_rts(self, start, end):
+        addr = start
+        while addr < end:
+            i = decode(self.data, self.base, addr)
+            if i.kind == 'rts':
+                return True
+            addr = i.end
+        return False
+
     def gen_func(self, start, end, entry):
         self.emit('/* $%06x - $%06x, vstup $%06x */' % (start, end, entry))
         self.emit('%s(M68 *m) {' % self.func_head(entry))
         self.cur = entry
+        if self._has_rts(start, end):
+            self.emit('    uint32_t e0 = m->a[7], r0 = RD32_RAW(e0);   /* 1.0.24: rts checks the stack against these */')
         if entry != start:
             self.emit('    goto L%06x;' % entry)
         addr = start
@@ -930,6 +963,10 @@ class Gen:
                 L.extend(e.pre)
 
         if k == 'rts':
+            # 1.0.24 (Xenon 2 KIT-GAP 4): the 68000 jumps to the long at (a7). A routine that pushed a target (pea X /
+            # move.l X,-(a7); rts) or replaced its return address does not return to its C caller: rts_jump runs the
+            # chain through call_addr. a7 above the entry's (addq.l #4,a7; rts) stays the caller's sp0 check.
+            L.append('if (m->a[7] < e0 || (m->a[7] == e0 && RD32_RAW(e0) != r0)) { rts_jump(m, e0); return; }')
             L.append('m->a[7] += 4;')          # navratova adresa ulozena pri bsr/jsr
             L.append('return;')
         elif k == 'nop':
@@ -1180,7 +1217,7 @@ class Gen:
                 raise Unsupported('jsr %s' % i.ea.kind)
             if i.addr in self.flow.dynamic:
                 L.append('{ uint32_t t = %s, sp0 = m->a[7]; push32(m, 0x%xu); call_addr(m, t); '
-                         'if (m->a[7] > sp0) return; }' % (i.ea.addr, i.end))
+                         'CALL_END(sp0, 0x%xu); }' % (i.ea.addr, i.end, i.end))
                 return L
             if i.addr in self.flow.jtabs:
                 return L + self.jump_table(i, lambda t: self.callseq(t, i.end) + ' break;',
@@ -1332,9 +1369,9 @@ class Gen:
         if target in self.flow.exits:
             return 'exit_point(m, 0x%xu);' % target
         if target in self.flow.externs:
-            return ('{ uint32_t sp0 = m->a[7]; push32(m, 0x%xu); %s(m); if (m->a[7] > sp0) return; }'
-                    % (ret, self.flow.externs[target]))
-        return '{ uint32_t sp0 = m->a[7]; push32(m, 0x%xu); %s if (m->a[7] > sp0) return; }' % (ret, self.call(target))
+            return ('{ uint32_t sp0 = m->a[7]; push32(m, 0x%xu); %s(m); CALL_END(sp0, 0x%xu); }'
+                    % (ret, self.flow.externs[target], ret))
+        return '{ uint32_t sp0 = m->a[7]; push32(m, 0x%xu); %s CALL_END(sp0, 0x%xu); }' % (ret, self.call(target), ret)
 
     def inline_target(self, i):
         """The routine a direct call ``i`` goes to when that routine has data after its call."""

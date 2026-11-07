@@ -485,3 +485,29 @@ def test_source_read_before_the_destination_moves_the_same_register(tmp_path, he
     d, a, f, ram = run(tmp_path, hexcode, regs, ram_init=ram_init)
     assert ram[at:at + len(want) // 2].hex() == want
     assert (a if reg[0] == 'a' else d)[int(reg[1])] == after
+
+
+def test_rts_after_a_push_is_a_jump(tmp_path):
+    """1.0.24 (Xenon 2 KIT-GAP 4): `move.l #X,-(a7); rts` jumps to X on the 68000; the translation returned to its C
+    caller and dropped X. Now rts compares the stack with the routine's entry and runs X through call_addr."""
+    code = '2f3c00001010' '4e75' + '4e71' * 4 + '7007'            # $1000 push $1010; rts | $1010 moveq #7,d0 (+ rts)
+    d, a, f, ram = run(tmp_path, code, {}, auto=(BASE, 0x1010))
+    assert d[0] == 7
+
+
+def test_rts_after_a_replaced_return_address(tmp_path):
+    """A called routine drops its return address and pushes another (addq.l #4,a7; move.l #X,-(a7); rts): X runs and
+    its rts leaves the caller too - the caller's continuation ($1004 moveq #1,d1) never runs, as on the 68000."""
+    code = ('6100000e' '7201' '4e75' + '4e71' * 4 +                 # $1000 bsr $1010 | $1004 moveq #1,d1 | rts
+            '588f' '2f3c00001020' '4e75' + '4e71' * 3 + '7009')     # $1010 addq.l #4,a7; push $1020; rts | $1020 moveq #9,d0
+    d, a, f, ram = run(tmp_path, code, {}, auto=(BASE, 0x1020))
+    assert d[0] == 9 and d[1] == 0
+
+
+def test_rts_with_two_pushed_targets_runs_both(tmp_path):
+    """push $1030; push $1020; rts: $1020 runs, its rts jumps to $1030, whose rts returns - the chain through the long
+    each rts popped."""
+    code = ('2f3c00001030' '2f3c00001020' '4e75' + '4e71' * 9 +     # $1000 .. $100c rts, nops to $1020
+            '7005' '4e75' + '4e71' * 6 + '7206')                    # $1020 moveq #5,d0; rts | $1030 moveq #6,d1 (+ rts)
+    d, a, f, ram = run(tmp_path, code, {}, auto=(BASE, 0x1020, 0x1030))
+    assert d[0] == 5 and d[1] == 6
