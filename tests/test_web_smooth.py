@@ -192,3 +192,31 @@ def test_measure_the_synthetic_page_without_interpolation():
 
 
 LIM = websmooth.LIMITS['cam_jitter']
+
+
+def test_a_vertical_scroller_with_the_keys_on_the_player():
+    """1.6 (kit 1.0.27, Xenon 2 KIT-GAP 7): the camera judged on y, the key latency on the player, and an original camera
+    that moves 1 px every 4 frames is reported, not failed, without interpolation."""
+    smp = [[i * 16.7, [0, 4500 - i * 0.25], None, None, None] for i in range(200)]          # smooth: y only
+    r = websmooth.analyse(smp, axis=1)
+    assert r['axis'] == 'y' and r['cam_moving'] > 150 and r['cam_jitter'] < 0.05
+    assert websmooth.analyse(smp)['cam_moving'] == 0                                       # judged on x it would not move
+    r.update(latency_on='player', latency_ms=None, player_ms=40.0, audio=None)
+    assert websmooth.verdict(r) == (True, [])
+    assert websmooth.verdict(dict(r, player_ms=None))[1] == ['no player move after the key']
+    assert websmooth.verdict(dict(r, player_ms=90.0))[1] == ['key -> player 90 ms']
+    orig = [[i * 16.7, [0, 4500 - (i // 4)], None, None, None] for i in range(200)]        # original: 1 px every 4 frames
+    r = websmooth.analyse(orig, axis=1)
+    r.update(interp=False, latency_on='player', latency_ms=None, player_ms=40.0, audio=None)
+    assert r['cam_moving'] == 0 and websmooth.verdict(r) == (True, [])
+    assert websmooth.verdict(dict(r, interp=True))[1][0].startswith('the camera hardly moved')
+    assert 'camera (y) jitter' in websmooth.format_result('chromium', dict(r, passed=True, fails=[], latency_all=[], player_all=[]))
+
+
+def test_keys_on_the_player_in_the_browser():
+    """1.6: keys_move='player' - no camera probe, the verdict takes key -> player."""
+    pytest.importorskip('playwright')
+    r = _run(True, page='scene-demo.html?s=2', seconds=2, stalls=1, stall_ms=50, keys_move='player')
+    assert 'error' not in r, r
+    assert r['latency_on'] == 'player' and r['latency_ms'] is None and r['latency_all'] == []
+    assert r['player_ms'] is not None and not any('move after the key' in f for f in r['fails']), r['fails']

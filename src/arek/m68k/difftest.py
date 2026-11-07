@@ -206,7 +206,7 @@ def control_programs(rng):
 
     def rts(P):
         return {'code': be16(0x4e75) + be16(NOP), 'entry': P, 'roots': [P], 'exits': [P + 2], 'dyn': [], 'self': P + 2, 'kind_ret': P + 2}
-    add('rts', rts, lambda stop: [_stacked(state(rng), be32(stop)) for _ in range(6)], 'rts')
+    add('rts', rts, lambda stop: [_stacked(state(rng), be32(stop | (0xff000000 if k % 2 else 0))) for k in range(6)], 'rts')
 
     def rte(P):
         return {'code': be16(0x4e73) + be16(NOP), 'entry': P, 'roots': [P], 'exits': [P + 2], 'dyn': [], 'self': P + 2, 'kind_ret': P + 2}
@@ -223,6 +223,8 @@ def control_programs(rng):
 def _target_state(rng, mode, reg, t):
     s = state(rng)
     s['a'][reg] = t if mode == 2 else (t - 0x20) & 0xffffffff
+    if rng.random() < .5:
+        s['a'][reg] |= rng.choice((0xff, 0x80, 0x01)) << 24      # a flag in the top byte: 24 address lines (1.0.27)
     s['d'][1] = 0
     return s
 

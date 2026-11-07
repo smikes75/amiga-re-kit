@@ -134,10 +134,11 @@ static int run(int argc, char **argv) {
         bool stopped = false;
         for (int n = 0; n < 8 && !(FLAGS & F_EXC); n++) {
             cpu.execute();
-            if (cpu.getPC() == s1 || cpu.getPC() == s2) { stopped = true; break; }
+            uint32_t pc = cpu.getPC() & 0xffffff;                // 24 address lines: a flag in the top byte is the same place
+            if (pc == s1 || pc == s2) { stopped = true; break; }
         }
         if (!stopped) FLAGS |= F_RUN;
-        fprintf(out, "%x %llx %x %x", FLAGS, (unsigned long long)(cpu.getClock() - c0), cpu.getPC(), cpu.getSR());
+        fprintf(out, "%x %llx %x %x", FLAGS, (unsigned long long)(cpu.getClock() - c0), cpu.getPC() & 0xffffff, cpu.getSR());
         for (int i = 0; i < 8; i++) fprintf(out, " %x", cpu.getD(i));
         for (int i = 0; i < 8; i++) fprintf(out, " %x", cpu.getA(i));
         std::map<uint32_t, uint8_t> first;

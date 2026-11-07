@@ -79,3 +79,14 @@ def test_corpus_through_the_command_line(tmp_path, capsys):
 def test_sweep_against_moira(tmp_path):
     res = difftest.sweep(os.environ['AREK_MOIRA'], tmp_path / 'moira', work=str(tmp_path), kinds={'trap', 'rte', 'rts'})
     assert res['cases'] > 30 and not res['mismatches'], difftest.summary(res)
+
+
+def test_a_target_compared_on_32_bits_is_found(tmp_path, monkeypatch):
+    """1.0.27 (Xenon 2 KIT-GAP 6): call_addr without the 24-bit mask - the recorded jsr/jmp through a register with a flag
+    in its top byte must fail."""
+    compiler()
+    emit = recomp.Gen.emit
+    monkeypatch.setattr(recomp.Gen, 'emit', lambda self, s='': None if s.strip().startswith('a = ADDR24(a);') else emit(self, s))
+    groups = [[p for p in g if p['kind'] in ('jsr', 'jmp') and p['m']['dyn']] for g in difftest.load_corpus(CORPUS)]
+    res = difftest._compare_groups([g for g in groups if g], None, None, str(tmp_path))
+    assert any(m['fields'][0].startswith('unknown target') for m in res['mismatches'])

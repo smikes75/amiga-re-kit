@@ -91,7 +91,9 @@ target (`pea X` / `move.l X,-(a7)`, then `rts`) or replaced its return address r
 hook returns (`UNKNOWN_HOOK`, `OVERLAY_HOOK`) leaves no return address behind: the run goes on as if the target
 were an empty routine. The source of every two-operand
 instruction is read before the destination's `(An)+` / `-(An)` moves the register (1.0.23). A static target of such a
-jump is a root (`arek roots` lists `pea` and immediate addresses); a run-time one reaches `unknown_call`.
+jump is a root (`arek roots` lists `pea` and immediate addresses); a run-time one reaches `unknown_call`. A run-time target
+is compared on 24 bits, as the 68000's address bus has them (1.0.27): a table entry with a flag in its top byte
+(`$ff004906`) is the routine at `$004906`.
 
 Exceptions the same way (1.0.26). `TRAP #n` writes the 68000's frame (PC behind it, SR), sets S and calls the routine whose
 address is in the vector at `$80 + 4n` at run time; the handler is a root like any other. `rte` reads SR and the stacked

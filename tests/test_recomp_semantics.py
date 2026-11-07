@@ -623,3 +623,17 @@ def test_resume_module_and_cli(tmp_path):
     assert cli.main(['recomp', str(p), '--base', '0x1000', '--auto', '0x1000', '--resume', '-o', str(out)]) == 0
     text = out.read_text()
     assert '#define AREK_RESUME 1' in text and 'case 0x1002u: RESUME_PC = 0x1002u; f_001000(m); return;' in text
+
+
+@pytest.mark.parametrize('how', ['indirect', 'dynamic', 'pushed'])
+def test_a_target_with_a_flag_in_its_top_byte(tmp_path, how):
+    """1.0.27 (Xenon 2 KIT-GAP 6): the 68000 has 24 address lines; $ff00100c is $00100c.
+    1000 movea.l #$ff00100c,a1 ; 1006 jsr (a1) ; 1008 rts ; 100a nop ; 100c moveq #1,d0 ; 100e rts
+    pushed: 1000 move.l #$ff00100c,-(a7) ; 1006 rts ..."""
+    if how == 'pushed':
+        code, flow = '2f3cff00100c 4e75 4e75 4e71 7001'.replace(' ', ''), Flow()
+    else:
+        code = '227cff00100c 4e91 4e75 4e71 7001'.replace(' ', '')
+        flow = Flow(indirect={0x1006: [0x100c]}) if how == 'indirect' else Flow(dynamic=[0x1006])
+    d, a, _, _ = run(tmp_path, code, {}, auto=(BASE, 0x100c), flow=flow)
+    assert d[0] == 1 and a[7] == 0x80000 - 0x100 + 4

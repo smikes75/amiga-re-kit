@@ -31,6 +31,11 @@ waits for it (up to 10 s) or is void and repeated (up to 10 more).
 interpolation (an original mode: a 50 Hz game on a 60 Hz display steps 0 or 1 frame per display frame, which is
 jitter by definition); the camera's and the objects' jitter and the missing passes are then reported, not judged.
 ``--no-interp`` says the same for a page without the hook. Dropped frames, the key latency and the sound still count.
+1.6 (kit 1.0.27, Xenon 2 KIT-GAP 7): axis -> 'x' (default) or 'y', the camera's axis that is judged (a vertical
+auto-scroller); keysMove -> 'camera' (default) or 'player': when the keys move the player and not the camera, the key
+latency judged is key -> player (player() needed) and the camera is not probed. Without interpolation the camera's
+moving steps are reported, not judged (an original camera that moves 1 px every few frames has no moving stretch).
+``--axis`` and ``--keys-move`` say the same for a page without the hooks.
 """
 import json
 import statistics
@@ -52,14 +57,14 @@ FOCUS_JS = """() => { const H = globalThis.WBLONGRUN, f = H.focus; let el = null
     if (!el) { let best = 0; for (const c of document.querySelectorAll('canvas')) { const r = c.getBoundingClientRect(); if (r.width * r.height > best) { best = r.width * r.height; el = c; } } }
     if (!el) return [10, 10];
     const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }"""
-LATENCY_JS = """([code, maxMs]) => new Promise((res) => { const H = globalThis.WBLONGRUN; const x0 = H.cam()[0];
+LATENCY_JS = """([code, maxMs, axis]) => new Promise((res) => { const H = globalThis.WBLONGRUN; const x0 = H.cam()[axis || 0];
     const out = () => H.ready && !H.ready();
     const t0 = performance.now();
     const ev = (type) => new KeyboardEvent(type, { key: code.replace('Arrow', ''), code, bubbles: true, cancelable: true });
     window.dispatchEvent(ev('keydown')); document.dispatchEvent(ev('keydown'));
     const f = () => { const dt = performance.now() - t0;
         if (out()) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(-1); }   // the game left the screen: void
-        else if (Math.abs(H.cam()[0] - x0) > 0.01) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(dt); }
+        else if (Math.abs(H.cam()[axis || 0] - x0) > 0.01) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(dt); }
         else if (dt > maxMs) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(null); }
         else requestAnimationFrame(f); };
     requestAnimationFrame(f); })"""
@@ -95,9 +100,10 @@ def jitter(steps, window=3, jump=None, grid=0.0):
     return (statistics.fmean(devs), max(devs)) if devs else (0.0, 0.0)
 
 
-def analyse(samples, scale=None):
+def analyse(samples, scale=None, axis=0):
     """``[[ts, cam, objs, missing, ahead], ...]`` of one run -> the metrics; ``scale``: S, device px per game px, when
-    the page draws its objects on whole device pixels (their steps on the screen are then judged within 1/S)."""
+    the page draws its objects on whole device pixels (their steps on the screen are then judged within 1/S); ``axis``:
+    0 or 1, the camera's coordinate that is judged (1.6)."""
     # 1.2: None marks a gap - the page's ready() was false (a map fly-over after a death, a menu); nothing is
     # judged across it
     pairs = [(i, a, b) for i, (a, b) in enumerate(zip(samples, samples[1:])) if a is not None and b is not None]
@@ -113,7 +119,7 @@ def analyse(samples, scale=None):
     for i, a, b in pairs:
         if last is not None and i != last + 1:
             steps.append(0.0)                             # a gap ends a stretch of motion
-        steps.append((b[1][0] - a[1][0]) * norm[i])
+        steps.append((b[1][axis] - a[1][axis]) * norm[i])
         last = i
     # the camera's moving stretches (a stop - a wall, the map's edge, a key let go - ends a stretch); the jitter is
     # judged within the stretches
@@ -160,7 +166,7 @@ def analyse(samples, scale=None):
     return {'frames': len(samples_in), 'gaps': gaps, 'refresh_hz': round(1000.0 / nominal, 1) if nominal else None, 'dropped': dropped,
             'cam_dev': round(cam_dev, 4), 'cam_jitter': round(cam_jit, 4), 'cam_jitter_max': round(cam_jit_max, 4), 'cam_moving': len(moving),
             'obj_dev': round(obj_dev, 4), 'obj_jitter': round(obj_jit, 4), 'missing_pct': missing_pct,
-            'ahead': statistics.median(ahead) if ahead else None}
+            'ahead': statistics.median(ahead) if ahead else None, 'axis': 'xy'[axis]}
 
 
 def verdict(r):
@@ -170,32 +176,35 @@ def verdict(r):
     interp = r.get('interp', True) is not False
     if r.get('dropped', 0) > LIMITS['dropped']:
         fails.append('dropped frames %d' % r['dropped'])
-    if r.get('cam_moving', 0) < 10:
-        fails.append('the camera hardly moved (%d steps): hold a key, or set keys' % r.get('cam_moving', 0))
+    if interp and r.get('cam_moving', 0) < 10:              # 1.6: without interpolation reported, not judged
+        fails.append('the camera hardly moved (%d steps): hold a key, set keys, or axis' % r.get('cam_moving', 0))
     elif interp and r['cam_jitter'] >= LIMITS['cam_jitter']:
         fails.append('camera jitter %.3f px' % r['cam_jitter'])
     if interp and r.get('obj_jitter', 0) >= LIMITS['obj_jitter']:
         fails.append('object jitter %.3f px' % r['obj_jitter'])
     if interp and r.get('missing_pct') is not None and r['missing_pct'] > LIMITS['missing_pct']:
         fails.append('missing passes %.1f %%' % r['missing_pct'])
-    if r.get('latency_ms') is None:
-        fails.append('no camera move after the key')
-    elif r['latency_ms'] > LIMITS['latency_ms']:
-        fails.append('key -> camera %.0f ms' % r['latency_ms'])
+    on = r.get('latency_on', 'camera')                       # 1.6: the keys move the player, not the camera
+    lat = r.get('player_ms') if on == 'player' else r.get('latency_ms')
+    if lat is None:
+        fails.append('no %s move after the key' % on)
+    elif lat > LIMITS['latency_ms']:
+        fails.append('key -> %s %.0f ms' % (on, lat))
     a = r.get('audio')
     if a and a.get('dropouts', 0) > LIMITS['dropouts']:
         fails.append('sound dropouts %d' % a['dropouts'])
     return not fails, fails
 
 
-def measure(page, seconds=30.0, stalls=10, stall_ms=150, reps=5, log=None, interp=None):
+def measure(page, seconds=30.0, stalls=10, stall_ms=150, reps=5, log=None, interp=None, axis=None, keys_move=None):
     """The phases on an open page: (1.1) focus - a click into the game (``WBLONGRUN.focus``: a selector or [x, y],
     default the largest canvas; G41), prepare - ``WBLONGRUN.prepare()`` brings the page into the game and resolves
     when it is there (a promise or a value; G42); scroll - the keys of ``WBLONGRUN.route`` ([[key, ms], ...], cycled;
     default the right key for the whole run) held in turn while every display frame is sampled; latency - key presses
     dispatched in the page, alternating left and right; stalls - busy loops in the main thread, the sound's counters
     before and after. ``interp``: None asks the page (``WBLONGRUN.interp()``, default true), False / True say it.
-    Returns the metrics dict."""
+    ``axis`` ('x' / 'y') and ``keys_move`` ('camera' / 'player'): None asks the page (``WBLONGRUN.axis``,
+    ``WBLONGRUN.keysMove``; 1.6). Returns the metrics dict."""
     page.wait_for_function('globalThis.WBLONGRUN', timeout=30000)
     if page.evaluate('typeof globalThis.WBLONGRUN.prepare === "function"'):
         page.evaluate('async () => { await globalThis.WBLONGRUN.prepare(); return true; }')
@@ -220,11 +229,14 @@ def measure(page, seconds=30.0, stalls=10, stall_ms=150, reps=5, log=None, inter
     if held:
         page.keyboard.up(held)
     samples = page.evaluate(SAMPLE_STOP_JS)
-    r = analyse(samples, page.evaluate('globalThis.WBLONGRUN.scale ? WBLONGRUN.scale() : null'))
+    axis = axis or page.evaluate("globalThis.WBLONGRUN.axis || 'x'")
+    keys_move = keys_move or page.evaluate("globalThis.WBLONGRUN.keysMove || 'camera'")
+    r = analyse(samples, page.evaluate('globalThis.WBLONGRUN.scale ? WBLONGRUN.scale() : null'), 1 if axis == 'y' else 0)
+    r['latency_on'] = 'player' if keys_move == 'player' else 'camera'
     r['interp'] = bool(page.evaluate('typeof globalThis.WBLONGRUN.interp === "function" ? !!WBLONGRUN.interp() : true')) if interp is None else bool(interp)
     page.wait_for_timeout(400)
     lats, void = [], 0
-    for k in range(reps + 10):                            # 1.2: a probe outside the game does not count; up to 10 more
+    for k in range(reps + 10 if r['latency_on'] == 'camera' else 0):   # 1.2: a probe outside the game does not count; up to 10 more
         if len(lats) >= reps:
             break
         try:                                              # wait until the page is in the game again (10 s)
@@ -232,7 +244,7 @@ def measure(page, seconds=30.0, stalls=10, stall_ms=150, reps=5, log=None, inter
         except Exception:
             void += 1
             continue
-        lat = page.evaluate(LATENCY_JS, [keys['right'] if k % 2 == 0 else keys['left'], 1000])
+        lat = page.evaluate(LATENCY_JS, [keys['right'] if k % 2 == 0 else keys['left'], 1000, 1 if axis == 'y' else 0])
         if lat is not None and lat >= 0:
             lats.append(lat)
         elif lat is not None:
@@ -287,7 +299,8 @@ def load_average():
         return None
 
 
-def run(url, seconds=30.0, browsers=BROWSERS, stalls=10, stall_ms=150, log=print, viewport=(1280, 800), gpu=False, interp=None):
+def run(url, seconds=30.0, browsers=BROWSERS, stalls=10, stall_ms=150, log=print, viewport=(1280, 800), gpu=False, interp=None,
+        axis=None, keys_move=None):
     """The measurement in every browser of ``browsers`` that is installed: ``{browser: metrics}``. Every result carries
     the WebGL renderer (headless Chromium draws WebGL in software, SwiftShader) and the load average before and after;
     ``gpu``: launch Chromium on the GPU (``GPU_ARGS``; macOS: ANGLE on Metal); ``interp``: see ``measure``."""
@@ -305,7 +318,7 @@ def run(url, seconds=30.0, browsers=BROWSERS, stalls=10, stall_ms=150, log=print
             page.goto(url)
             la0 = load_average()
             try:
-                out[name] = measure(page, seconds, stalls, stall_ms, interp=interp)
+                out[name] = measure(page, seconds, stalls, stall_ms, interp=interp, axis=axis, keys_move=keys_move)
                 out[name]['renderer'] = page.evaluate(RENDERER_JS)
                 out[name]['load'] = [la0, load_average()]
                 if 'swiftshader' in out[name]['renderer'].lower():
@@ -323,9 +336,10 @@ def format_result(name, r):
     fmt = lambda v: ('%.0f' % v) if isinstance(v, (int, float)) else str(v)
     nj = '' if r.get('interp', True) is not False else ' (not judged: no interpolation)'
     aud = ('sound reserve %s ms, latency %s ms, dropouts %d over %s%s' % (fmt(a['reserve_ms']), fmt(a['latency_ms']), a['dropouts'], a['stalls'], ' (simulated by the page)' if a['simulated'] else '')) if a else 'no sound hook'
-    return ('%s: %s - %d frames at %s Hz, %d dropped; camera jitter %.3f px (max %.3f; %d steps, speed deviation %.3f), objects jitter %.3f px, missing passes %s%s; '
+    return ('%s: %s - %d frames at %s Hz, %d dropped; camera%s jitter %.3f px (max %.3f; %d steps, speed deviation %.3f), objects jitter %.3f px, missing passes %s%s; '
             'key -> camera %s ms %s%s; %s; %s' % (
-                name, 'PASSED' if r['passed'] else 'FAILED', r['frames'], r['refresh_hz'], r['dropped'], r['cam_jitter'], r['cam_jitter_max'], r['cam_moving'], r['cam_dev'], r['obj_jitter'],
+                name, 'PASSED' if r['passed'] else 'FAILED', r['frames'], r['refresh_hz'], r['dropped'], ' (y)' if r.get('axis') == 'y' else '',
+                r['cam_jitter'], r['cam_jitter_max'], r['cam_moving'], r['cam_dev'], r['obj_jitter'],
                 '%.1f %%' % r['missing_pct'] if r['missing_pct'] is not None else 'n/a', nj, r['latency_ms'], r['latency_all'],
                 (', key -> player %s ms %s' % (r['player_ms'], r['player_all'])) if r.get('player_ms') is not None else '', aud,
                 ('; '.join(r['fails']) if r['fails'] else 'every limit met') + (' · ' + r['status'] if r.get('status') else '')

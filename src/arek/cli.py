@@ -692,7 +692,7 @@ def cmd_web(a):
             raise ValueError('web smooth URL [--seconds S] [--browser chromium|webkit|all] [--stalls N] [--stall-ms M] [--json]')
         browsers = websmooth.BROWSERS if a.browser == 'all' else (a.browser,)
         res = websmooth.run(a.target, a.seconds, browsers, a.stalls, a.stall_ms, log=(lambda *x: None) if a.json else print, gpu=a.gpu,
-                            interp=False if a.no_interp else None)
+                            interp=False if a.no_interp else None, axis=a.axis, keys_move=a.keys_move)
         if a.json:
             print(json.dumps(res, indent=1))
         return 0 if all(r.get('passed') for r in res.values() if 'error' not in r) and any('error' not in r for r in res.values()) else 1
@@ -1297,6 +1297,9 @@ def build_parser():
     s.add_argument('--hz', help='replay: the display rates to replay at (default 50,60,120,144)')
     s.add_argument('--frames', type=int, default=300, help='replay: game frames to compute at every rate (default 300)')
     s.add_argument('--route', help='replay: inputs by game frame as mask:frames pairs, e.g. 1:120,2:60,0:120 (the page\'s key bits)')
+    s.add_argument('--axis', choices=['x', 'y'], help='smooth: the camera axis that is judged (default: the page\'s WBLONGRUN.axis, else x)')
+    s.add_argument('--keys-move', choices=['camera', 'player'], help='smooth: what the keys move - player: key latency judged on player() '
+                   '(default: the page\'s WBLONGRUN.keysMove, else camera)')
     s.add_argument('--no-interp', action='store_true', help="smooth: the page draws the game's frames without interpolation (an original "
                    "mode): the camera's and the objects' jitter and the missing passes are reported, not judged (else WBLONGRUN.interp())")
     s.add_argument('--json', action='store_true', help='smooth: the metrics as JSON')

@@ -835,6 +835,7 @@ class Gen:
         """overlay_call (the areas of Flow.overlays) and call_addr (every entry of this
         translation, the overlay areas, else unknown_call) for run-time targets."""
         self.emit('void overlay_call(M68 *m, uint32_t a) {')
+        self.emit('    a = ADDR24(a);                   /* 1.0.27: the 68000 has 24 address lines (Xenon 2 KIT-GAP 6) */')
         self.emit('    uint32_t base = 0, size = 0, key = 0;')
         for b, n, k in self.flow.overlays:
             self.emit('    if (a - 0x%xu < 0x%xu) { base = 0x%xu; size = 0x%xu; key = %du; }' % (b, n, b, n, k))
@@ -857,6 +858,7 @@ class Gen:
         self.emit('#endif')
         self.emit('}')
         self.emit('void call_addr(M68 *m, uint32_t a) {')
+        self.emit('    a = ADDR24(a);                   /* 1.0.27: a target with a flag in its top byte is the same address */')
         self.emit('    switch (a) {')
         for e in sorted(set(self.all_entries())):
             self.emit('    case 0x%xu: %s(m); return;' % (e, self.flow.fname(e)))
@@ -882,6 +884,7 @@ class Gen:
             end = min(end, self.flow.prefix[2])
         name = self.flow.prefix[0] or 'module_%x' % base
         self.emit('static void ovl_%s(M68 *m, uint32_t a) {' % name)
+        self.emit('    a = ADDR24(a);')
         self.emit('    switch (a) {')
         own = sorted(set(x for x in self.all_entries() if self.flow.in_module(x)))
         for e in own:
@@ -1298,7 +1301,7 @@ class Gen:
                 return L + self.jump_table(i, lambda t: self.callseq(t, i.end) + ' break;',
                                            'break;')
             if i.addr in self.flow.indirect:
-                L.append('{ uint32_t t = %s; switch (t) {' % i.ea.addr)
+                L.append('{ uint32_t t = ADDR24(%s); switch (t) {' % i.ea.addr)
                 for t in self.flow.indirect[i.addr]:
                     L.append('  case 0x%xu: %s break;' % (t, self.callseq(t, i.end)))
                 L.append('  default: unknown_call(t); } }')
@@ -1309,7 +1312,7 @@ class Gen:
                 L.append(self.callseq(i.ea.absval, i.end))
             else:
                 L.append('push32(m, 0x%xu);' % i.end)
-                L.append('unknown_call(%s);' % i.ea.addr)
+                L.append('unknown_call(ADDR24(%s));' % i.ea.addr)
         elif k == 'jmp':
             nm = self.stub_name(i.ea)
             if nm:
@@ -1328,7 +1331,7 @@ class Gen:
                         ('(uint32_t)(int16_t)rd16_raw(0x%xu)' % (i.addr + 2))   # extension words raw - prefetch, in BUS_TAB
                 else:
                     t = i.ea.addr
-                L.append('{ uint32_t t = %s; switch (t) {' % t)
+                L.append('{ uint32_t t = ADDR24(%s); switch (t) {' % t)
                 for t in self.flow.indirect[i.addr]:
                     L.append('  case 0x%xu: %s' % (t, self.br(t, start, end, ins)))
                 L.append('  default: unknown_call(t); } }')
@@ -1336,7 +1339,7 @@ class Gen:
             if mode in FLOW_MODES:
                 L.append(self.br(i.ea.absval, start, end, ins))
             elif self.cur in self.flow.inline and mode in (2, 5):
-                L.append('INLINE_RET = %s; return;' % i.ea.addr)     # back behind the caller's data
+                L.append('INLINE_RET = ADDR24(%s); return;' % i.ea.addr)     # back behind the caller's data
             else:
                 raise Unsupported('neprimy jmp @%x' % i.addr)
         elif k in ('mulu', 'divu', 'muls', 'divs') and self.timing:
@@ -1424,7 +1427,7 @@ class Gen:
         if i.ea.mode == 73:
             base = '(%d)' % (i.ea.pcbase - jt.table)
         elif jt.base_reg:                                  # An = table + an offset the program chose
-            base = '(int32_t)(m->a[%d] - 0x%xu)' % (i.ea.areg, jt.table)
+            base = '((int32_t)((m->a[%d] - 0x%xu) << 8) >> 8)' % (i.ea.areg, jt.table)   # 1.0.27: 24 address lines
         else:
             base = '(%d)' % (jt.origin - jt.table)
         L = ['{ int32_t off = %s + (%d) + %s; if (off < 0 || off %% %d) unknown_call((uint32_t)off); '
