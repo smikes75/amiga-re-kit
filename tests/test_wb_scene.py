@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.4' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.5' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -361,7 +361,7 @@ def _run_page(url_tail, fn, browser='chromium'):
         srv.shutdown()
 
 
-@pytest.mark.parametrize('tail', ['?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1', '?s=2&paltop=1&palscreen=1', '?s=1.9943&fine=1&paltop=1&palscreen=1'])
+@pytest.mark.parametrize('tail', ['?s=2&back=1', '?s=1.9943&fine=1&back=1&mean=1', '?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1', '?s=2&paltop=1&palscreen=1', '?s=1.9943&fine=1&paltop=1&palscreen=1'])
 def test_gpu_equals_the_reference(tail):
     """The GPU band against the CPU reference of the same composition, pixel for pixel, while the camera moves and the
     objects interpolate (as Alien Breed II checked its WebGL path: 0 of 60 M pixels)."""
@@ -415,3 +415,47 @@ def test_smooth_on_the_scene_page():
     assert 'error' not in r, r
     assert r['frames'] > 100 and r['cam_moving'] > 50 and r['missing_pct'] <= 1.5, r      # a loaded machine (other sessions, SwiftShader) misses a pass or two here; the canon's 0 % is for a real run
     assert r['obj_jitter'] < 0.05 and r['cam_jitter'] < 0.05, (r['obj_jitter'], r['cam_jitter'], r['fails'])
+
+
+def test_back_layer_rules():
+    """2.5 (Xenon 2 KIT-GAP 8): the back layer shows where the window and the map leave a hole, at a camera of its own that
+    interpolates between frames at its own speed, the short way round a wrapped axis; window.or's bits go onto it; the
+    margins less; under subpixel its device camera is rounded against the playfield's fraction."""
+    body = """(() => { const img = new Uint8Array(8 * 4); for (let i = 0; i < 32; i++) img[i] = 3 + (i %% 8);   // a row: 3 4 5 ... 10
+        const hole = (rec) => { const w = Object.assign({}, rec.window, { idx: rec.window.idx.slice() }); w.idx.fill(255); return Object.assign({}, rec, { window: w, map: null }); };
+        const a = hole(mk(1, 0, [0, 0], 0)), b = hole(mk(2, 20, [0, 0], 0));
+        a.back = { cam: %s, w: 8, h: 4, idx: img, origin: [0, 0], wrap: %s }; b.back = { cam: %s, w: 8, h: 4, idx: img, origin: [0, 0], wrap: %s };
+        a.objects = []; b.objects = []; a.sprites = []; b.sprites = [];
+        %s
+        const c = S.compose([a, b], %s, { S: %s, extX: %s }, %s, null); const px = S.reference(c); const R = (x, y) => px[(y * Math.round(c.W * c.S) + x) * 4];
+        return { cam: c.back.cam, d: c.back.d, row: [0, 1, 2, 3].map((x) => R(x, 0)), W: c.W }; })()"""
+    def run(acam, bcam, t, S=1, wrap='false', extra='', extX=0, opts='{}'):
+        return js(with_mk(body % (acam, wrap, bcam, wrap, extra, t, S, extX, opts)))
+    r = run('[0, 0]', '[2, 0]', 10)                                                     # half way: the back's camera at 1
+    assert r['cam'] == [1, 0] and r['d'] == [1, 0] and r['row'] == [40, 50, 60, 70]
+    r = run('[0, 0]', '[2, 0]', 0)
+    assert r['cam'] == [0, 0] and r['row'] == [30, 40, 50, 60]
+    r = run('[7, 0]', '[1, 0]', 10, wrap="'x'")                                         # wrapped: 7 -> 1 is +2 the short way, not -6
+    assert r['cam'] == [0, 0] and r['row'] == [30, 40, 50, 60]
+    r = run('[6, 0]', '[6, 0]', 0, wrap="'x'")                                          # the picture repeats: x 8 is x 0
+    assert r['row'] == [90, 100, 30, 40]
+    r = run('[6, 0]', '[6, 0]', 0)                                                      # without wrap: black past the picture
+    assert r['row'] == [90, 100, 0, 0]
+    r = run('[0, 0]', '[0, 0]', 0, extra='b.window.or = new Uint8Array(4 * 2); b.window.or[1] = 16;')
+    assert r['row'] == [30, 200, 50, 60]                                                # (4 | 16) * 10: the bits ORed onto the back
+    r = run('[2, 0]', '[2, 0]', 0, extX=1)
+    assert r['cam'] == [1, 0] and r['W'] == 6                                           # the margins: the back's camera less extX
+    r = run('[0, 0]', '[2, 0]', 10, S=2, opts='{ subpixel: true }')                    # the window's camera is fixed: no fraction, the plain floor
+    assert r['d'] == [2, 0]
+    r = js(with_mk("""(() => { const a = mk(1, 0, [0, 0], 0), b = mk(2, 20, [1, 0], 0); const img = new Uint8Array(16).fill(7);
+        a.back = { cam: [0, 0], w: 8, h: 2, idx: img, wrap: true }; b.back = { cam: [3, 0], w: 8, h: 2, idx: img, wrap: true };
+        const c = S.compose([a, b], 5, { S: 2 }, { subpixel: true }, null); return [c.sub.w, c.back.cam, c.back.d]; })()"""))
+    assert r == [[128, 0], [0.75, 0], [1, 0]]                                          # round(0.75 * 2 - 128 / 256) = 1: the shift of the picture adds the half pixel
+
+
+def test_unexplained_with_the_back_layer():
+    """2.5: unexplained() models the back layer and window.or too, so they do not land in window.over."""
+    r = js(with_mk("""(() => { const rec = mk(1, 0, [0, 0], 0); rec.map = null; rec.window = Object.assign({}, rec.window, { idx: new Uint8Array(8).fill(255), or: new Uint8Array(8) });
+        rec.window.or[3] = 16; rec.back = { cam: [1, 0], w: 4, h: 2, idx: Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8]), origin: [0, 0], wrap: 'x' }; rec.objects = []; rec.sprites = [];
+        const game = Uint8Array.from([2, 3, 4, 17, 6, 7, 8, 5]); const u = S.unexplained(rec, game); return [u.count, Array.from(u.model)]; })()"""))
+    assert r == [0, [2, 3, 4, 17, 6, 7, 8, 5]]

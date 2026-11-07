@@ -1,4 +1,4 @@
-// wb-scene.js 2.4 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
+// wb-scene.js 2.5 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
 // after Superfrog's switch - KIT-GAPS 40-43: screen-fixed sprites, the means over the interpolated camera, a layer of
 // drawings without identity, a guard for a pass that never changes, one timebase; 1.2 kit 0.9.2 - KIT-GAPS 44-46: no
 // interpolation across a jump, sprites[].id, camMean for both axes; 1.3 kit 0.9.3 - objects[].ox/oy, the drawing's offset
@@ -24,7 +24,8 @@
 // the anchor per pair (Turrican II KIT-GAP 29): a sprite or object whose WORLD position is the same in both frames of its
 // pair goes with the ground, one whose SCREEN position is the same stays on the screen - per axis, no flag needed (a player
 // sprite stands on the screen while the camera tracks it and in the world while the camera coasts); steady still forces the screen
-// (a game's own transition at one scale - Alien Breed SE92).
+// (a game's own transition at one scale - Alien Breed SE92); 2.5 kit 1.0.28 - back (Xenon 2 KIT-GAP 8): a layer under the window with a
+// camera of its own, a parallax background that interpolates between frames at its own speed; window.or: bits ORed onto it.
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -42,6 +43,15 @@
 //                                        over (1.1, optional) = Uint8Array(w*h) of what the game drew over it without an
 //                                        object record (a popping score, a picked coin, the player in an interlude): shown
 //                                        with the window, above the terrain and below the objects, not interpolated
+//     back: { cam, w, h, idx, origin, wrap },   2.5, optional: a layer under the window and the map with a camera of its own
+//                                        (a parallax background): cam = [x, y] its position shown at the window's top-left in
+//                                        this frame, in its own pixels; idx = Uint8Array(w*h) (255 = none, black) with its
+//                                        top-left at origin (default cam); wrap = 'x', 'y', 'xy' or true: the picture repeats
+//                                        on that axis (a ring of rows - Xenon 2's coral, 192 rows), and the camera
+//                                        interpolates the short way round. It shows where the window and the map have no
+//                                        index, with the window's palette rows; window.or (optional) = Uint8Array(w*h) of bits
+//                                        ORed onto what shows through a hole (stars ORed with the background: the index 0 when
+//                                        nothing shows), below window.over
 //     map: { gen, atlas, nslots, dirty, cols, rows, cells, origin },   optional, for the margins: atlas = Uint8Array(nslots*256)
 //                                        16 x 16 tiles (32 per atlas row, 512 x 512 texture), gen changes when the atlas is
 //                                        rebuilt, dirty = Uint16Array of slots changed since the last frame (null = none),
@@ -105,7 +115,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '2.4';
+    const VERSION = '2.5';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -244,9 +254,33 @@ const WBSCENE = (() => {
             const sx = !!from && pr.from.x === pr.to.x && from[0] !== tw[0], sy = !!from && pr.from.y === pr.to.y && from[1] !== tw[1];   // 2.4 (KIT-GAP 29): on the screen only when the hardware position held and the world one moved
             return { s: pr.to, x: from ? lerp(from[0], tw[0], pr.f) : tw[0], y: from ? lerp(from[1], tw[1], pr.f) : tw[1], sx, sy };
         });
-        return { A, B, f, OA, OB, of, cam: vcam, spriteCam, gcam, win, map: B.map || null, limits: lim, objs, sprs, hud: B.hud || null,
-                 W: win.w + 2 * ext.x, H: win.h + 2 * ext.y, S: view.S || 1, ext, fixed: o.fixedAxis || null, n: B.n, sub: subOf(vcam, view.S || 1, o),
+        const sub = subOf(vcam, view.S || 1, o);
+        return { A, B, f, OA, OB, of, cam: vcam, spriteCam, gcam, win, map: B.map || null, limits: lim, objs, sprs, hud: B.hud || null, back: backOf(frames, A, B, f, tv, o, ext, view.S || 1, sub, jumped),
+                 W: win.w + 2 * ext.x, H: win.h + 2 * ext.y, S: view.S || 1, ext, fixed: o.fixedAxis || null, n: B.n, sub,
                  palScreen: o.palAnchor === 'screen' ? Math.round(gcam[1] - vcam[1]) : null };   // 2.3 (KIT-GAP 27): the band row of the game's screen row 0
+    }
+    /** 2.5 (Xenon 2 KIT-GAP 8): the back layer's camera at display time - between the frames as the window's (the same pair
+     *  and fraction, or camMean's window), on a wrapped axis the short way round, less the view's margins - and in whole
+     *  device pixels: floor(cam * S), or under subpixel round(cam * S - the playfield's fraction), since the picture it is
+     *  drawn into is shifted by that fraction afterwards (the background within half a device pixel). */
+    function backOf(frames, A, B, f, tv, o, ext, S, sub, jumped) {
+        const bk = B.back; if (!bk) return null;
+        const wrap = wrapOf(bk.wrap);
+        const near = (fr, i) => { const v = fr.back ? fr.back.cam[i] : bk.cam[i]; if (!wrap[i]) return v; const per = i ? bk.h : bk.w, d = ((v - bk.cam[i]) % per + per) % per; return bk.cam[i] + (d > per / 2 ? d - per : d); };
+        let bc;
+        if (o.camMean && o.camMean.tau > 0) { const sh = { shape: o.camMean.shape || 'box' }; bc = [windowMean(frames, tv, o.camMean.tau, (fr) => near(fr, 0), sh), windowMean(frames, tv, o.camMean.tau, (fr) => near(fr, 1), sh)]; }
+        else { const fa = A.back ? [near(A, 0), near(A, 1)] : null, from = fa && !jumped(fa, bk.cam) ? fa : bk.cam; bc = [lerp(from[0], bk.cam[0], f), lerp(from[1], bk.cam[1], f)]; }
+        bc = [bc[0] - ext.x, bc[1] - ext.y];
+        const d = sub ? [Math.round(bc[0] * S - sub.w[0] / 256), Math.round(bc[1] * S - sub.w[1] / 256)] : [Math.floor(bc[0] * S), Math.floor(bc[1] * S)];
+        return { rec: bk, cam: bc, d, origin: bk.origin || bk.cam, wrap };
+    }
+    function wrapOf(wr) { return [wr === true || wr === 'x' || wr === 'xy', wr === true || wr === 'y' || wr === 'xy']; }
+    /** The back layer's index at its game pixel (gx, gy), 255 outside a picture that does not wrap. */
+    function backIdx(back, gx, gy) {
+        const bk = back.rec; let x = gx - back.origin[0], y = gy - back.origin[1];
+        if (back.wrap[0]) x = ((x % bk.w) + bk.w) % bk.w;
+        if (back.wrap[1]) y = ((y % bk.h) + bk.h) % bk.h;
+        return x >= 0 && y >= 0 && x < bk.w && y < bk.h ? bk.idx[y * bk.w + x] : 255;
     }
     /** 1.5: the playfield's camera snapped to whole device pixels and the remaining fraction as weights /256 (x, y). */
     function subOf(cam, S, o) {
@@ -319,11 +353,13 @@ const WBSCENE = (() => {
     function unexplained(rec, gameIdx) {
         const win = rec.window, map = rec.map, cam = rec.cam, W = win.w, H = win.h, model = new Uint8Array(W * H);
         for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-            let v = win.idx[y * W + x];
+            let v = win.idx[y * W + x]; const hole = v === 255;
             if (v === 255 && map) {
                 const wx = cam[0] + x - map.origin[0], wy = cam[1] + y - map.origin[1], cx = Math.floor(wx / 16), cy = Math.floor(wy / 16);
                 if (cx >= 0 && cy >= 0 && cx < map.cols && cy < map.rows) { const sl = map.cells[cy * map.cols + cx]; if (sl !== 0xffff) v = map.atlas[sl * 256 + (wy & 15) * 16 + (wx & 15)]; }
             }
+            if (v === 255 && rec.back) v = backIdx({ rec: rec.back, origin: rec.back.origin || rec.back.cam, wrap: wrapOf(rec.back.wrap) }, rec.back.cam[0] + x, rec.back.cam[1] + y);   // 2.5
+            if (hole && win.or && win.or[y * W + x]) v = (v === 255 ? 0 : v) | win.or[y * W + x];
             model[y * W + x] = v;
         }
         for (const ob of rec.objects || []) {
@@ -348,7 +384,7 @@ const WBSCENE = (() => {
     /** The playfield alone (the window's clean picture, the map, black outside) at camera cam, Wd x Hd device pixels. */
     function playfield(c, camd, Wd, Hd) {
         const S = c.S, out = new Uint8Array(Wd * Hd * 4), bandWd = Math.round(c.W * S), bandHd = Math.round(c.H * S), bandH = c.H;
-        const win = c.win, winX = c.B.cam[0], winY = c.B.cam[1], map = c.map;
+        const win = c.win, winX = c.B.cam[0], winY = c.B.cam[1], map = c.map, back = c.back;
         const fixed = c.fixed, lim = c.limits;
         // 2.0.1 (Alien Breed II G59): the device pixel (dx, dy) with the camera camd (whole device pixels) shows game pixel
         // floor((dx + camd) * W / Wd) - whole numbers only on both paths, so no GPU's float rounding (WebKit fused a multiply-add
@@ -371,6 +407,9 @@ const WBSCENE = (() => {
                     if (cx >= 0 && cy >= 0 && cx < map.cols && cy < map.rows) { const sl = map.cells[cy * map.cols + cx];
                         if (sl !== 0xffff) idx = map.atlas[sl * 256 + ((wy - map.origin[1]) & 15) * 16 + ((wx - map.origin[0]) & 15)]; }
                 }
+                const hole = idx < 0;
+                if (hole && back) { const v = backIdx(back, Math.floor((dx + back.d[0]) * c.W / bandWd), Math.floor((dy + back.d[1]) * c.H / bandHd)); if (v !== 255) idx = v; }   // 2.5: the back layer
+                if (hole && inWin && win.or) { const v = win.or[by * win.w + bx]; if (v) idx = (idx < 0 ? 0 : idx) | v; }
                 if (inWin && win.over) { const v = win.over[by * win.w + bx]; if (v !== 255) idx = v; }   // 1.1: the game's own drawings over the window
             }
             if (idx >= 0) put(dx, dy, idx, palRow(wy, dy)); else { const p = (dy * Wd + dx) * 4; out[p + 3] = 255; }
@@ -390,6 +429,7 @@ const WBSCENE = (() => {
     int fdiv(int a, int b) { int q = a / b; return (a % b != 0 && a < 0) ? q - 1 : q; }   // floor division, b > 0
     uniform ivec2 u_winpos; uniform ivec2 u_winsize; uniform ivec4 u_palrows; uniform highp usampler2D u_grid; uniform sampler2D u_atlas; uniform ivec4 u_map; uniform ivec4 u_fixed; uniform sampler2D u_over; uniform int u_hasover;
     uniform sampler2D u_mid; uniform ivec2 u_w; uniform int u_midh;
+    uniform sampler2D u_back; uniform sampler2D u_or; uniform ivec4 u_bk; uniform ivec2 u_bcamd; uniform ivec3 u_bflags; uniform int u_hasor;   // 2.5
     int ix8(sampler2D t, ivec2 p) { return int(texelFetch(t, p, 0).r * 255.0 + 0.5); }
     ivec4 px8(ivec2 p) { return ivec4(texelFetch(u_mid, p, 0) * 255.0 + 0.5); }
     void main() {
@@ -420,6 +460,15 @@ const WBSCENE = (() => {
           if (idx < 0 && u_map.z > 0) { ivec2 m = w - u_map.xy; ivec2 c = m >> 4;
             if (m.x >= 0 && m.y >= 0 && c.x < u_map.z && c.y < u_map.w) { uint sl = texelFetch(u_grid, c, 0).r;
               if (sl != 0xffffu) idx = ix8(u_atlas, ivec2(int(sl % 32u) * 16 + (m.x & 15), int(sl / 32u) * 16 + (m.y & 15))); } }
+          bool hole = idx < 0;
+          if (hole && u_bflags.x == 1) {                     // 2.5: the back layer at its own camera, whole numbers as the reference
+            ivec2 bd = ivec2(int(gl_FragCoord.x - 0.5 - u_band.x), int(u_band.y - gl_FragCoord.y - 0.5)) + u_bcamd;
+            ivec2 q = ivec2(fdiv(bd.x * u_ratio.x, u_ratio.y), fdiv(bd.y * u_ratio.z, u_ratio.w)) - u_bk.xy;
+            if (u_bflags.y == 1) q.x -= fdiv(q.x, u_bk.z) * u_bk.z;
+            if (u_bflags.z == 1) q.y -= fdiv(q.y, u_bk.w) * u_bk.w;
+            if (q.x >= 0 && q.y >= 0 && q.x < u_bk.z && q.y < u_bk.w) { int v = ix8(u_back, q); if (v != 255) idx = v; }
+          }
+          if (hole && inWin && u_hasor == 1) { int v = ix8(u_or, b); if (v != 0) idx = (idx < 0 ? 0 : idx) | v; }
           if (inWin && u_hasover == 1) { int v = ix8(u_over, b); if (v != 255) idx = v; }
         }
         if (idx < 0) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
@@ -472,12 +521,12 @@ const WBSCENE = (() => {
                 const prog = this.prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog);
                 if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
                 gl.useProgram(prog); this.u = {};
-                for (const n of ['u_size', 'u_tex', 'u_pal', 'u_mode', 'u_camd', 'u_ratio', 'u_band', 'u_winpos', 'u_winsize', 'u_palrows', 'u_grid', 'u_atlas', 'u_map', 'u_fixed', 'u_over', 'u_hasover', 'u_qpos', 'u_qsize', 'u_qimg', 'u_mid', 'u_w', 'u_midh']) this.u[n] = gl.getUniformLocation(prog, n);
+                for (const n of ['u_size', 'u_tex', 'u_pal', 'u_mode', 'u_camd', 'u_ratio', 'u_band', 'u_winpos', 'u_winsize', 'u_palrows', 'u_grid', 'u_atlas', 'u_map', 'u_fixed', 'u_over', 'u_hasover', 'u_qpos', 'u_qsize', 'u_qimg', 'u_mid', 'u_w', 'u_midh', 'u_back', 'u_or', 'u_bk', 'u_bcamd', 'u_bflags', 'u_hasor']) this.u[n] = gl.getUniformLocation(prog, n);
                 this.vao = gl.createVertexArray(); gl.bindVertexArray(this.vao); this.vbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
                 const aPos = gl.getAttribLocation(prog, 'a_pos'), aUv = gl.getAttribLocation(prog, 'a_uv');
                 gl.enableVertexAttribArray(aPos); gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0); gl.enableVertexAttribArray(aUv); gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
                 gl.bindVertexArray(null);
-                this.texWin = this._tex(); this.texPal = this._tex(); this.texGrid = this._tex(); this.texAtlas = this._tex(); this.texHud = [this._tex(), this._tex()]; this.texOver = this._tex();
+                this.texWin = this._tex(); this.texPal = this._tex(); this.texGrid = this._tex(); this.texAtlas = this._tex(); this.texHud = [this._tex(), this._tex()]; this.texOver = this._tex(); this.texBack = this._tex(); this.texOr = this._tex();
                 this.quad = new Float32Array(24);
                 gl.canvas.addEventListener('webglcontextlost', () => { this.gl = null; });
                 return true;
@@ -523,6 +572,14 @@ const WBSCENE = (() => {
                 gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, map.cols, map.rows, 0, gl.RED_INTEGER, gl.UNSIGNED_SHORT, map.cells);
                 gl.uniform4i(u.u_map, map.origin[0], map.origin[1], map.cols, map.rows);
             } else gl.uniform4i(u.u_map, 0, 0, 0, 0);
+            gl.uniform1i(u.u_back, 6); gl.uniform1i(u.u_or, 7);                    // 2.5: the back layer and the bits ORed onto it
+            const bk = c.back;
+            gl.activeTexture(gl.TEXTURE6);
+            if (bk) { this._r8(this.texBack, bk.rec.w, bk.rec.h, bk.rec.idx); gl.uniform4i(u.u_bk, bk.origin[0], bk.origin[1], bk.rec.w, bk.rec.h); gl.uniform2i(u.u_bcamd, bk.d[0], bk.d[1]); gl.uniform3i(u.u_bflags, 1, bk.wrap[0] ? 1 : 0, bk.wrap[1] ? 1 : 0); }
+            else { gl.bindTexture(gl.TEXTURE_2D, this.texBack); gl.uniform3i(u.u_bflags, 0, 0, 0); }
+            gl.activeTexture(gl.TEXTURE7);
+            if (win.or) this._r8(this.texOr, win.w, win.h, win.or); else gl.bindTexture(gl.TEXTURE_2D, this.texOr);
+            gl.uniform1i(u.u_hasor, win.or ? 1 : 0);
             gl.activeTexture(gl.TEXTURE0); this._r8(this.texWin, win.w, win.h, win.idx);
             if (c.sub) this._subpixel(c, fbo, x0, vy, Wd, Hd); else { gl.uniform1i(u.u_mode, 2); this._quad(0, 0, Wd, Hd); }
             const under = !!(c.hud && c.hud.under), topD = under && c.hud.top ? Math.round(c.hud.top.h * S) : 0, botD = under && c.hud.bottom ? Math.round(c.hud.bottom.h * S) : 0;
@@ -601,7 +658,7 @@ const WBSCENE = (() => {
             return { pixels: out, w, h, composition: c };
         }
     }
-    return { VERSION, lerp, clampCam, valueAt, windowMean, pairById, pairOf, fnv1a, x17, widenColumns, compose, reference, unexplained, quadOf, Scene };
+    return { VERSION, lerp, clampCam, valueAt, windowMean, pairById, pairOf, fnv1a, x17, widenColumns, compose, reference, unexplained, quadOf, backIdx, Scene };
 })();
 if (typeof globalThis !== 'undefined') globalThis.WBSCENE = WBSCENE;
 if (typeof module !== 'undefined') module.exports = WBSCENE;

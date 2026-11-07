@@ -446,6 +446,14 @@ first half and made moire); the pattern is the source mode's in the first half a
 second - exactly two patterns per transition, and the end of the transition is the settled pattern (taking the
 detail from the wrong side made the CRT jump at the end); a mode without CRT keeps the other's pattern all along.
 
+2.5 (kit 1.0.28, Xenon 2 KIT-GAP 8): a game with a parallax background - two scrolling layers drawn into one 4-plane
+picture (Xenon 2: the coral in bitplanes 0-1, a ring of 192 rows copied every pass and moving a row every 2 passes; the
+tiles in bitplanes 2-3, a row every pass) - gives the record `back: { cam, w, h, idx, origin, wrap }`: its own camera,
+interpolated between frames at its own speed (or by camMean, the short way round a wrapped axis), shown where the window
+and the map leave a hole, with the window's palette rows. `window.or` holds bits ORed onto what shows through a hole (the
+stars in bitplanes 2-3 over the coral). Under the shift the back's device camera is rounded against the playfield's
+fraction, so it lands within half a device pixel. The GPU equals the reference with it (`?back=1` on the synthetic page).
+
 The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
 the 2D path; `?fine=1` the subpixel shift) runs a generated map, a clean window with decorations the map does not have and holes the map shows
 through, three objects on a 25 Hz loop (one blinking), a sprite and HUD rows on the kit's clock; its hooks are
