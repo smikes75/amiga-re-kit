@@ -62,6 +62,13 @@ first message of any coding agent.
    frames with scripted input; `arek trace` records registers, inputs and bus activity;
    `arek render` draws a frame from chip RAM so it can be compared pixel for pixel.
 
+## A whole game (the rebuilds)
+
+When the goal is the whole game in the browser (static recompilation + the kit's host, engine and display stack), read
+`docs/REBUILD-PLAYBOOK.md` next: the milestones M0-M9, the start from the disks without a Kickstart, module discovery,
+the page's events at exact frames, the scene record, the public build checklist - what three rebuilds measured.
+`docs/HOST.md`, `docs/WB-RECIPE.md` and `docs/WB-PLYNULOST.md` are the contracts it points to.
+
 ## What to deliver
 
 - `docs/disk.md`: inventory, map, regions, packers found, boot chain, each with the command

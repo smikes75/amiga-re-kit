@@ -208,3 +208,39 @@ static void my_record(int n) { if (n != REC_LAST + 1) REC_ORDER_OK = 0; REC_LAST
     assert r.returncode == 0, r.stderr
     chip = (tmp_path / 'chip.bin').read_bytes()
     assert struct.unpack('>HH', chip[0x4100:0x4104]) == (5, 1)       # five frames, each recorded in order before publishing
+
+
+def test_node_harness_drives_both_wasm_builds(tmp_path):
+    """arek_host_engine_node.js (1.0.20): the harness opens the coroutine build and the threaded build, schedules the
+    check's keys as events at exact frames and prints the native build's check line; its synthState() writes the very
+    bytes `arek host pack` writes."""
+    if not (shutil.which('emcc') and shutil.which('node') and bus.compiler()):
+        pytest.skip('no emcc + node')
+    build_state(tmp_path)
+    kw = dict(src=str(tmp_path / 'externs.c'), defines=['HOST_L4=f_001180'])
+    host.engine_build(str(tmp_path / 'n'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', native=True, **kw)
+    want = subprocess.run([str(tmp_path / 'n' / 'arek_host_engine'), str(tmp_path / 'state.bin'), '30', '--disk', '0', str(tmp_path / 'disk.adf')],
+                          capture_output=True, text=True, check=True, timeout=60).stdout.strip()
+    host.engine_build(str(tmp_path / 'wa'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', **kw)
+    host.engine_build(str(tmp_path / 'wt'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', thread=True, **kw)
+    script = tmp_path / 'drive.js'
+    script.write_text('''
+const fs = require('fs'); const H = require(%s);
+(async () => {
+  for (const dir of [%s, %s]) {
+    const eng = await H.open(dir, { state: %s, disks: [%s], hash: true });
+    for (let f = 0; f < 30; f++) eng.at(f, () => eng.keys(((f / 40) | 0) %% 2 ? 4 : 1));
+    let seen = 0; const n = await eng.run(30, (f) => { seen = f; });
+    console.log('frames ' + n + ' frame ' + eng.frameNo(n - 1) + ' hash ' + eng.hash());
+    console.log('seen ' + seen + ' threaded ' + eng.threaded + ' cnt ' + eng.peek16(0x4000) + ' pix ' + eng.pix().w + 'x' + eng.pix().h);
+  }
+  fs.writeFileSync(%s, H.synthState({ chip: fs.readFileSync(%s), creg: fs.readFileSync(%s), a: [0, 0, 0, 0, 0, 0, 0, 0x7f000], sr: 0x2000, entry: 0x1000, frame: 100 }));
+})();
+''' % tuple(repr(str(x)) for x in (os.path.join(HOST, 'arek_host_engine_node.js'), tmp_path / 'wa', tmp_path / 'wt', tmp_path / 'state.bin', tmp_path / 'disk.adf',
+                                   tmp_path / 'synth.bin', tmp_path / 'state' / 'chip.bin', tmp_path / 'state' / 'creg.bin')))
+    r = subprocess.run(['node', str(script)], capture_output=True, text=True, timeout=240)
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.strip().splitlines()
+    assert want.startswith('frames 30 ') and lines[0] == want and lines[2] == want, lines
+    assert lines[1].startswith('seen 30 threaded false cnt ') and lines[3].startswith('seen 30 threaded true cnt ') and lines[1].endswith('pix ' + lines[1].split('pix ')[1])
+    assert (tmp_path / 'synth.bin').read_bytes() == (tmp_path / 'state.bin').read_bytes()

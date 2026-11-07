@@ -15,6 +15,7 @@ measured against the original per instruction, with the kit's models behind it:
 | `arek_host_disk.h` | the game's disk reads from images given at run time (`AHD_EXTERN`, below) |
 | `arek_host_engine.c` | the engine of a web page: Emscripten ASYNCIFY, frames on demand, picture / sound / inputs / disks through its API; natively the check line (below) |
 | `arek_host_engine_check.js` | the wasm engine in Node, printing the check line of the native build |
+| `arek_host_engine_node.js` | the harness (1.0.20): the wasm engine in Node for a project's measurements - loader, synthetic start state, keys and events at exact frames, hang guard |
 | `arek_audio.h` | the four channels' bytes as 48 kHz stereo int16 (left 0 + 3, right 1 + 2); 0.8.6: `ARA_GAIN[ch][side]`, `ara_gain(ch, l, r)` at once or `ara_gain_to(ch, l, r)` ramped across the next `ara_until()` - an effect fading a channel or moving it across the stereo picture (Alien Breed II G52); the default matrix keeps the old integer mix bit for bit |
 | `arek_host_trace.c` | the driver: the game from a state of the original with inputs per frame, records in the trace format, `--pclog`, `--own`, `--reglog`, `--audlog`, `--shots` |
 | `arek_display_render.c` | one frame from a RAM image with the C renderer (the tests and the self-test) |
@@ -247,6 +248,24 @@ test builds both (`tests/test_host_engine.py`, emcc and node when installed).
 - Not modelled: NTSC, the blitter's line mode on the bus, Paula's audio interrupts (a host that
   needs AUDx INTREQ bits sets them itself), the CIA timers and TOD (a game that seeds its random
   numbers from CIA-B TOD gets the value from the capture: `docs/METHOD.md` §5), disk DMA.
+
+### The Node harness (1.0.20, `arek_host_engine_node.js`)
+
+A project's measurements (coverage runs, scene checks, pop-in counts) drive the wasm engine from Node; Turrican II's tools
+repeated the loader, the synthetic state and the key schedule ten times. The harness in `arek host copy`'s folder does it once:
+
+```js
+const H = require('./lib/arek_host_engine_node.js');
+const eng = await H.open('build/web/out', { state: H.synthState({ sr: 0x2000, entry: 0x1246, time: 39601, frame: 2645 }), disks: ['d1.adf', 'd2.adf'] });
+eng.schedule('300:16,310:0,1000:1').at(1, () => eng.poke8(0xc7fff0, 1));   // keys from a frame on; an event after frame 1
+await eng.run(2500, (f) => { if (f % 500 === 0) console.log(f, eng.hash()); });
+eng.peek16(0x17e); eng.pix(); eng.dump(0, 0x80000);
+```
+
+`open` finds `engine_mt.js` or `engine.js`; `synthState()` writes the bytes of `arek host pack` (zero RAM unless `chip` / `slow` /
+`creg` are given); an event at frame f runs after frame f is done, before frame f + 1 is allowed - the page's rule, so a
+measurement and a replay see the same game; `run` throws `{ code: 'hung' | 'error' }` instead of waiting for ever. The
+synthetic test drives both wasm builds with it and compares the native check line (`tests/test_host_engine.py`).
 
 ### A scene record from the threaded engine (1.0.16)
 
