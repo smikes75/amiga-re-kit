@@ -34,7 +34,7 @@ _CTL_IX = {'ind': 0, 'd16': 1, 'd8x': 2, 'absw': 3, 'absl': 4, 'pcd16': 5, 'pcd8
 # MOVEM base by addressing class: memory to registers / registers to memory
 _MOVEM_M2R = {'ind': 12, 'post': 12, 'd16': 16, 'd8x': 18, 'absw': 16, 'absl': 20, 'pcd16': 16, 'pcd8x': 18}
 _MOVEM_R2M = {'ind': 8, 'pre': 8, 'd16': 12, 'd8x': 14, 'absw': 12, 'absl': 16}
-_FIXED = {'nop': 4, 'rts': 16, 'rte': 20, 'link': 16, 'unlk': 12, 'exg': 6, 'ext': 4,
+_FIXED = {'nop': 4, 'rts': 16, 'rte': 20, 'trap': 34, 'link': 16, 'unlk': 12, 'exg': 6, 'ext': 4,
           'swap': 4, 'moveq': 4, 'bra': 10, 'bsr': 18}
 
 
@@ -237,7 +237,7 @@ _CTL_RW = {'jmp': ((2, 0), (2, 0), (3, 0), (2, 0), (3, 0), (2, 0), (3, 0)),
            'pea': ((1, 2), (2, 2), (2, 2), (2, 2), (3, 2), (2, 2), (2, 2))}
 _MOVEM_R_M2R = {'ind': 3, 'post': 3, 'd16': 4, 'd8x': 4, 'absw': 4, 'absl': 5, 'pcd16': 4, 'pcd8x': 4}
 _MOVEM_R_R2M = {'ind': 2, 'pre': 2, 'd16': 3, 'd8x': 3, 'absw': 3, 'absl': 4}
-_FIXED_RW = {'nop': (1, 0), 'rts': (4, 0), 'rte': (5, 0), 'link': (2, 2), 'unlk': (3, 0), 'exg': (1, 0),
+_FIXED_RW = {'nop': (1, 0), 'rts': (4, 0), 'rte': (5, 0), 'trap': (4, 3), 'link': (2, 2), 'unlk': (3, 0), 'exg': (1, 0),
              'ext': (1, 0), 'swap': (1, 0), 'moveq': (1, 0), 'bra': (2, 0), 'bsr': (2, 2)}
 
 
@@ -351,7 +351,9 @@ def performed(i):
     if k in ('jsr', 'bsr', 'pea', 'link', 'unlk'):
         return 2
     if k == 'rte':
-        return 1                                       # the SR; the return address is not read
+        return 1                                       # the SR; the return address is read raw
+    if k == 'trap':
+        return 5                                       # the frame (3 words) and the vector (2)
     if k == 'movem':
         return bin(i.mask).count('1') * W
     if k == 'sr':

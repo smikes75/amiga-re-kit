@@ -22,6 +22,14 @@ When a knowledge base is set up (`AREK_KB`: `arek kb search`, `get`, `add`; the 
 Proposals land in the base's inbox and become records after review. A brief that measures a model on a clean start
 (no knowledge of other games) leaves `AREK_KB` unset.
 
+## Tasks with stacks of their own, and the CPU itself (kit 1.0.26)
+
+A game that switches tasks by loading another a7 and doing `rte` or `rts` (a scheduler with a ring of task records) needs
+`arek recomp --resume`; without it the stacked PC of a sleeping task is not an entry and the run stops at `unknown
+routine`. TRAP handlers are found through their vectors at run time: make them roots. When the translation and the
+original differ in a way no routine explains, `arek difftest` tells whether the kit's 68000 is at fault before anyone
+reads the game's code.
+
 ## The milestones
 
 | | milestone | done when | the trap the rebuilds met |

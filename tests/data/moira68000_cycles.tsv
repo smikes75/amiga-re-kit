@@ -993,3 +993,5 @@ e3a8	{"count": 64}	8	lsl.l m->d[1] & 63,d0
 08400023	{"count": 35}	10	bchg
 08800023	{"count": 35}	12	bclr
 08c00023	{"count": 35}	10	bset
+4e40	{}	34	trap #0
+4e4f	{}	34	trap #15

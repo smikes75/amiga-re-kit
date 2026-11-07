@@ -319,6 +319,8 @@ def decode(data, base, addr):
             return Insn(addr, r.pc, 'tst', sz=sz2, ea=e, text='tst.%s %s' % (SZNAME[sz2], e.text))
         if op == 0x4e73:
             return Insn(addr, r.pc, 'rte', text='rte')
+        if (op & 0xfff0) == 0x4e40:                 # TRAP #n: through the vector at $80 + 4n, then behind it
+            return Insn(addr, r.pc, 'trap', vec=op & 15, text='trap #%d' % (op & 15))
         if (op & 0xffc0) in (0x40c0, 0x44c0, 0x46c0):       # MOVE SR/CCR
             e = ea(SZ_W)
             which = {0x40c0: 'from_sr', 0x44c0: 'to_ccr', 0x46c0: 'to_sr'}[op & 0xffc0]

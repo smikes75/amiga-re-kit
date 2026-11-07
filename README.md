@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.25 on PyPI, 2587 tests. Extracted from five game
+- **The kit:** version 1.0.26 on PyPI, 2613 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -47,7 +47,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2587 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2613 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -153,6 +153,9 @@ arek web test http://localhost:8911/?test=1            # ... and §6: the menu a
 arek bus     copy lib/                                 # the model's C sources into a rebuild (arek_bus_glue.h behind the translation's hooks)
 arek recomp  main.bin --base c00000 --auto c00000 --timing --bus-table --out game.c   # bus table: words, extra accesses, flags per instruction
 arek roots   main.bin --base c00000 --lo c00fa0 --hi c58a8c --json roots.json        # static roots of a whole game (slot tables, pointer tables, stored handlers)
+arek recomp  main.bin --base c00000 --auto-file roots.txt --resume --out game.c       # 1.0.26: tasks with their own stacks (rte / rts into another task)
+arek difftest --moira ~/src/vamiga                    # 1.0.26: every opcode through the translation and through Moira, vAmiga's 68000
+arek difftest --corpus cases.txt.gz                   # the same against recorded results: a C compiler is enough
 arek recomp  main.bin --base c00000 --auto-file roots.txt --auto-soft --out game.c    # a root into data is dropped, not refused
 arek selftest bus                                      # the model against this VAHeadless's bus log (synthetic program, BLTPRI blits)
 arek selftest audio                                    # the Paula model (audio DMA slots, output bytes) against this VAHeadless's logs
@@ -184,6 +187,7 @@ asks for (see `examples/profile.example.json`).
 | `arek.m68k.cover`, `arek.fuzz` | coverage of a translation run (`recomp --cover`: one bit per translated instruction, `arek cover` lists what never ran) and deterministic random joystick input (`arek fuzz`, one file for `trace run --inputs` and the rebuild) - where a long random run stalls, a bug hides | Superfrog |
 | `arek.bus` (`src/arek/bus/*.c`) | the Amiga bus per DMA slot: who owns each slot, the blitter cycle by cycle, the CPU by the accesses of its instructions - on which instruction an interrupt lands, when a blit ends, whether the original overran the frame; `arek_bus_vamiga.c` is MPL-2.0 (derived from vAmiga) | Alien Breed |
 | `arek.m68k.timing.bus` | bus cycles n(r/w) of every instruction, opcode and extension words included - what a model of the Amiga bus per DMA slot needs beyond the clock count | Alien Breed |
+| `arek.m68k.difftest` (`arek difftest`) | the translation against Moira, the 68000 of vAmiga, opcode by opcode: registers, flags, memory, where it ended and the clock count; a recorded corpus replays without Moira (1.0.26) | all of them |
 | `arek.kb` (`arek kb`, MCP `kb_search` / `kb_get` / `kb_add`) | the knowledge base of the rebuilds: records of what was measured and learned (symptom, cause, check, resolution, evidence), searched by the words of the log an agent sees; the base is a folder of the user's (`AREK_KB`), the kit only reads, searches and proposes | all the rebuilds |
 | `docs/REBUILD-PLAYBOOK.md`, `host/arek_host_engine_node.js` | the method of the whole-game rebuilds (milestones, the start from the disks without a Kickstart, module discovery, the page's events at exact frames, the scene record, the public build checklist) and the Node harness that drives the wasm engine for a project's measurements | Alien Breed II, Superfrog, Turrican II |
 | `host/` (`arek host copy`) | the host of a translation: time from the bus model, the beam, interrupts 1-6, CIA-A with the E clock, Paula, the picture line by line in C (`arek_display.h`, 0 px against the emulator), the trace driver (`arek_host_trace.c`), `arek host state` from a capture, disk images at run time (`arek_host_disk.h`), a data disk the game writes (`arek_host_datadisk.h`), the web engine (`arek_host_engine.c`, Emscripten ASYNCIFY, `arek host engine`, held against its native build by `arek_host_engine_check.js`) (`docs/HOST.md`) | Alien Breed II |

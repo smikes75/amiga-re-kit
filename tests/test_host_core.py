@@ -606,3 +606,63 @@ def test_engine_key_raises_ports():
     i = src.index('static void e_apply_keys(void)')
     body = src[i:src.index('\n}', i)]
     assert 'H_CIAA_ICR |= 0x08' in body and 'h_cia_raise(0)' in body
+
+
+TASKS = {
+    COPLIST: 'fffffffe',
+    MAIN: '4df900dff000'          # lea $dff000,a6
+          '3d7cc020009a'          # move.w #$c020,$9a(a6)    INTENA: master + VERTB
+          '52b84000'              # 100c: addq.l #1,$4000
+          '20384000'              # move.l $4000,d0           this task's counter
+          '22384004'              # move.l $4004,d1           the other's
+          '60f2',                 # bra.s 100c
+    0x1040: '52b84004'            # the other task: addq.l #1,$4004
+            '60fa',               # bra.s 1040
+    L3: '33fc002000dff09c'        # move.w #$20,$dff09c       clear VERTB
+        '2b4f000e'                # move.l a7,14(a5)          the interrupted task's frame stays on its stack
+        '2a55'                    # movea.l (a5),a5           the next task
+        '2e6d000e'                # movea.l 14(a5),a7
+        '4e73',                   # rte
+    0x3000: '00003100',           # +0 next
+    0x3100: '00003000',
+    0x310e: '00004ffa',           # +14 saved a7: the start frame of the task not run yet
+    0x4ffa: '200000001040',
+}
+
+
+def test_host_with_preemptive_tasks(tmp_path):
+    """1.0.26 --resume: an interrupt handler that rte's into the other task. The C frames of the interrupted task are
+    dropped, its stacked PC is an arbitrary instruction, the interrupt depth is back at 0 (records need it)."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    img = bytearray(0x5000)
+    for at, hx in TASKS.items():
+        img[at:at + len(hx) // 2] = bytes.fromhex(hx)
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN, 0x1040, L3], timing=True, bus_table=True, resume=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x100cu',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', '-DHOST_L3_PC=0x1100u',
+                    os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'),
+                    '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', 0x0200)
+    creg[0x82:0x84] = struct.pack('>H', COPLIST)
+    (st / 'creg.bin').write_bytes(creg)
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 3000 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
+    out = tmp_path / 'run.vtr'
+    r = subprocess.run([str(exe), str(st), str(out), '9', '--full'], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    recs = [x for x in trace.records(str(out)) if x['pc'] == 0x100c]
+    assert len(recs) > 100                                 # records need the interrupt depth back at 0 after the switch
+    frames = sorted({x['frame'] for x in recs})
+    assert len(frames) >= 3 and frames[-1] - frames[0] >= 4          # every second frame is this task's
+    assert recs[-1]['d'][0] > recs[10]['d'][0] > 0         # its counter goes on
+    assert recs[-1]['d'][1] > recs[10]['d'][1]             # and the other task's, on the other frames

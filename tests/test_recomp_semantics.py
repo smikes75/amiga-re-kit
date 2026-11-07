@@ -80,10 +80,10 @@ CASES = [
     ('c1c1', {'d0': 0xfffe, 'd1': 3}, '00000', 0xfffffffa, '.N...'),
     # divs.w d1,d0: -7 / 2 = -3 remainder -1
     ('81c1', {'d0': 0xfffffff9, 'd1': 2}, '00000', 0xfffffffd, '.N...'),
-    # divs.w d1,d0: overflow leaves d0, sets V
-    ('81c1', {'d0': 0x10000000, 'd1': 1}, '00000', 0x10000000, '...V.'),
-    # divu.w d1,d0: overflow leaves d0, sets V, clears C
-    ('80c1', {'d0': 0x10000000, 'd1': 1}, '00001', 0x10000000, '...V.'),
+    # divs.w d1,d0: overflow leaves d0, sets V, and N as the 68000 does (1.0.26, Moira)
+    ('81c1', {'d0': 0x10000000, 'd1': 1}, '00000', 0x10000000, '.N.V.'),
+    # divu.w d1,d0: overflow leaves d0, sets V and N, clears Z and C
+    ('80c1', {'d0': 0x10000000, 'd1': 1}, '00101', 0x10000000, '.N.V.'),
 ]
 
 
@@ -511,3 +511,115 @@ def test_rts_with_two_pushed_targets_runs_both(tmp_path):
             '7005' '4e75' + '4e71' * 6 + '7206')                    # $1020 moveq #5,d0; rts | $1030 moveq #6,d1 (+ rts)
     d, a, f, ram = run(tmp_path, code, {}, auto=(BASE, 0x1020, 0x1030))
     assert d[0] == 5 and d[1] == 6
+
+
+# ------------------------------------------------------------------ 1.0.26: TRAP, rte, --resume
+def be32(v):
+    return v.to_bytes(4, 'big')
+
+
+def test_trap_runs_the_vector_and_comes_back_behind_it(tmp_path):
+    # 1000 trap #3 ; 1002 move sr,d3 ; 1004 moveq #1,d1 ; 1006 rts
+    # 1008 move sr,d2 ; 100a moveq #5,d0 ; 100c rte      <- the handler, found through the vector at run time
+    code = '4e43 40c3 7201 4e75 40c2 7005 4e73'.replace(' ', '')
+    d, a, _, ram = run(tmp_path, code, {}, '11111', auto=(BASE, 0x1008), ram_init={0x8c: be32(0x1008)})
+    top = 0x80000 - 0x100
+    assert (d[0], d[1]) == (5, 1)
+    assert d[2] == 0x201f                                  # the handler runs supervisor, the flags are the caller's
+    assert d[3] == 0x001f                                  # rte gave back SR with the flags the handler changed
+    assert a[7] == top + 4
+    assert ram[top - 6:top] == bytes.fromhex('001f') + be32(0x1002)   # the 68000's frame
+
+
+def test_trap_handler_replacing_the_stacked_pc(tmp_path):
+    # 1000 trap #0 ; 1002 moveq #1,d1 ; 1004 rts
+    # 1006 move.l #$1010,2(a7) ; 100e rte                 <- the handler goes on elsewhere
+    # 1010 moveq #7,d2 ; 1012 rts                          <- pops the return address of the routine at 1000
+    code = '4e40 7201 4e75 2f7c00001010 0002 4e73 7407'.replace(' ', '')
+    d, a, _, _ = run(tmp_path, code, {}, auto=(BASE, 0x1006, 0x1010), ram_init={0x80: be32(0x1006)})
+    assert (d[1], d[2]) == (0, 7) and a[7] == 0x80000 - 0x100 + 4
+
+
+def test_rte_goes_to_a_frame_the_routine_pushed(tmp_path):
+    # 1000 move.l #$100a,-(a7) ; 1006 move sr,-(a7) ; 1008 rte ; 100a moveq #1,d0 ; 100c rts
+    code = '2f3c0000100a 40e7 4e73 7001'.replace(' ', '')
+    d, a, _, _ = run(tmp_path, code, {}, auto=(BASE, 0x100a))
+    assert d[0] == 1 and a[7] == 0x80000 - 0x100 + 4
+
+
+def test_rte_from_a_routine_called_by_the_handler_still_unwinds(tmp_path):
+    # 1000 bsr 1008 ; 1004 moveq #1,d0 ; 1006 rts         <- the frame the routine at 1008 pops is the driver's caller's
+    # 1008 addq.l #4,a7 ; 100a rte
+    code = '6100 0006 7001 4e75 588f 4e73'.replace(' ', '')
+    top = 0x80000 - 0x100
+    d, a, _, _ = run(tmp_path, code, {'a7': top}, ram_init={top: bytes.fromhex('2000') + be32(0x2000)})
+    assert d[0] == 0 and a[7] == top + 6
+
+
+def task_ram(stack_b, rts_frame=False):
+    """Two records in a ring as SWIV's (+0 next, +14 saved a7), task B not started yet: its stack holds a start frame."""
+    frame = be32(0x1016) if rts_frame else bytes.fromhex('2000') + be32(0x1016)
+    sp = stack_b - len(frame)
+    return {0x3000: be32(0x3100), 0x3100: be32(0x3000), 0x3100 + 14: be32(sp), sp: frame}
+
+
+def tasks(limit, yield_ends_in='4e73', push_sr='40e7'):
+    """Two loops, each counting and yielding from one routine deeper; the first ends the run at `limit`:
+    1000 addq.l #1,$2000.w ; 1004 cmpi.l #limit,$2000.w ; 100c bge.s 1014 ; 100e bsr 1020 ; 1012 bra.s 1000 ; 1014 nop (exit)
+    1016 addq.l #1,$2004.w ; 101a bsr 1020 ; 101e bra.s 1016
+    1020 bsr yield ; 1024 rts
+    yield: [move sr,-(a7)] ; move.l a7,14(a5) ; movea.l (a5),a5 ; movea.l 14(a5),a7 ; rte or rts"""
+    return ('52b82000 0cb8%08x2000 6c06 61000010 60ec 4e71 52b82004 61000004 60f6 61000004 4e75' % limit
+            + push_sr + '2b4f000e 2a55 2e6d000e' + yield_ends_in).replace(' ', '')
+
+
+@pytest.mark.parametrize('stack_b', [0x5000, 0x7ff80], ids=['below', 'above'])
+def test_two_tasks_switching_through_rte(tmp_path, stack_b):
+    n = 300000                                             # a C frame per switch would not fit the C stack
+    d, a, _, ram = run(tmp_path, tasks(n), {'a5': 0x3000}, auto=(BASE, 0x1016), flow=Flow(exits=[0x1014]), resume=True,
+                       ram_init=task_ram(stack_b))
+    assert int.from_bytes(ram[0x2000:0x2004], 'big') == n
+    assert int.from_bytes(ram[0x2004:0x2008], 'big') == n - 1
+
+
+@pytest.mark.parametrize('stack_b', [0x5000, 0x7ff80], ids=['below', 'above'])
+def test_two_tasks_switching_through_rts(tmp_path, stack_b):
+    n = 300000
+    _, _, _, ram = run(tmp_path, tasks(n, '4e75', ''), {'a5': 0x3000}, auto=(BASE, 0x1016), flow=Flow(exits=[0x1014]),
+                       resume=True, ram_init=task_ram(stack_b, rts_frame=True))
+    assert int.from_bytes(ram[0x2000:0x2004], 'big') == n
+    assert int.from_bytes(ram[0x2004:0x2008], 'big') == n - 1
+
+
+def test_a_task_switch_without_resume_names_the_address(tmp_path):
+    with pytest.raises(subprocess.CalledProcessError) as e:
+        run(tmp_path, tasks(100), {'a5': 0x3000}, auto=(BASE, 0x1016), flow=Flow(exits=[0x1014]), ram_init=task_ram(0x5000))
+    assert e.value.returncode == 4                         # unknown routine 001024: the stacked PC is inside a routine
+
+
+def test_resume_keeps_ordinary_returns(tmp_path):
+    # the handler's plain rte under TASK_RUN: the run ends where it would without --resume
+    code = '4e43 40c3 7201 4e75 40c2 7005 4e73'.replace(' ', '')
+    d, a, _, _ = run(tmp_path, code, {}, '11111', auto=(BASE, 0x1008), ram_init={0x8c: be32(0x1008)}, resume=True)
+    assert (d[0], d[1], d[2], d[3]) == (5, 1, 0x201f, 0x001f) and a[7] == 0x80000 - 0x100 + 4
+
+
+def test_resume_pushed_target_and_profile_refused(tmp_path):
+    # after a jump the run has no C caller to return to: it ends at an exit (or the host's stop)
+    d, a, _, _ = run(tmp_path, '2f3c0000100a 40e7 4e73 7001 4e71'.replace(' ', ''), {}, auto=(BASE, 0x100a), resume=True,
+                     flow=Flow(exits=[0x100c]))
+    assert d[0] == 1 and a[7] == 0x80000 - 0x100
+    with pytest.raises(ValueError, match='--resume'):
+        recomp.generate(bytes.fromhex('4e75'), BASE, auto=[BASE], profile=True, resume=True)
+
+
+def test_resume_module_and_cli(tmp_path):
+    src, _, _ = recomp.generate(bytes.fromhex('7001 4e71 4e75'.replace(' ', '')), 0x8000, auto=[0x8000], resume=True,
+                                flow=Flow(lib=True, prefix=('m_', 0x8000, 0x8006), module=(0x8000, 6)))
+    assert 'a --resume module needs' in src and 'case 0x8002u: RESUME_PC = 0x8002u; f_m_008000(m); return;' in src
+    p = tmp_path / 'p.bin'
+    p.write_bytes(bytes.fromhex('7001 4e71 4e75'.replace(' ', '')))
+    out = tmp_path / 'o.c'
+    assert cli.main(['recomp', str(p), '--base', '0x1000', '--auto', '0x1000', '--resume', '-o', str(out)]) == 0
+    text = out.read_text()
+    assert '#define AREK_RESUME 1' in text and 'case 0x1002u: RESUME_PC = 0x1002u; f_001000(m); return;' in text

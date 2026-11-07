@@ -182,7 +182,11 @@ int main(int argc, char **argv) {
     if (NINP) apply_input(0);
     if (!setjmp(DONE)) {
         if (entry != TICK_PC) fprintf(stderr, "note: the state's pc %x is not TICK_PC %x; the run starts in HOST_ENTRY\n", entry, (unsigned)TICK_PC);
+#ifdef AREK_RESUME
+        TASK_RUN(&m, HOST_ENTRY(&m), H_IRQ_DEPTH = 0);
+#else
         HOST_ENTRY(&m);
+#endif
         fprintf(stderr, "the entry routine returned (the level ended?)\n");
     }
     fclose(OUTF);

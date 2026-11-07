@@ -205,9 +205,54 @@ def engine_command(out_dir, game, l3, entry, cc=None, native=False, dynamic=Fals
     return cmd
 
 
+WASM_FUNCTION_LIMIT = 7654321           # V8 refuses a larger function body
+
+
+def wasm_largest_function(path):
+    """The size in bytes of the largest function body of a wasm file (0 without a code section)."""
+    with open(path, 'rb') as f:
+        b = f.read()
+
+    def leb(p):
+        v = sh = 0
+        while True:
+            c = b[p]
+            p += 1
+            v |= (c & 0x7f) << sh
+            sh += 7
+            if not c & 0x80:
+                return v, p
+    pos = 8
+    while pos < len(b):
+        sid = b[pos]
+        size, pos = leb(pos + 1)
+        if sid == 10:
+            n, p = leb(pos)
+            big = 0
+            for _ in range(n):
+                sz, p = leb(p)
+                big = max(big, sz)
+                p += sz
+                if p >= len(b):
+                    break
+            return big
+        pos += size
+    return 0
+
+
 def engine_build(out_dir, *args, **kw):
-    """Run ``engine_command``; returns the command. Raises CalledProcessError when the compiler fails."""
+    """Run ``engine_command``; returns the command. Raises CalledProcessError when the compiler fails. A big translation
+    can get hundreds of routines inlined into one wasm function above V8's limit (Xenon 2, 17 MB of C: 8.2 MB in one
+    function, ``CompileError`` at instantiation): such a build is made again with ``-fno-inline-functions``."""
     os.makedirs(out_dir, exist_ok=True)
     cmd = engine_command(out_dir, *args, **kw)
     subprocess.run(cmd, check=True)
+    if cmd[0] == 'emcc' and '-fno-inline-functions' not in cmd:
+        wasm = os.path.splitext(cmd[cmd.index('-o') + 1])[0] + '.wasm'
+        big = wasm_largest_function(wasm) if os.path.exists(wasm) else 0
+        if big > WASM_FUNCTION_LIMIT:
+            print('a wasm function of %d bytes is above the browsers\' limit of %d: building again with -fno-inline-functions'
+                  % (big, WASM_FUNCTION_LIMIT))
+            cmd = cmd + ['-fno-inline-functions']
+            subprocess.run(cmd, check=True)
     return cmd

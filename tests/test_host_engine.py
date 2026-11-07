@@ -244,3 +244,91 @@ const fs = require('fs'); const H = require(%s);
     assert want.startswith('frames 30 ') and lines[0] == want and lines[2] == want, lines
     assert lines[1].startswith('seen 30 threaded false cnt ') and lines[3].startswith('seen 30 threaded true cnt ') and lines[1].endswith('pix ' + lines[1].split('pix ')[1])
     assert (tmp_path / 'synth.bin').read_bytes() == (tmp_path / 'state.bin').read_bytes()
+
+
+TASKS = {
+    MAIN: '4df900dff000'          # lea $dff000,a6
+          '3d7cc020009a'          # move.w #$c020,$9a(a6)    INTENA: master + VERTB
+          '52b84000'              # 100c: addq.l #1,$4000
+          '60fa',                 # bra.s 100c
+    0x1040: '52b84004'            # the other task: addq.l #1,$4004
+            '60fa',               # bra.s 1040
+    L3: '33fc002000dff09c'        # move.w #$20,$dff09c       clear VERTB
+        '2b4f000e'                # move.l a7,14(a5)
+        '2a55'                    # movea.l (a5),a5           the next task
+        '2e6d000e'                # movea.l 14(a5),a7
+        '4e73',                   # rte
+    0x3000: '00003100',           # +0 next
+    0x3100: '00003000',
+    0x310e: '00004ffa',           # +14 saved a7: the start frame of the task not run yet
+    0x4ffa: '200000001040',
+}
+
+
+def test_tasks_through_the_threaded_engine(tmp_path):
+    """1.0.26 --resume in the build the pages use: a level-3 handler rte's into the other task, frame after frame. The
+    C frames dropped are the game thread's; the Node check of the wasm thread must print the native line."""
+    if not bus.compiler():
+        pytest.skip('no C compiler')
+    img = bytearray(0x5000)
+    for at, hx in TASKS.items():
+        img[at:at + len(hx) // 2] = bytes.fromhex(hx)
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN, 0x1040, L3], timing=True, bus_table=True, resume=True)
+    (tmp_path / 'game.c').write_text(src)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', 0x0200)
+    (st / 'creg.bin').write_bytes(creg)
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 3000 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
+    host.pack(str(st), str(tmp_path / 'state.bin'))
+    host.engine_build(str(tmp_path / 't'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', native=True, thread=True)
+    dump = tmp_path / 'chip.bin'
+    got = subprocess.run([str(tmp_path / 't' / 'arek_host_engine_mt'), str(tmp_path / 'state.bin'), '30', '--dump', str(dump)],
+                         capture_output=True, text=True, timeout=60)
+    assert got.returncode == 0, got.stderr
+    assert got.stdout.strip().startswith('frames 30 ')
+    mem = dump.read_bytes()
+    assert int.from_bytes(mem[0x4000:0x4004], 'big') > 1000 and int.from_bytes(mem[0x4004:0x4008], 'big') > 1000
+    if not (shutil.which('emcc') and shutil.which('node')):
+        return
+    host.engine_build(str(tmp_path / 'w'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', thread=True)
+    r = subprocess.run(['node', os.path.join(HOST, 'arek_host_engine_check.js'), str(tmp_path / 'w'), str(tmp_path / 'state.bin'), '30'],
+                       capture_output=True, text=True, timeout=180)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().splitlines()[-1] == got.stdout.strip()
+
+
+def _wasm(*sizes):
+    def leb(v):
+        out = bytearray()
+        while True:
+            c = v & 0x7f
+            v >>= 7
+            out.append(c | (0x80 if v else 0))
+            if not v:
+                return bytes(out)
+    body = leb(len(sizes)) + b''.join(leb(n) + bytes(min(n, 8)) for n in sizes)
+    return b'\0asm\1\0\0\0' + b'\x01' + leb(3) + bytes(3) + b'\x0a' + leb(len(body)) + body
+
+
+def test_wasm_largest_function_and_the_second_build(tmp_path, monkeypatch):
+    """1.0.26 (Xenon 2 KIT-GAP 5): one wasm function above V8's limit is built again without the inlining, once."""
+    p = tmp_path / 'a.wasm'
+    p.write_bytes(_wasm(5, 9, 3))
+    assert host.wasm_largest_function(str(p)) == 9
+    p.write_bytes(b'\0asm\1\0\0\0')
+    assert host.wasm_largest_function(str(p)) == 0
+    calls = []
+
+    def fake(cmd, check=True):
+        calls.append(cmd)
+        out = cmd[cmd.index('-o') + 1]
+        size = 5 if '-fno-inline-functions' in cmd else host.WASM_FUNCTION_LIMIT + 1
+        (tmp_path / 'w' / os.path.basename(out.replace('.js', '.wasm'))).write_bytes(_wasm(size))
+    monkeypatch.setattr(host.subprocess, 'run', fake)
+    cmd = host.engine_build(str(tmp_path / 'w'), 'game.c', 'f_1', 'f_2')
+    assert len(calls) == 2 and '-fno-inline-functions' in cmd and '-fno-inline-functions' not in calls[0]

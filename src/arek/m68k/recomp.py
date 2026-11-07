@@ -473,7 +473,7 @@ static uint32_t sr_get(M68 *m) {
     return m->srhi | (m->x << 4) | (m->n << 3) | (m->z << 2) | (m->v << 1) | m->c;
 }
 static void sr_set(M68 *m, uint32_t v, int with_hi) {
-    if (with_hi) m->srhi = v & 0xff00;       /* T/S/maska preruseni jen ulozime */
+    if (with_hi) m->srhi = v & 0xa700;       /* T/S/maska preruseni jen ulozime; 1.0.26: the bits a 68000 has */
     m->x = (v >> 4) & 1; m->n = (v >> 3) & 1;
     m->z = (v >> 2) & 1; m->v = (v >> 1) & 1; m->c = v & 1;
 }
@@ -523,44 +523,39 @@ static uint32_t f_subx(M68 *m, uint32_t s, uint32_t d, int sz) {
     if (r) m->z = 0;
     return r;
 }
-/* ABCD/SBCD: X and C from the decimal carry, Z only cleared. N and V are
-   undefined in the Motorola manual; modelled as Musashi does. */
+/* ABCD/SBCD as the 68000 does them, digits above 9 and the undefined N and V included (1.0.26: the arithmetic of Moira,
+   Dirk W. Hoffmann, MIT; arek difftest compares it). Z is only cleared. */
 static uint32_t f_bcd(M68 *m, uint32_t s, uint32_t d, int sub) {
-    uint32_t r, v;
+    uint32_t r, t;
     s &= 0xff; d &= 0xff;
     if (!sub) {
-        r = (s & 15) + (d & 15) + m->x; v = ~r;
-        if (r > 9) r += 6;
-        r += (s & 0xf0) + (d & 0xf0);
-        m->c = m->x = r > 0x99;
-        if (m->c) r -= 0xa0;
-        v &= r;
+        uint32_t lo = (s & 15) + (d & 15) + m->x;
+        r = t = (s & 0xf0) + (d & 0xf0) + lo;
+        if (lo > 9) r += 6;
+        m->x = (r & 0x3f0) > 0x90;
+        if (m->x) r += 0x60;
+        m->v = !(t & 0x80) && (r & 0x80);
     } else {
-        r = (d & 15) - (s & 15) - m->x; v = ~r;
-        if (r > 9) r -= 6;
-        r += (d & 0xf0) - (s & 0xf0);
-        m->c = m->x = r > 0x99;
-        if (m->c) r += 0xa0;
-        v &= ~r;
+        uint32_t lo = (uint16_t)((d & 15) - (s & 15) - m->x), x0 = m->x;
+        r = t = (uint16_t)((d & 0xf0) - (s & 0xf0)) + lo;
+        if (lo & 0xf0) { r -= 6; m->x = ((d - s - 6 - x0) & 0x300) > 0xff; }
+        else m->x = ((d - s - x0) & 0x300) > 0xff;
+        if ((d - s - m->x) & 0x100) r -= 0x60;
+        m->v = (t & 0x80) && !(r & 0x80);
     }
-    m->v = (v >> 7) & 1; m->n = (r >> 7) & 1;
+    m->c = m->x; m->n = (r >> 7) & 1;
     r &= 0xff;
     if (r) m->z = 0;
     return r;
 }
 static uint32_t f_negx(M68 *m, uint32_t d, int sz) {
-    uint32_t s = m->x;                       /* 0 - d - X */
-    uint32_t r = f_sub(m, d, 0, sz);
-    int z0 = m->z;
-    r = f_sub(m, s, r, sz);
-    m->z = z0 && m->z;                       /* Z se jen nuluje, nikdy nenastavuje */
-    return r;
+    return f_subx(m, d, 0, sz);              /* 0 - d - X; 1.0.26: X and C of the whole, not of its second half */
 }
 static void do_divu(M68 *m, int reg, uint32_t src) {
     src &= 0xffff;
     if (src == 0) { fprintf(stderr, "deleni nulou\n"); exit(5); }
     uint32_t q = m->d[reg] / src, r = m->d[reg] % src;
-    if (q > 0xffff) { m->v = 1; m->c = 0; return; }   /* pretecni: registr zustava */
+    if (q > 0xffff) { m->v = 1; m->c = 0; m->n = 1; m->z = 0; return; }   /* pretecni: registr zustava; 1.0.26: N, Z as the 68000 leaves them */
     m->d[reg] = (r << 16) | (q & 0xffff);
     m->n = (q >> 15) & 1; m->z = (q == 0); m->v = 0; m->c = 0;
 }
@@ -568,9 +563,9 @@ static void do_divu(M68 *m, int reg, uint32_t src) {
 static void do_divs(M68 *m, int reg, uint32_t src) {
     int32_t sv = (int16_t)(src & 0xffff), dv = (int32_t)m->d[reg];
     if (sv == 0) { fprintf(stderr, "deleni nulou\n"); exit(5); }
-    if (dv == INT32_MIN && sv == -1) { m->v = 1; m->c = 0; return; }
+    if (dv == INT32_MIN && sv == -1) { m->v = 1; m->c = 0; m->n = 1; m->z = 0; return; }
     int32_t q = dv / sv, r = dv % sv;
-    if (q > 32767 || q < -32768) { m->v = 1; m->c = 0; return; }   /* pretecni: registr zustava */
+    if (q > 32767 || q < -32768) { m->v = 1; m->c = 0; m->n = 1; m->z = 0; return; }   /* pretecni: registr zustava */
     m->d[reg] = ((uint32_t)(r & 0xffff) << 16) | ((uint32_t)q & 0xffff);
     m->n = q < 0; m->z = (q == 0); m->v = 0; m->c = 0;
 }
@@ -647,8 +642,7 @@ void call_addr(M68 *m, uint32_t a);
    returns without having popped the routine's own return address (a7 still at or below e0), the chain goes on at the
    long it popped (two pushed targets), as the engine's ENGINE_DYNAMIC loop does. A target that changed nothing (an
    unknown routine under UNKNOWN_HOOK) ends it. */
-static void rts_jump(M68 *m, uint32_t e0) {
-    uint32_t t = RD32_RAW(m->a[7]); m->a[7] += 4;
+static void jump_chain(M68 *m, uint32_t t, uint32_t e0) {
     for (;;) {
         uint32_t before = m->a[7];
         call_addr(m, t);
@@ -656,6 +650,54 @@ static void rts_jump(M68 *m, uint32_t e0) {
         t = RD32_RAW(m->a[7] - 4);
     }
 }
+/* 1.0.26: TRAP - after the handler. A handler that popped more returns this routine too; an unknown handler whose hook
+   returned leaves its frame, which is taken as an empty handler's rte. */
+#define TRAP_END(sp0, ret) do { if (m->a[7] > (sp0) + 6) return; if (m->a[7] == (sp0) && RD32_RAW((sp0) + 2) == (ret)) { sr_set(m, rd16_raw(sp0), 1); m->a[7] = (sp0) + 6; } } while (0)
+#ifdef AREK_RESUME
+/* 1.0.26, recomp --resume: every translated instruction is a target of call_addr (RESUME_PC tells a routine where to go
+   on), so everything the run needs after a jump is on the 68000's own stacks. A jump onto another stack (a task switch
+   through rte or rts) throws the C frames away and goes on at the target: task_jump -> TASK_RUN. A routine that returns
+   there has popped the address it returned to, and the run goes on at that address, whatever stack it is on. */
+#include <setjmp.h>
+static uint32_t RESUME_PC = 0, TASK_PC = 0;
+static jmp_buf TASK_JB;
+static int TASK_ON = 0;
+static void task_jump(M68 *m, uint32_t pc) {
+    (void)m;
+    if (!TASK_ON) { fprintf(stderr, "jump to %06x from outside TASK_RUN\n", pc); exit(4); }
+    TASK_PC = pc;
+    longjmp(TASK_JB, 1);
+}
+/* first: the call that starts the run; a plain return from it ends the run, as without --resume. on_switch: what the
+   host does when C frames are dropped (one may have been an interrupt's). A target that changed nothing is an empty routine. */
+#define TASK_RUN(m, first, on_switch) do { \
+    uint32_t sp_ = (m)->a[7]; \
+    TASK_ON = 1; \
+    if (!setjmp(TASK_JB)) { first; if ((m)->a[7] - sp_ <= 6) break; } \
+    else { on_switch; call_addr((m), TASK_PC); } \
+    for (;;) { \
+        uint32_t b_ = (m)->a[7]; \
+        call_addr((m), RD32_RAW(b_ - 4)); \
+        if ((m)->a[7] == b_) (m)->a[7] += 4; \
+    } \
+} while (0)
+#define RTE_PLAIN(sp, e0, pc, p0) ((sp) == (e0) && (pc) == (p0))
+#define rte_jump(m, pc, e0) task_jump((m), (pc))
+static void rts_jump(M68 *m, uint32_t e0) {
+    uint32_t t = RD32_RAW(m->a[7]); m->a[7] += 4;
+    (void)e0;
+    task_jump(m, t);
+}
+#else
+/* 1.0.26: rte. A frame at or above the routine's entry with its PC unchanged returns in C to whoever entered the
+   exception (H_ENTER, a TRAP); anything else is a jump to the stacked PC, chained as in rts_jump. */
+#define RTE_PLAIN(sp, e0, pc, p0) ((sp) > (e0) || ((sp) == (e0) && (pc) == (p0)))
+#define rte_jump(m, pc, e0) jump_chain((m), (pc), (e0))
+static void rts_jump(M68 *m, uint32_t e0) {
+    uint32_t t = RD32_RAW(m->a[7]); m->a[7] += 4;
+    jump_chain(m, t, e0);
+}
+#endif
 static uint32_t INLINE_RET = 0;     /* where a routine with data after its call returned to */
 
 /* Overlays: code the program loads at run time into an area. Each translated module registers under the FNV-1a 64 of
@@ -689,8 +731,10 @@ class Gen:
         return decoder.STUBS
 
     def __init__(self, data, base, funcs, cfg=None, flow=NOFLOW, timing=False, profile=False, cover=False,
-                 cover_in_tick=False, bus_table=False):
+                 cover_in_tick=False, bus_table=False, resume=False):
         self.data, self.base, self.flow, self.timing = data, base, flow, timing
+        self.resume = resume                             # --resume: every instruction is a target of call_addr
+        self.labels = {}                                 # entry -> [instruction addresses], with resume
         self.bus_table = bus_table and not flow.lib      # the table lives with the main runtime
         self.tab_insns = {}                              # pc -> Insn of every translated instruction
         self.profile = profile and not flow.lib          # the profile lives in the main runtime
@@ -721,6 +765,8 @@ class Gen:
             self.emit(RUNTIME.replace('%%PROFILE%%', cov + (prof or PROFILE_OFF)))
         else:                               # guarded: a main translation included before wins
             self.emit((TIMING_RT if self.timing else '') + WAIT_RT)
+            if self.resume:
+                self.emit('#ifndef AREK_RESUME\n#error "a --resume module needs a --resume main translation"\n#endif')
         for name in sorted(set(self.flow.externs.values())):
             self.emit('void %s(M68 *m);' % name)
         for entry in self.all_entries():
@@ -814,6 +860,7 @@ class Gen:
         self.emit('    switch (a) {')
         for e in sorted(set(self.all_entries())):
             self.emit('    case 0x%xu: %s(m); return;' % (e, self.flow.fname(e)))
+        self.resume_cases(sorted(set(self.all_entries())))
         self.emit('    }')
         for b, n, k in self.flow.overlays:
             self.emit('    if (a - 0x%xu < 0x%xu) { overlay_call(m, a); return; }' % (b, n))
@@ -836,8 +883,10 @@ class Gen:
         name = self.flow.prefix[0] or 'module_%x' % base
         self.emit('static void ovl_%s(M68 *m, uint32_t a) {' % name)
         self.emit('    switch (a) {')
-        for e in sorted(set(x for x in self.all_entries() if self.flow.in_module(x))):
+        own = sorted(set(x for x in self.all_entries() if self.flow.in_module(x)))
+        for e in own:
             self.emit('    case 0x%xu: %s(m); return;' % (e, self.flow.fname(e)))
+        self.resume_cases(own)
         self.emit('    }')
         self.emit('    unknown_call(a);')
         self.emit('}')
@@ -847,6 +896,31 @@ class Gen:
 
     def all_entries(self):
         return [e for _, _, e in self.funcs] + sorted(self.cfg)
+
+    def resume_cases(self, entries):
+        """--resume: the dispatcher's cases for the instructions inside the routines; of several routines holding one
+        instruction (a shared tail) the first will do, all the state is in M68 and RAM."""
+        seen = set(entries)
+        for e in entries:
+            for a in self.labels.get(e, ()):
+                if a not in seen:
+                    seen.add(a)
+                    self.emit('    case 0x%xu: RESUME_PC = 0x%xu; %s(m); return;' % (a, a, self.flow.fname(e)))
+
+    def routine_head(self, entry, insns):
+        """The values rts and rte compare the stack with, and with --resume the way in at any instruction."""
+        kinds = {i.kind for i in insns}
+        if 'rts' in kinds:
+            self.emit('    uint32_t e0 = m->a[7], r0 = RD32_RAW(e0);   /* 1.0.24: rts checks the stack against these */')
+        if 'rte' in kinds:
+            self.emit('    uint32_t %sp0 = RD32_RAW(m->a[7] + 2);   /* 1.0.26: and rte the frame */'
+                      % ('' if 'rts' in kinds else 'e0 = m->a[7], '))
+        if self.resume:
+            self.labels[entry] = [i.addr for i in insns]
+            self.emit('    if (RESUME_PC) { uint32_t r_ = RESUME_PC; RESUME_PC = 0; switch (r_) {')
+            for i in insns:
+                self.emit('        case 0x%xu: goto L%06x;' % (i.addr, i.addr))
+            self.emit('    } }')
 
     def func_head(self, entry):
         """The function head; with the profile the body is a static function wrapped by the
@@ -867,8 +941,7 @@ class Gen:
         idx = {a: k for k, a in enumerate(order)}
         self.emit('/* vstup $%06x, %d instrukci z grafu toku */' % (entry, len(ins)))
         self.emit('%s(M68 *m) {' % self.func_head(entry))
-        if any(x.kind == 'rts' for x in ins.values()):
-            self.emit('    uint32_t e0 = m->a[7], r0 = RD32_RAW(e0);   /* 1.0.24: rts checks the stack against these */')
+        self.routine_head(entry, [ins[a] for a in order])
         if order and order[0] != entry:
             self.emit('    goto L%06x;' % entry)
         for k, a in enumerate(order):
@@ -895,21 +968,18 @@ class Gen:
         self.emit('}')
         self.emit()
 
-    def _has_rts(self, start, end):
-        addr = start
+    def _insns(self, start, end):
+        out, addr = [], start
         while addr < end:
-            i = decode(self.data, self.base, addr)
-            if i.kind == 'rts':
-                return True
-            addr = i.end
-        return False
+            out.append(decode(self.data, self.base, addr))
+            addr = out[-1].end
+        return out
 
     def gen_func(self, start, end, entry):
         self.emit('/* $%06x - $%06x, vstup $%06x */' % (start, end, entry))
         self.emit('%s(M68 *m) {' % self.func_head(entry))
         self.cur = entry
-        if self._has_rts(start, end):
-            self.emit('    uint32_t e0 = m->a[7], r0 = RD32_RAW(e0);   /* 1.0.24: rts checks the stack against these */')
+        self.routine_head(entry, self._insns(start, end))
         if entry != start:
             self.emit('    goto L%06x;' % entry)
         addr = start
@@ -1068,8 +1138,8 @@ class Gen:
             pre(i.ea)
             L.append('push32(m, %s);' % i.ea.addr)
         elif k == 'link':
-            if i.an == 7:                              # pushes the already decremented a7
-                L.append('m->a[7] -= 4; wr32(m->a[7], m->a[7]); m->a[7] = (uint32_t)(m->a[7] + (%d));' % i.disp)
+            if i.an == 7:                              # 1.0.26: pushes a7 as it was before the decrement (Moira)
+                L.append('m->a[7] -= 4; wr32(m->a[7], m->a[7] + 4); m->a[7] = (uint32_t)(m->a[7] + (%d));' % i.disp)
             else:
                 L.append('push32(m, m->a[%d]); m->a[%d] = m->a[7]; m->a[7] = (uint32_t)(m->a[7] + (%d));'
                          % (i.an, i.an, i.disp))
@@ -1144,7 +1214,7 @@ class Gen:
                         else:
                             L.append('%s = rd32(ma%06x);' % (tgt, i.addr))
                         L.append('ma%06x += %d;' % (i.addr, step))
-                if not in_list:      # kdyz je bazovy registr v seznamu, plati nactena hodnota
+                if not in_list or i.mode == 4:      # kdyz je bazovy registr v seznamu, plati nactena hodnota; 1.0.26: not when writing
                     L.append('m->a[%d] = ma%06x;' % (i.reg, i.addr))
             else:
                 pre(i.ea)
@@ -1164,11 +1234,16 @@ class Gen:
                         L.append('%s = rd32(ma%06x + %d);' % (tgt, i.addr, off))
                     off += step
         elif k == 'rte':
-            L.append('{ uint32_t sp = m->a[7]; uint32_t sr = rd16(sp);')
-            L.append('  m->srhi = sr & 0xff00; m->x = (sr >> 4) & 1; m->n = (sr >> 3) & 1;')
+            L.append('{ uint32_t sp = m->a[7]; uint32_t sr = rd16(sp); uint32_t pc_ = RD32_RAW(sp + 2);')
+            L.append('  m->srhi = sr & 0xa700; m->x = (sr >> 4) & 1; m->n = (sr >> 3) & 1;')
             L.append('  m->z = (sr >> 2) & 1; m->v = (sr >> 1) & 1; m->c = sr & 1;')
-            L.append('  m->a[7] = sp + 6; }')
+            L.append('  m->a[7] = sp + 6;')
+            L.append('  if (!RTE_PLAIN(sp, e0, pc_, p0)) { rte_jump(m, pc_, e0); return; } }')
             L.append('return;')
+        elif k == 'trap':
+            L.append('{ uint32_t sr = sr_get(m), sp0; push32(m, 0x%xu); m->a[7] -= 2; wr16(m->a[7], sr); sp0 = m->a[7];' % i.end)
+            L.append('  m->srhi = (m->srhi & 0x7f00u) | 0x2000u; call_addr(m, rd32(0x%xu)); TRAP_END(sp0, 0x%xu); }'
+                     % (0x80 + 4 * i.vec, i.end))
         elif k == 'sr':
             pre(i.ea)
             if i.which == 'from_sr':
@@ -1440,7 +1515,11 @@ int main(int argc, char **argv) {
     if (fscanf(f, "%63s", name) != 1) return 1;
     if (fscanf(f, "%x", &ret) == 1) push32(&m, ret);   /* jako bsr od volajiciho */
     fclose(f);
+#ifdef AREK_RESUME
+    if (!setjmp(EXIT_JB)) TASK_RUN(&m, ENTRY(name, &m), (void)0);
+#else
     if (!setjmp(EXIT_JB)) ENTRY(name, &m);
+#endif
     f = fopen(argv[3], "wb"); fwrite(MEM, 1, MEMSZ, f); fclose(f);
 #if SLOWSZ
     if (argc > 6) { f = fopen(argv[6], "wb"); fwrite(SLOW, 1, SLOWSZ, f); fclose(f); }
@@ -1567,7 +1646,7 @@ def refusal_json(e):
 
 def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow=NOFLOW,
              stub_impl=None, timing=False, memsz=None, slow=None, profile=False, cover=None, oob='stop',
-             cover_in_tick=False, bus_table=False, auto_soft=False, report=None):
+             cover_in_tick=False, bus_table=False, auto_soft=False, report=None, resume=False):
     """Return (c_source, stats, entries). ``funcs`` are (start, end, entry) linear ranges,
     ``auto`` are entry addresses whose bodies are discovered by walking the
     flow graph (transitively over bsr/jsr). ``flow`` (a decoder.Flow) carries what the
@@ -1600,6 +1679,10 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
     data, as a static root scan produces) is dropped with a note instead of refusing the whole
     translation; ``report`` (a dict) gets ``{'dropped': [(root, why)]}``. Frontiers inside routines the
     roots reach still refuse.
+    ``resume``: for a game whose tasks switch stacks (rte or rts into another task): every translated instruction is a
+    target of call_addr, and a jump onto another stack drops the C frames and goes on at the target through TASK_RUN,
+    which the host wraps around its first call (the kit's hosts and the driver do). Larger code; not with ``profile``,
+    whose counters need the C frames.
     Raises Unsupported / SystemExit-free."""
     hi = min(hi if hi is not None else base + len(data), base + len(data))
     lo = max(lo, base)                           # nothing outside the image can be walked
@@ -1655,7 +1738,9 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
             raise Unsupported(first, found)
     if oob not in ('stop', 'zero'):
         raise ValueError("oob is 'stop' or 'zero'")
-    g = Gen(data, base, list(funcs), cfg, flow, timing, profile, cover is not None, cover_in_tick, bus_table)
+    if resume and profile:
+        raise ValueError('--profile counts through the C frames that --resume drops')
+    g = Gen(data, base, list(funcs), cfg, flow, timing, profile, cover is not None, cover_in_tick, bus_table, resume)
     src = g.gen()
     if cover is not None:
         cover['lo'] = base
@@ -1680,6 +1765,8 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
         raise ValueError('memsz/slow belong to the main translation, not to a --lib module')
     if oob == 'zero' and not flow.lib:
         mem += '#define OOB_ZERO 1\n'
+    if resume and not flow.lib:
+        mem += '#define AREK_RESUME 1\n'
     if memsz is not None:
         mem += '#define MEMSZ 0x%xu\n' % memsz
     if slow is not None:

@@ -93,6 +93,33 @@ were an empty routine. The source of every two-operand
 instruction is read before the destination's `(An)+` / `-(An)` moves the register (1.0.23). A static target of such a
 jump is a root (`arek roots` lists `pea` and immediate addresses); a run-time one reaches `unknown_call`.
 
+Exceptions the same way (1.0.26). `TRAP #n` writes the 68000's frame (PC behind it, SR), sets S and calls the routine whose
+address is in the vector at `$80 + 4n` at run time; the handler is a root like any other. `rte` reads SR and the stacked
+PC: a frame at the routine's entry with its PC unchanged is a plain C return to whoever entered the exception (the host's
+interrupt, a TRAP); a frame the routine pushed, or a PC it replaced, is a jump there, chained as for `rts`.
+
+A game whose tasks have stacks of their own (S.W.I.V.: a ring of task records, the yield saves a7 in one and takes the
+next one's, then `rte`) cannot keep its run on the C stack: each switch would leave the C frames of a task that is now
+asleep. `arek recomp --resume` makes every translated instruction a target of `call_addr` (a routine goes on at the label
+`RESUME_PC` names), so all the run needs is on the 68000's own stacks; a jump onto another stack (`rte` or `rts` that does
+not return to the caller) drops the C frames and goes on at the target through `TASK_RUN`, which the kit's hosts and the
+driver wrap around their first call. Pre-emptive switches from an interrupt handler work too: the stacked PC can be any
+instruction, and the host's interrupt depth is reset. The cost is code size (a `switch` per routine) and a `longjmp` per
+switch; a run that switched ends at an exit or the host's stop, as there is no C caller left to return to.
+
+### Checking the translation against the 68000
+
+`arek difftest --moira DIR` builds Moira, the CPU of vAmiga (from its source, MIT), and runs every opcode the decoder
+accepts on both: the same registers, SR and RAM, one instruction (the branches, calls, `rts`, `rte` and `TRAP` with a
+place to go), then registers, flags, memory, where it ended and the clock count must agree. Cases where Moira takes an
+exception other than TRAP, touches anything above the mirrored chip RAM or writes into the instruction itself are not
+compared: the translation has no such exceptions by design. About 120 000 cases run in half a minute. The first run
+found five slips that games had not shown: `negx` lost the carry of its first half, `divu`/`divs` overflow left N and Z,
+ABCD/SBCD with digits above 9 and their V flag, `movem` to `-(An)` with An in the list, and SR bits a 68000 does not
+have; `link a7` now pushes a7 as Moira does. It also lists the legal 68000 instructions the decoder still refuses
+(`chk`, `movep`, `nbcd`, `tas`, `move usp`, `rtr`, `trapv`, `stop`, `reset`). `--record FILE` keeps a sample with
+Moira's results; `--corpus FILE` replays one with a C compiler alone, which is what the kit's tests do.
+
 With `--main` the C file gets a driver: *RAM dump + registers in → routine →
 RAM dump + write log out*. That is the verification loop:
 

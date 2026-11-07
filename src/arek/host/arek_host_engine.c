@@ -205,7 +205,11 @@ API int engine_init(const uint8_t *p, int n) {
 }
 API int engine_set_disk(int n, const uint8_t *p, int len) { return ahd_set(n, p, len); }
 static void g_game(void) {
+#ifdef AREK_RESUME
+    TASK_RUN(&E_M, HOST_ENTRY(&E_M), H_IRQ_DEPTH = 0);
+#else
     HOST_ENTRY(&E_M);
+#endif
 #ifdef ENGINE_DYNAMIC
     for (;;) { uint32_t next = ((uint32_t)rd16_raw(E_M.a[7] - 4) << 16) | rd16_raw(E_M.a[7] - 2); call_addr(&E_M, next); }
 #endif

@@ -266,7 +266,7 @@ def hwscan(path: str, base: str, roots: list, lo: str = None, hi: str = None,
 @mcp.tool()
 def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = None,
            stubs: list = None, with_main: bool = False, flow: dict = None, timing: bool = False,
-           memsz: str = None, slow: str = None, profile: bool = False) -> dict:
+           memsz: str = None, slow: str = None, profile: bool = False, resume: bool = False) -> dict:
     """Statically recompile 68k routines to C. ``auto``: entry addresses whose
     bodies are discovered by walking; ``funcs``: 'START:END[:ENTRY]' linear
     ranges; ``stubs``: 'An:DISP:NAME' for jsr through jump tables. ``flow``: what
@@ -277,6 +277,8 @@ def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = No
     ``memsz``: chip RAM bytes (default "0x80000"); ``slow``: slow RAM "BASE:SIZE" in hex,
     e.g. "c00000:80000" (the driver then takes SLOW.bin SLOWOUT.bin as arguments 5 and 6).
     ``profile``: the runtime counts per routine calls, clocks and written pages (recomp_profile).
+    ``resume``: for tasks with stacks of their own (rte / rts into another task): every instruction is a target of
+    call_addr and a jump onto another stack goes on through TASK_RUN (not with ``profile``).
     Anything the decoder does not support is refused, never skipped: the result is then
     {"refused": {"message", "frontiers": [{routine, site, kind, insn, operand, target, why}]}}
     with every place that needs a ``flow`` entry (addresses as hex strings)."""
@@ -295,7 +297,7 @@ def recomp(path: str, base: str, out_c: str, auto: list = None, funcs: list = No
                                           with_main=with_main, flow=fl, timing=timing,
                                           memsz=_addr(memsz) if memsz else None,
                                           slow=tuple(int(x, 16) for x in slow.split(':')) if slow else None,
-                                      profile=profile)
+                                      profile=profile, resume=resume)
     except rc.Unsupported as e:
         return {'refused': rc.refusal_json(e)}
     Path(out_c).write_text(src)

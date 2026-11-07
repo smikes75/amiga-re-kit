@@ -296,6 +296,11 @@ def cmd_roots(a):
     print('%d roots (%s)' % (len(r), ', '.join('%s %d' % (k, sum(1 for v in r.values() if k in v)) for k in ('slots', 'ptr', 'lea', 'imm'))), file=sys.stderr)
 
 
+def cmd_difftest(a):
+    from .m68k import difftest
+    return difftest.main(a)
+
+
 def cmd_recomp(a):
     from .m68k import recomp
     data = rd(a.file)
@@ -324,7 +329,7 @@ def cmd_recomp(a):
             stub_impl=impl, timing=a.timing, memsz=a.memsz,
             slow=tuple(_hex(x) for x in a.slow.split(':')) if a.slow else None, profile=a.profile,
             cover=cover, oob=a.oob, cover_in_tick=a.cover_in_tick, bus_table=a.bus_table,
-            auto_soft=a.auto_soft, report=report)
+            auto_soft=a.auto_soft, report=report, resume=a.resume)
     except recomp.Unsupported as e:
         if a.refusals:
             Path(a.refusals).write_text(json.dumps(recomp.refusal_json(e), indent=1) + '\n')
@@ -1020,6 +1025,19 @@ def build_parser():
     s.add_argument('--top', type=int, default=40)
     s.set_defaults(fn=cmd_xref)
 
+    s = sp.add_parser('difftest', help='the translation against Moira, the 68000 of vAmiga, opcode by opcode (needs its source), or a recorded corpus')
+    s.add_argument('--moira', metavar='DIR', help='the vAmiga source or its Moira folder')
+    s.add_argument('--corpus', metavar='FILE', help='replay a recorded file instead: a C compiler is enough')
+    s.add_argument('--seed', type=int, default=1)
+    s.add_argument('--states', type=int, default=3, help='valid states kept per opcode')
+    s.add_argument('--kind', nargs='*', help='only these instruction kinds')
+    s.add_argument('--jobs', type=int)
+    s.add_argument('--work', help='a folder to work in (default: a new temporary one)')
+    s.add_argument('--record', metavar='FILE', help='write a sample with the results of Moira')
+    s.add_argument('--record-limit', type=int, default=4000)
+    s.add_argument('--json', metavar='FILE')
+    s.add_argument('-v', '--verbose', action='store_true')
+    s.set_defaults(fn=cmd_difftest)
     s = sp.add_parser('recomp', help='68k -> C static recompilation',
                       description='--base/--lo/--hi/--auto take 0x or $ hex (or decimal, like every '
                                   'address option); --func and the flow specs (--jtab ... --inline) '
@@ -1029,6 +1047,8 @@ def build_parser():
     s.add_argument('--func', nargs='*', metavar='START:END[:ENTRY]')
     s.add_argument('--auto', type=AH, nargs='*', metavar='ENTRY')
     s.add_argument('--auto-file', nargs='*', metavar='FILE', help='more --auto entries, one hex address per line (arek roots)')
+    s.add_argument('--resume', action='store_true', help='for a game whose tasks switch stacks (rte or rts into another task): '
+                   'every instruction is a target of call_addr, a jump onto another stack goes on through TASK_RUN')
     s.add_argument('--auto-soft', action='store_true', help='an --auto root that leads into data is dropped with a note '
                    'instead of refusing the translation (static roots from arek roots)')
     s.add_argument('--stub', nargs='*', metavar='An:DISP:NAME')
