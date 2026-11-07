@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.20 on PyPI, 2561 tests. Extracted from five game
+- **The kit:** version 1.0.21 on PyPI, 2565 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -47,7 +47,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2561 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2565 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -75,6 +75,7 @@ arek pp20       file.pp -o file.bin    # PowerPacker 2.0
 arek bytekiller trk1.bin --offset 0x200 -o main.bin
 arek t2         INTR -o intr.bin       # Turrican II three-stage
 arek atn        BLOCK -o out.bin --offset 0x1234   # Atomik (ATN!), block inside an image
+arek rnc        disk.adf -o out.bin --offset 0xd5a32   # Rob Northen Compression method 1 (ProPack), both CRCs verified
 arek hunk info  prog && arek hunk load prog --base 0x20000 -o h   # AmigaDOS executables
 arek hunk split prog --chip prog2 --base 0xc00000 0x20000 -o h    # records split over two files
 
@@ -171,6 +172,7 @@ asks for (see `examples/profile.example.json`).
 | `arek.adf` | geometry, boot block checksum, entropy map / regions, inventory | new |
 | `arek.amigados` | AmigaDOS OFS/FFS reader (directories, files, extension blocks, checksums) + synthetic image builder for tests | new |
 | `arek.packers.pp20` | PowerPacker 2.0 decruncher (+ literal-only encoder for tests) | Turrican II / Superfrog |
+| `arek.packers.rnc` | Rob Northen Compression method 1 (ProPack: Huffman tables per chunk, raw bytes in the stream, the reader's prefetch discipline), both CRCs verified; a naive packer for the round-trip tests | Xenon 2 |
 | `arek.packers.bytekiller` | Bytekiller format B (8-byte header, XOR checksum), BK (the classic 12-byte header; kit 1.0.4) and the SWIV word-stream format A | S.W.I.V., Turrican II |
 | `arek.packers.turrican2` | Huffman → backwards LZ → RLE three-stage decruncher | Turrican II |
 | `arek.packers.atomik` | Atomik (`ATN!`) decruncher with exact block extent (+ greedy LZ test encoder) | Superfrog |

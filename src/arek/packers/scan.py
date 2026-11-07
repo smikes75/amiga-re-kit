@@ -25,8 +25,8 @@ from .. import amigados
 SIGNATURES = {
     b'PP20': 'PowerPacker 2.0 (unpack: arek pp20)',
     b'PX20': 'PowerPacker 2.0, encrypted (no unpacker here)',
-    b'RNC\x01': 'Rob Northen Compression method 1 (no unpacker here)',
-    b'RNC\x02': 'Rob Northen Compression method 2 (no unpacker here)',
+    b'RNC\x01': 'Rob Northen Compression method 1 (unpack: arek rnc)',
+    b'RNC\x02': 'Rob Northen Compression method 2 (recognised; only method 1 unpacks here)',
     b'ATN!': 'Atomik packer (unpack: arek atn)',
     b'IMP!': 'Imploder (no unpacker here)',
     b'XPKF': 'XPK container (no unpacker here)',

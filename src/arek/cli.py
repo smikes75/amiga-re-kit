@@ -179,6 +179,15 @@ def cmd_atn(a):
     wr(a.out, atomik.unpack(rd(a.file)[a.offset:]))
 
 
+def cmd_rnc(a):
+    from .packers import rnc
+    data = rd(a.file)
+    h = rnc.info(data, a.offset)
+    out = rnc.unpack(data, a.offset)
+    print('RNC method %d: %d packed -> %d bytes, both CRCs verified' % (h['method'], h['packed'], len(out)), file=sys.stderr)
+    wr(a.out, out)
+
+
 # ----------------------------------------------------------------- hunk
 def cmd_hunk(a):
     from . import hunk
@@ -899,6 +908,12 @@ def build_parser():
     s.add_argument('-o', '--out', required=True)
     s.add_argument('--offset', type=A, default=0, help='block offset inside an image')
     s.set_defaults(fn=cmd_atn)
+
+    s = sp.add_parser('rnc', help='unpack a Rob Northen Compression block (RNC method 1 / ProPack; CRCs verified)')
+    s.add_argument('file')
+    s.add_argument('-o', '--out', required=True)
+    s.add_argument('--offset', type=A, default=0, help='block offset inside an image')
+    s.set_defaults(fn=cmd_rnc)
 
     s = sp.add_parser('hunk', help='HUNK executables: info, relocate+dump, or two streams (split)')
     s.add_argument('what', choices=['info', 'load', 'split'])

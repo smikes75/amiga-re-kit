@@ -132,17 +132,19 @@ def scan_packed(path: str, deep: bool = False) -> dict:
 
 @mcp.tool()
 def unpack(path: str, out: str, kind: str = 'auto', offset: str = '0') -> dict:
-    """Unpack a block to ``out``. kind: auto | pp20 | atn | bytekiller (B or BK by checksum) | bytekiller_b | bytekiller_bk | bytekiller_a | t2."""
-    from .packers import atomik, bytekiller, pp20, turrican2
+    """Unpack a block to ``out``. kind: auto | pp20 | atn | rnc (Rob Northen method 1) | bytekiller (B or BK by checksum) | bytekiller_b | bytekiller_bk | bytekiller_a | t2."""
+    from .packers import atomik, bytekiller, pp20, rnc, turrican2
     data = _bytes(path)
     off = _addr(offset)
     if kind == 'auto':
         magic = data[off:off + 4]
-        kind = 'pp20' if magic == b'PP20' else 'atn' if magic == b'ATN!' else 'bytekiller'
+        kind = 'pp20' if magic == b'PP20' else 'atn' if magic == b'ATN!' else 'rnc' if magic[:3] == b'RNC' else 'bytekiller'
     if kind == 'pp20':
         res, ok = pp20.unpack(data[off:]), True
     elif kind == 'atn':
         res, ok = atomik.unpack(data[off:]), True
+    elif kind == 'rnc':                           # 1.0.21: both CRCs verified, a mismatch raises
+        res, ok = rnc.unpack(data, off), True
     elif kind == 'bytekiller':                    # 1.0.4: the header layout by checksum (B: 8 bytes, BK: the classic 12 bytes)
         kind = bytekiller.detect(data, off) or 'b'
         res, ok = (bytekiller.unpack_bk if kind == 'bk' else bytekiller.unpack_b)(data, off)

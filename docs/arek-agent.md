@@ -48,7 +48,7 @@ first message of any coding agent.
    follow the loader to the next stage (`arek adf track`, `arek adf sector`). An AmigaDOS
    disk: `arek adf ls`, `arek adf cat`, `arek adf extract`.
 3. **Packers.** `arek scan <file>` finds known signatures and Bytekiller blocks verified by
-   unpacking; `arek pp20`, `arek bytekiller`, `arek atn`, `arek t2` unpack them. An unknown
+   unpacking; `arek pp20`, `arek bytekiller`, `arek atn`, `arek rnc`, `arek t2` unpack them. An unknown
    packer means reading the decrunch routine next to the loader, not guessing a format.
 4. **Code.** `arek walk --base <addr> --start <entry>` follows the flow graph and reports
    its frontiers; `arek hwscan` separates pure-RAM routines from those that drive Agnus,

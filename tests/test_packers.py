@@ -166,3 +166,72 @@ def test_scan_finds_and_verifies_atomik(rnd):
     assert not hits[15000]['verified'] and 'error' in hits[15000]
     txt = scan.format_report(rep)
     assert 'atomik (ATN!) blocks: 2, verified 1' in txt
+
+
+# ----------------------------------------------------------------- RNC method 1 (1.0.21, Xenon 2 KIT-GAP 1)
+from arek.packers import rnc  # noqa: E402
+
+
+def _rnc_samples(rnd):
+    return [b'', b'A', b'ab' * 1000, rnd(5000), bytes(70000), (b'hello world ' * 300 + rnd(777)) * 3,
+            bytes((i * 7) & 0xff for i in range(40000)) + rnd(100) * 20]
+
+
+def test_rnc_round_trip_and_header(rnd):
+    """Every kind of data packs to a valid method-1 block and unpacks to itself; the header fields and the CRC-16
+    (polynomial 0xA001, as the loader computes it) are what the decoder checks."""
+    assert rnc.crc16(b'') == 0 and rnc.crc16(b'123456789') == 0xbb3d           # CRC-16/ARC check value
+    for data in _rnc_samples(rnd):
+        p = rnc.pack(data)
+        assert p[:4] == rnc.MAGIC1 and rnc.is_rnc(p)
+        h = rnc.info(p)
+        assert h['method'] == 1 and h['unpacked'] == len(data) and h['packed'] == len(p) - rnc.HEADER and h['crc_out'] == rnc.crc16(data)
+        assert h['crc_in'] == rnc.crc16(p[rnc.HEADER:]) and h['chunks'] == (1 if data else 0)
+        assert rnc.unpack(p) == data
+    assert len(rnc.pack(b'ab' * 1000)) < 60 and len(rnc.pack(bytes(70000))) < 60   # matches do compress
+
+
+def test_rnc_block_inside_an_image_and_many_chunks(rnd):
+    """A block at an offset inside a bigger file; the chunk count byte and a stream of more than one chunk
+    (65 535 segments per chunk) decode as the original decoder would."""
+    data = rnd(300)
+    img = rnd(1000) + rnc.pack(data) + b'tail'
+    assert rnc.unpack(img, 1000) == data
+    # force many segments: alternate a repeated run and a random byte so that the greedy packer emits 70 000 / 4 segments
+    noise = rnd(90000)
+    tricky = b''.join(b'xyzxyz' + noise[i:i + 1] for i in range(90000))   # ~80 000 segments: two chunks
+    p = rnc.pack(tricky)
+    assert rnc.info(p)['chunks'] >= 2 and rnc.unpack(p) == tricky
+
+
+def test_rnc_detects_corruption_and_refuses_method_2(rnd):
+    data = rnd(2000) + b'abcabcabc' * 50
+    p = bytearray(rnc.pack(data))
+    bad = p[:]; bad[rnc.HEADER + 10] ^= 1                                        # a packed byte: the packed CRC catches it
+    with pytest.raises(ValueError, match='packed CRC'):
+        rnc.unpack(bytes(bad))
+    bad = p[:]; bad[12] ^= 1                                                     # the unpacked CRC in the header
+    with pytest.raises(ValueError, match='unpacked CRC'):
+        rnc.unpack(bytes(bad))
+    bad = p[:]; bad[3] = 2
+    with pytest.raises(ValueError, match='method 2'):
+        rnc.unpack(bytes(bad))
+    with pytest.raises(ValueError, match='truncated'):
+        rnc.unpack(bytes(p[:-5]))
+    with pytest.raises(ValueError, match='missing RNC header'):
+        rnc.unpack(b'not a block')
+
+
+def test_rnc_cli_scan_and_mcp(tmp_path, rnd):
+    from arek import cli
+    from arek.packers import scan as scan_mod
+    data = b'code' * 500 + rnd(200)
+    img = bytes(100) + rnc.pack(data)
+    (tmp_path / 'img.bin').write_bytes(img)
+    assert cli.main(['rnc', str(tmp_path / 'img.bin'), '-o', str(tmp_path / 'out.bin'), '--offset', '100']) in (0, None)
+    assert (tmp_path / 'out.bin').read_bytes() == data
+    hits = scan_mod.signatures(img)
+    assert any(h['magic'] == 'RNC\x01' and h['offset'] == 100 and 'arek rnc' in h['what'] for h in hits)
+    from arek import mcp_server
+    r = mcp_server.unpack(str(tmp_path / 'img.bin'), str(tmp_path / 'out2.bin'), 'auto', '0x64')
+    assert r['kind'] == 'rnc' and r['bytes'] == len(data) and (tmp_path / 'out2.bin').read_bytes() == data
