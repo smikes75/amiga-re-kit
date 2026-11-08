@@ -40,6 +40,8 @@ moving steps are reported, not judged (an original camera that moves 1 px every 
 the screen as the page measured it in its engine (a game that reads the joystick once per pass and shows its double
 buffer a pass later: 60-100 ms by the phase); the limit then applies to what the page adds, measured - gameLatency.
 State the median over the phases, not the worst. ``--game-latency MS`` says the same for a page without the hook.
+1.7.1 (kit 1.0.31, Xenon 2 KIT-GAP 11): a camera step over CAM_JUMP game px (a respawn at a checkpoint, as wb-scene's
+jumpMax shows it at once) ends a moving stretch like a stop, so it and its neighbours are not judged as jitter.
 """
 import json
 import statistics
@@ -47,6 +49,7 @@ import statistics
 LIMITS = {'dropped': 0, 'cam_jitter': 0.05, 'obj_jitter': 0.05, 'missing_pct': 0.0, 'latency_ms': 70, 'dropouts': 0}
 BROWSERS = ('chromium', 'webkit')
 OBJ_JUMP = 1.0                     # game px: a larger step of an object against the screen is a jump (animation, a new place), not jitter
+CAM_JUMP = 40.0                    # game px: a larger camera step is a jump (wb-scene's jumpMax), it ends a moving stretch
 
 SAMPLE_START_JS = """() => { const H = globalThis.WBLONGRUN; const S = globalThis.__wbSmooth = { out: [], on: true };
     const f = (ts) => { if (!S.on) return;
@@ -123,7 +126,8 @@ def analyse(samples, scale=None, axis=0):
     for i, a, b in pairs:
         if last is not None and i != last + 1:
             steps.append(0.0)                             # a gap ends a stretch of motion
-        steps.append((b[1][axis] - a[1][axis]) * norm[i])
+        st = (b[1][axis] - a[1][axis]) * norm[i]
+        steps.append(0.0 if abs(st) > CAM_JUMP else st)     # 1.7.1: a jump ends a stretch, as a stop does
         last = i
     # the camera's moving stretches (a stop - a wall, the map's edge, a key let go - ends a stretch); the jitter is
     # judged within the stretches

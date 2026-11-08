@@ -157,7 +157,9 @@ game frame. The camera's 0 step ends a stretch of motion, so its jitter stays lo
 steps 1 1 1 1 1 0, which is jitter by the definition above. Such a mode cannot meet the jitter limit and is not meant
 to: the jitter and the missing passes are reported and not judged; dropped frames, the key latency and the sound
 are. The canon's limits are for the interpolated mode. 1.6: there the camera's moving steps are reported, not judged
-either: an original camera that moves 1 px every few frames has no stretch of motion at all.
+either: an original camera that moves 1 px every few frames has no stretch of motion at all. 1.7.1 (kit 1.0.31, Xenon 2
+KIT-GAP 11): a camera step over 40 game px (a respawn at a checkpoint, shown at once by the scene's jumpMax) ends a moving
+stretch like a stop; before, one such step in a 20 s run put the camera jitter at 0.115-0.157 px.
 
 Alien Breed II's baseline (kit 0.8.1, level 1, enhanced 522 x 357, headless 60 Hz, engine in a thread / coroutine,
 Chromium / WebKit): 0 dropped frames and 0 % missing passes in all four; jitter 0.0001-0.0002 px (max 0.25);

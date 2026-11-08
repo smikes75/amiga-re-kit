@@ -232,3 +232,15 @@ def test_the_games_own_latency_is_not_the_pages():
     line = websmooth.format_result('chromium', dict(r, game_latency_ms=80.0, passed=True, fails=[], frames=1, refresh_hz=60, cam_jitter=0, cam_jitter_max=0,
                                                     cam_dev=0, obj_jitter=0, missing_pct=None, latency_all=[], player_all=[140.0]))
     assert "(the game's own 80 ms)" in line
+
+
+def test_a_camera_jump_ends_a_stretch():
+    """1.7.1 (kit 1.0.31, Xenon 2 KIT-GAP 11): a respawn puts the camera back 108 px in one step; that step and its
+    neighbours are not camera jitter."""
+    ys, y = [], 4500.0
+    for i in range(300):
+        y += 108 if i == 150 else -0.278
+        ys.append(y)
+    smp = [[i * 16.67, [0, v], None, None, None] for i, v in enumerate(ys)]
+    r = websmooth.analyse(smp, axis=1)
+    assert r['cam_jitter'] < 0.01 and r['cam_jitter_max'] < 0.01 and r['cam_moving'] >= 290
