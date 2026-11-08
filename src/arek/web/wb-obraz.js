@@ -30,9 +30,12 @@
 //       on the canvas until the next set() - a running game must not paint over it (pause it, or hold the pattern)
 //   window.wbObrazTest.gl() -> bool (1.5)      the WebGL path is on; a page honours ?gl=0 / ?gl=1 so the test runs both
 // arek web test needs `pip install amiga-re-kit[web]` and `python -m playwright install chromium`.
+// 1.8 (kit 1.0.32, Xenon 2 KIT-GAP 12): new Screen(gameEl, canvas, { crtEnhanced: 'original' }) - a game whose Enhanced only
+// smooths the motion (the Original picture, the same scale) draws the Original CRT in both modes; Screen.info().crtLook
+// names the pattern drawn and `arek web test` expects it. Default 'screen': Enhanced keeps its own fixed grid of device pixels.
 'use strict';
 const WBOBRAZ = (() => {
-    const VERSION = '1.7';
+    const VERSION = '1.8';
     const CRT_DETAILS = ['fine', 'standard', 'strong'];
     const CRT_SHAPES = ['lines', 'grid'];
     // 1.3 values (Alien Breed / Turrican II, 2026-10-22: larger steps between the levels)
@@ -434,8 +437,10 @@ const WBOBRAZ = (() => {
     /** The game box .game: the CRT layer (redrawn only when its key changes), --crt-on, data-crt / data-mode,
      *  and the content on a whole device pixel by layout (1.3: position relative + left/top, no transform). */
     class Screen {
-        constructor(gameEl, canvas) {
+        constructor(gameEl, canvas, opts) {
             this.game = gameEl; this.canvas = canvas;
+            this.crtEnhanced = (opts && opts.crtEnhanced) || 'screen';           // 1.8: 'original' = Enhanced draws the Original CRT
+            this.look = null;
             this.layer = gameEl.querySelector('.crt-layer');
             if (!this.layer) {
                 this.layer = document.createElement('canvas'); this.layer.className = 'crt-layer';
@@ -452,8 +457,10 @@ const WBOBRAZ = (() => {
         }
         /** o = { mode, detail, shape, S, dpr, w, h, on }: w, h = the game content in device pixels (W*S x H*S). */
         crt(o) {
-            const key = [o.w, o.h, o.S, o.dpr, o.mode, o.detail, o.shape].join(':');
-            if (key !== this.key) { this.key = key; this.pd = drawCrt(this.layer, o.mode, o.detail, o.S, o.dpr, Math.max(1, o.w), Math.max(1, o.h), o.shape); }
+            const look = o.mode === 'enhanced' && this.crtEnhanced === 'original' ? 'original' : o.mode;   // 1.8
+            const key = [o.w, o.h, o.S, o.dpr, look, o.detail, o.shape].join(':');
+            if (key !== this.key) { this.key = key; this.pd = Object.assign(drawCrt(this.layer, look, o.detail, o.S, o.dpr, Math.max(1, o.w), Math.max(1, o.h), o.shape), { look }); }
+            this.look = look;
             this.on = o.on;
             this.game.style.setProperty('--crt-on', (+o.on).toFixed(3));
             this.game.dataset.crt = o.detail; this.game.dataset.mode = o.mode;
@@ -475,7 +482,7 @@ const WBOBRAZ = (() => {
             return { version: VERSION, origin: [(r.left + (this.canvas.clientLeft || 0)) * dpr, (r.top + (this.canvas.clientTop || 0)) * dpr],
                      backing: [this.canvas.width, this.canvas.height], crtLayer: [this.layer.width, this.layer.height],
                      crtOrigin: [l.left * dpr, l.top * dpr], crtOn: this.on, crtP: this.pd.P, crtD: this.pd.D, crtShape: this.pd.shape,
-                     crtMode: this.game.dataset.mode, crtDetail: this.game.dataset.crt, offset: [this.ax, this.ay] };
+                     crtMode: this.game.dataset.mode, crtLook: this.look || this.game.dataset.mode, crtDetail: this.game.dataset.crt, offset: [this.ax, this.ay] };
         }
     }
     return { VERSION, CRT_DETAILS, CRT_SHAPES, CRT_ROW, CRT_SCREEN, CRT_LINE, CRT_RGB, MODE_MS, VIEW_DEFAULTS, WORDS,

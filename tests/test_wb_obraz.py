@@ -22,7 +22,7 @@ def js(expr):
 
 
 def test_version_and_scale():
-    assert js('O.VERSION') == '1.7'
+    assert js('O.VERSION') == '1.8'
     assert js('O.deviceScale(2, 320, 320, 1.25, 10)') == 3          # round(2 * 1.25)
     assert js('O.deviceScale(2, 336, 448, 2, 10)') == 3             # wider window: zoom counts in W0
     assert js('O.deviceScale(6, 320, 320, 2, 2.4)') == 4            # limited by the window
@@ -104,7 +104,7 @@ def test_web_copy_and_package_files(tmp_path, capsys):
     assert cli.main(['web', 'copy', str(tmp_path / 'web')]) == 0
     out = capsys.readouterr().out
     data = (tmp_path / 'web' / 'wb-obraz.js').read_bytes()
-    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.7' in out
+    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.8' in out
 
 
 def test_png_decoder_reads_the_kits_png():
@@ -298,3 +298,52 @@ def test_present_rect_on_both_paths(tmp_path):
             br.close()
     finally:
         srv.shutdown()
+
+
+def test_check_layout_with_the_original_crt_in_enhanced():
+    """1.8 (kit 1.0.32, Xenon 2 KIT-GAP 12): Screen.info().crtLook names the pattern drawn; web test expects the Original's
+    period in Enhanced when the page draws the Original CRT there."""
+    info = {'scale': 3, 'W': 320, 'H': 256, 'content': [960, 768], 'backing': [960, 768], 'origin': [10, 20],
+            'crtLayer': [960, 768], 'crtOrigin': [10, 20], 'P': 3, 'D': 2, 'crtLook': 'original'}
+    fails = []
+    webtest.check_layout(info, 'enhanced', 'strong', 1, fails, 't')
+    assert fails == []
+    webtest.check_layout(dict(info, crtLook=None), 'enhanced', 'strong', 1, fails, 't')
+    assert fails and 'P 3 D 2' in fails[0]
+
+
+def test_the_original_crt_in_enhanced_on_the_demo_page():
+    """1.8: demo.html?crtenh=original draws the very same CRT layer in both modes and passes `arek web test --quick`; the
+    default keeps Enhanced's own grid."""
+    pytest.importorskip('playwright')
+    import threading
+    from playwright.sync_api import sync_playwright
+    from arek import web
+    srv = web.serve(WEB, 0)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    alpha = """(() => { const l = document.querySelector('.crt-layer'), d = l.getContext('2d').getImageData(0, 0, l.width, l.height).data;
+        let s = 0; for (let i = 3; i < d.length; i += 4) s += d[i]; return s; })()"""
+    try:
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            out = {}
+            for tail in ('?crtenh=original', ''):
+                p = b.new_page(viewport={'width': 1280, 'height': 900})
+                p.goto('http://127.0.0.1:%d/demo.html%s' % (port, tail))
+                p.wait_for_function('window.wbObrazTest')
+                res = []
+                for mode in ('original', 'enhanced'):
+                    info = p.evaluate("(m) => wbObrazTest.set(m, {zoom: 2, crtDetail: 'strong', crt: true, blur: 0, par: 1})", mode)
+                    res.append((p.evaluate(alpha), info['P'], info['D'], info.get('crtLook')))
+                out[tail] = res
+                p.close()
+            b.close()
+        r = webtest.run('http://127.0.0.1:%d/demo.html?crtenh=original' % port, quick=True, log=lambda *a: None)
+    finally:
+        srv.shutdown()
+    o, e = out['?crtenh=original']
+    assert o == e and e[3] == 'original'                                               # the same layer, alpha for alpha
+    o, e = out['']
+    assert o[0] != e[0] and e[3] == 'enhanced' and e[1] == 4 and e[2] == 1             # the default: Enhanced's own grid
+    assert r['checks'] > 20 and r['fails'] == [], r['fails'][:5]

@@ -124,7 +124,7 @@ def check_layout(info, mode, detail, dpr, fails, tag):
     ok(info['crtLayer'] == info['backing'], 'CRT layer %s != backing' % info['crtLayer'])
     ok(all(abs(a - b) < TOL_POS for a, b in zip(info['crtOrigin'], info['origin'])), 'CRT layer not over the content')
     P, D = info['P'], info['D']
-    if mode == 'original':
+    if (info.get('crtLook') or mode) == 'original':          # 1.8 (wb-obraz): a page may draw the Original CRT in Enhanced
         ok(P == max(2, S), 'P %d != max(2, S)' % P)
     else:
         ok(P == SCREEN[detail] and D == 1, 'P %d D %d' % (P, D))

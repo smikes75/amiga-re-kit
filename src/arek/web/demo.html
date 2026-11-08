@@ -38,7 +38,7 @@
 const W = 320, H = 256, W0 = 320, O = WBOBRAZ;
 const pic = document.createElement('canvas'); pic.width = W; pic.height = H;   // the game's own W x H picture (1.4: blit scales it)
 const game = document.querySelector('.game'), screen = document.getElementById('screen'), stage = document.getElementById('stage');
-const scr = new O.Screen(game, screen);
+const scr = new O.Screen(game, screen, { crtEnhanced: new URLSearchParams(location.search).get('crtenh') || 'screen' });   // 1.8: ?crtenh=original
 const GL = new URLSearchParams(location.search).get('gl');
 const pr = new O.Presenter(screen, { gl: GL === '0' ? 'off' : GL === '1' ? 'on' : 'auto' });   // 1.5: one visible canvas, WebGL2 or 2D
 const state = { mode: 'original', cfg: JSON.parse(JSON.stringify(O.VIEW_DEFAULTS)), pattern: 'picture' };
