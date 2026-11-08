@@ -149,6 +149,7 @@ The page's hooks (`globalThis.WBLONGRUN` 1.1; `arek web longrun` reads the same 
 | `player()` (optional, 1.5, kit 0.9.16) | `[x, y]` or `[x, y, image]` (1.5.1, Superfrog KIT-GAPS 53) the player as drawn on the screen in this display frame: a second latency, key -> player, reported beside key -> camera and not judged (a player the camera tracks does not move on the screen - it changes its picture first, so the image counts as the third value) |
 | `interp()` (optional, 1.4) | false when the page draws the game's frames as they are, without interpolation (an original mode); `--no-interp` says the same for a page without the hook |
 | `axis` (optional, 1.6, kit 1.0.27) | `'x'` (default) or `'y'`: the camera's axis that is judged and probed after a key (a vertical auto-scroller, Xenon 2); `--axis` |
+| `gameLatency` (optional, 1.7, kit 1.0.29) | ms, a number or a function: the original's own delay from a key to the screen, measured in the page's engine (the median over the phases of its input pass - Xenon 2 reads the joystick once per 3-frame pass and shows the double buffer a pass later: 60 / 80 / 100 ms); the latency limit applies to the measured value less this; `--game-latency` |
 | `keysMove` (optional, 1.6) | `'camera'` (default) or `'player'`: when the keys move the player and not the camera, the key latency judged is key -> player (`player()` needed) and the camera is not probed; `--keys-move` |
 
 1.4 (kit 0.8.5, Superfrog KIT-GAPS 38): without interpolation a 50 Hz game on a 60 Hz display repeats every sixth

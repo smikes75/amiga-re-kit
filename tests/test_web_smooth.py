@@ -220,3 +220,15 @@ def test_keys_on_the_player_in_the_browser():
     assert 'error' not in r, r
     assert r['latency_on'] == 'player' and r['latency_ms'] is None and r['latency_all'] == []
     assert r['player_ms'] is not None and not any('move after the key' in f for f in r['fails']), r['fails']
+
+
+def test_the_games_own_latency_is_not_the_pages():
+    """1.7 (kit 1.0.29, Xenon 2 KIT-GAP 9): a game that reads the joystick once per pass is 60-100 ms late on its own; the
+    limit applies to what the page adds."""
+    r = {'dropped': 0, 'cam_moving': 0, 'interp': False, 'latency_on': 'player', 'latency_ms': None, 'player_ms': 140.0, 'audio': None}
+    assert websmooth.verdict(r)[1] == ['key -> player 140 ms']
+    assert websmooth.verdict(dict(r, game_latency_ms=80.0)) == (True, [])                       # 60 ms added by the page
+    assert websmooth.verdict(dict(r, game_latency_ms=60.0))[1] == ["key -> player 140 ms, 80 over the game's own 60"]
+    line = websmooth.format_result('chromium', dict(r, game_latency_ms=80.0, passed=True, fails=[], frames=1, refresh_hz=60, cam_jitter=0, cam_jitter_max=0,
+                                                    cam_dev=0, obj_jitter=0, missing_pct=None, latency_all=[], player_all=[140.0]))
+    assert "(the game's own 80 ms)" in line
