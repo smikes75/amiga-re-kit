@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.6' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.7' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -361,7 +361,7 @@ def _run_page(url_tail, fn, browser='chromium'):
         srv.shutdown()
 
 
-@pytest.mark.parametrize('tail', ['?s=2&back=1', '?s=1.9943&fine=1&back=1&mean=1', '?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1', '?s=2&paltop=1&palscreen=1', '?s=1.9943&fine=1&paltop=1&palscreen=1'])
+@pytest.mark.parametrize('tail', ['?s=2.5&scrobj=1&mean=1', '?s=1.9943&fine=1&scrobj=1&mean=1', '?s=2&back=1', '?s=1.9943&fine=1&back=1&mean=1', '?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1', '?s=2&paltop=1&palscreen=1', '?s=1.9943&fine=1&paltop=1&palscreen=1'])
 def test_gpu_equals_the_reference(tail):
     """The GPU band against the CPU reference of the same composition, pixel for pixel, while the camera moves and the
     objects interpolate (as Alien Breed II checked its WebGL path: 0 of 60 M pixels)."""
@@ -474,3 +474,21 @@ def test_the_camera_mean_never_crosses_a_jump():
     assert r['before'][0] < 5 and r['before'][1] < 5                                     # just before it: the old side only
     assert r['far'][0] < 3
     assert r['steps'][0] != r['steps'][1]                                                # camMean.step reaches the mean
+
+
+def test_an_object_on_the_screen_stands_still():
+    """2.7 (Xenon 2 KIT-GAP 13): a countdown digit the game draws at one screen position on a scrolling camera (its world y =
+    the camera + 160, a pass every 3 frames, the camera a row per pass) flipped a device row ~17 times a second - its world
+    position between passes less a camera taken by camMean; its screen position is interpolated now (by its pair), and
+    objects[].screen keeps it there when the camera stood still between the pair too."""
+    body = """(() => { const lim = { x0: 0, x1: 100, y0: 0, y1: 5000 };
+        const fr = []; for (let i = 0; i < 40; i++) { const cy = 4000 - Math.floor(i / 3); const f = mk(i + 1, i * 20, [0, cy], 0, lim);
+            f.pass = Math.floor(i / 3) * 60; f.objects = [{ id: 7, w: 8, h: 8, idx: new Uint8Array(64).fill(5), x: 152, y: cy + 160, ox: -8, screen: SCREEN }]; f.sprites = []; fr.push(f); }
+        const ys = new Set(), xs = new Set();
+        for (let ts = 300; ts < 700; ts += 16.67) { const c = S.compose(fr, ts, { S: 2.5 }, { camMean: { tau: 29.952, step: 1 }, pairOlder: 2 }, null);
+            const ob = c.objs[0], d = S.objDev(c, ob, [Math.floor(c.cam[0] * 2.5), Math.floor(c.cam[1] * 2.5)]); xs.add(d[0]); ys.add(d[1]); }
+        return [Array.from(xs), Array.from(ys)]; })()"""
+    xs, ys = js(with_mk(body.replace('SCREEN', 'true')))
+    assert xs == [360] and ys == [400]                                                  # (152 - 8) * 2.5, 160 * 2.5: still
+    xs, ys = js(with_mk(body.replace('SCREEN', 'false')))
+    assert xs == [360] and len(ys) <= 2                                                 # by the pair alone: on the screen while the camera moves

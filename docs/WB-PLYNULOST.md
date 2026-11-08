@@ -463,6 +463,13 @@ the window is now clipped to the jump's side (the frames around B with no move o
 back layer too. `camMean.step` (the sampling of the mean, default 5 ms) is passed on; it had been ignored. Xenon 2 measured
 step 1 better than 5 with tau = half its 59.9 ms pass.
 
+2.7 (kit 1.0.33, Xenon 2 KIT-GAP 13): an object the game draws at one screen position (Xenon 2's boost countdown digit, at
+(152, 160) every pass) flipped a device row about 17 times a second in Enhanced: it was drawn at its world position between
+passes (at the objects' time, latO) less the view's camera (at the camera's time, latC, under camMean) - two times, two
+smoothings. An object on the screen - by its pair (2.4) or by `objects[].screen` - now interpolates its SCREEN position (its world
+position less its own frame's camera) and is drawn at round((ext + screen) * S), the same on both paths (objDev); with
+`screen` it stays there also when the camera stood still between the pair, and under the shift it is not glued to the ground.
+
 The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
 the 2D path; `?fine=1` the subpixel shift) runs a generated map, a clean window with decorations the map does not have and holes the map shows
 through, three objects on a 25 Hz loop (one blinking), a sprite and HUD rows on the kit's clock; its hooks are
