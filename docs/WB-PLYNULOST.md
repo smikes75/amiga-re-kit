@@ -455,6 +455,12 @@ and the map leave a hole, with the window's palette rows. `window.or` holds bits
 stars in bitplanes 2-3 over the coral). Under the shift the back's device camera is rounded against the playfield's
 fraction, so it lands within half a device pixel. The GPU equals the reference with it (`?back=1` on the synthetic page).
 
+2.6 (kit 1.0.30, Xenon 2 KIT-GAP 10): camMean never averages across a jump - after a death Xenon 2 puts the camera back
+109 px to its checkpoint, and the mean over +-tau spread that over frames of ~20 px (camera jitter 0.148 px, a step of 22.7);
+the window is now clipped to the jump's side (the frames around B with no move over jumpMax between neighbours), for the
+back layer too. `camMean.step` (the sampling of the mean, default 5 ms) is passed on; it had been ignored. Xenon 2 measured
+step 1 better than 5 with tau = half its 59.9 ms pass.
+
 The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
 the 2D path; `?fine=1` the subpixel shift) runs a generated map, a clean window with decorations the map does not have and holes the map shows
 through, three objects on a 25 Hz loop (one blinking), a sprite and HUD rows on the kit's clock; its hooks are

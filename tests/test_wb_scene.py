@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.5' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.6' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -459,3 +459,18 @@ def test_unexplained_with_the_back_layer():
         rec.window.or[3] = 16; rec.back = { cam: [1, 0], w: 4, h: 2, idx: Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8]), origin: [0, 0], wrap: 'x' }; rec.objects = []; rec.sprites = [];
         const game = Uint8Array.from([2, 3, 4, 17, 6, 7, 8, 5]); const u = S.unexplained(rec, game); return [u.count, Array.from(u.model)]; })()"""))
     assert r == [0, [2, 3, 4, 17, 6, 7, 8, 5]]
+
+
+def test_the_camera_mean_never_crosses_a_jump():
+    """2.6 (Xenon 2 KIT-GAP 10): a camera put back 109 px at a checkpoint is shown at once, not spread over frames of ~20 px
+    by camMean; the window is clipped to the jump's side, for the back layer too; camMean.step is used."""
+    r = js(with_mk("""(() => { const fr = [0, 1, 2, 111, 112].map((y, i) => { const f = mk(i + 1, i * 20, [0, y], 0, { x0: 0, x1: 100, y0: 0, y1: 500 }); f.back = { cam: [0, y], w: 4, h: 4, idx: new Uint8Array(16) }; return f; });
+        const at = (t, o) => { const c = S.compose(fr, t, { S: 1 }, Object.assign({ camMean: { tau: 30 } }, o || {}), null); return [c.cam[1], c.back.cam[1]]; };
+        const acc = [mk(1, 0, [0, 0], 0), mk(2, 20, [0, 0], 0), mk(3, 40, [0, 10], 0), mk(4, 60, [0, 30], 0)];
+        const m = (step) => S.compose(acc, 23, { S: 1 }, { camMean: { tau: 20, step } }, null).cam[1];
+        return { after: at(50), before: at(30), far: at(10), run: S.runOf(fr, fr[3], (u, v) => Math.abs(u.cam[1] - v.cam[1]) > 40).map((f) => f.n), steps: [m(5), m(1)] }; })()"""))
+    assert r['run'] == [4, 5]
+    assert r['after'][0] > 110 and r['after'][1] > 110                                   # just after the jump: the new side only
+    assert r['before'][0] < 5 and r['before'][1] < 5                                     # just before it: the old side only
+    assert r['far'][0] < 3
+    assert r['steps'][0] != r['steps'][1]                                                # camMean.step reaches the mean

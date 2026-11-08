@@ -1,4 +1,4 @@
-// wb-scene.js 2.5 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
+// wb-scene.js 2.6 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
 // after Superfrog's switch - KIT-GAPS 40-43: screen-fixed sprites, the means over the interpolated camera, a layer of
 // drawings without identity, a guard for a pass that never changes, one timebase; 1.2 kit 0.9.2 - KIT-GAPS 44-46: no
 // interpolation across a jump, sprites[].id, camMean for both axes; 1.3 kit 0.9.3 - objects[].ox/oy, the drawing's offset
@@ -25,7 +25,9 @@
 // pair goes with the ground, one whose SCREEN position is the same stays on the screen - per axis, no flag needed (a player
 // sprite stands on the screen while the camera tracks it and in the world while the camera coasts); steady still forces the screen
 // (a game's own transition at one scale - Alien Breed SE92); 2.5 kit 1.0.28 - back (Xenon 2 KIT-GAP 8): a layer under the window with a
-// camera of its own, a parallax background that interpolates between frames at its own speed; window.or: bits ORed onto it.
+// camera of its own, a parallax background that interpolates between frames at its own speed; window.or: bits ORed onto it;
+// 2.6 kit 1.0.30 - camMean never averages across a jump (Xenon 2 KIT-GAP 10: the camera put back 109 px at a checkpoint was
+// spread over frames of ~20 px): the window is clipped to the jump's side; camMean.step is passed on (it was ignored).
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -115,7 +117,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '2.5';
+    const VERSION = '2.6';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -160,6 +162,15 @@ const WBSCENE = (() => {
             sum += w * valueAt(frames, s, pick, tau); wsum += w;
         }
         return wsum ? sum / wsum : valueAt(frames, t, pick, tau);
+    }
+    /** 2.6 (Xenon 2 KIT-GAP 10): the run of frames around B with no jump between neighbours - a mean over a time window is
+     *  taken on B's side of a jump only, as the pair interpolation never crosses one. */
+    function runOf(frames, B, isJump) {
+        const i = frames.indexOf(B); if (i < 0) return frames;
+        let lo = i, hi = i;
+        while (lo > 0 && !isJump(frames[lo - 1], frames[lo])) lo--;
+        while (hi < frames.length - 1 && !isJump(frames[hi], frames[hi + 1])) hi++;
+        return lo === 0 && hi === frames.length - 1 ? frames : frames.slice(lo, hi + 1);
     }
     /** The pairs for the interpolation of things with an identity: for every item of b (by id) the same id in a, or in
      *  up to `older` frames before a (a blinking player drawn every other frame - Superfrog: paired 86 % -> 99.6 %).
@@ -234,8 +245,9 @@ const WBSCENE = (() => {
         const spriteCam = vcam.slice();
         const clampedOf = (fr, i) => clampCam(fr.cam[0], fr.cam[1], fr.limits, fr.window, ext)[i];
         if (o.camMean && o.camMean.tau > 0) {                                       // 1.2 (KIT-GAPS 46): the symmetric mean on both axes, always
-            const sh = { shape: o.camMean.shape || 'box' }, cl = clampCam(gcam[0], gcam[1], lim, win, ext);
-            const mx = windowMean(frames, tv, o.camMean.tau, (fr) => clampedOf(fr, 0), sh), my = windowMean(frames, tv, o.camMean.tau, (fr) => clampedOf(fr, 1), sh);
+            const sh = { shape: o.camMean.shape || 'box', step: o.camMean.step }, cl = clampCam(gcam[0], gcam[1], lim, win, ext);
+            const run = runOf(frames, B, (u, v) => jumped(u.cam, v.cam));          // 2.6: not across a jump
+            const mx = windowMean(run, tv, o.camMean.tau, (fr) => clampedOf(fr, 0), sh), my = windowMean(run, tv, o.camMean.tau, (fr) => clampedOf(fr, 1), sh);
             if (mx !== null) { vcam = [o.fixedAxis && o.fixedAxis.axis === 'x' ? vcam[0] : mx, o.fixedAxis && o.fixedAxis.axis === 'y' ? vcam[1] : my]; }
             spriteCam[0] = cl[0]; spriteCam[1] = cl[1];                             // the sprites: the original's screen position plus the hard stop at an edge
         }
@@ -268,7 +280,11 @@ const WBSCENE = (() => {
         const wrap = wrapOf(bk.wrap);
         const near = (fr, i) => { const v = fr.back ? fr.back.cam[i] : bk.cam[i]; if (!wrap[i]) return v; const per = i ? bk.h : bk.w, d = ((v - bk.cam[i]) % per + per) % per; return bk.cam[i] + (d > per / 2 ? d - per : d); };
         let bc;
-        if (o.camMean && o.camMean.tau > 0) { const sh = { shape: o.camMean.shape || 'box' }; bc = [windowMean(frames, tv, o.camMean.tau, (fr) => near(fr, 0), sh), windowMean(frames, tv, o.camMean.tau, (fr) => near(fr, 1), sh)]; }
+        if (o.camMean && o.camMean.tau > 0) {
+            const sh = { shape: o.camMean.shape || 'box', step: o.camMean.step }, nb = (fr) => [near(fr, 0), near(fr, 1)];
+            const run = runOf(frames, B, (u, v) => jumped(u.cam, v.cam) || (!!u.back && !!v.back && jumped(nb(u), nb(v))));   // 2.6
+            bc = [windowMean(run, tv, o.camMean.tau, (fr) => near(fr, 0), sh), windowMean(run, tv, o.camMean.tau, (fr) => near(fr, 1), sh)];
+        }
         else { const fa = A.back ? [near(A, 0), near(A, 1)] : null, from = fa && !jumped(fa, bk.cam) ? fa : bk.cam; bc = [lerp(from[0], bk.cam[0], f), lerp(from[1], bk.cam[1], f)]; }
         bc = [bc[0] - ext.x, bc[1] - ext.y];
         const d = sub ? [Math.round(bc[0] * S - sub.w[0] / 256), Math.round(bc[1] * S - sub.w[1] / 256)] : [Math.floor(bc[0] * S), Math.floor(bc[1] * S)];
@@ -658,7 +674,7 @@ const WBSCENE = (() => {
             return { pixels: out, w, h, composition: c };
         }
     }
-    return { VERSION, lerp, clampCam, valueAt, windowMean, pairById, pairOf, fnv1a, x17, widenColumns, compose, reference, unexplained, quadOf, backIdx, Scene };
+    return { VERSION, lerp, clampCam, valueAt, windowMean, runOf, pairById, pairOf, fnv1a, x17, widenColumns, compose, reference, unexplained, quadOf, backIdx, Scene };
 })();
 if (typeof globalThis !== 'undefined') globalThis.WBSCENE = WBSCENE;
 if (typeof module !== 'undefined') module.exports = WBSCENE;
