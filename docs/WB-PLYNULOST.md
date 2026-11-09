@@ -485,6 +485,13 @@ carried on by the slope over 2 tau: 0.0005 px at any of those delays. Where the 
 (a page whose engine runs ahead) nothing changes. `scene.frame()` also starts a new history when a frame's time goes back: after
 a clock reset the old frames kept the mean on the oldest camera for 280 ms (a 10-row step in Xenon 2's measurement).
 
+2.10 (kit 1.0.37, Xenon 2 KIT-GAP 15): `objects[].scale = [sx, sy]` (default 1) and `objects[].anchor = [ax, ay]` (in the object's
+own pixels, default [0, 0]: the point of the image that stays at (x + ox, y + oy)) - Xenon 2's GET READY line, which the game redraws
+at 16 sizes one per 3-4 frames, can grow at the display's rate. The scale interpolates between the pair like the position; the quad
+is round(w * sx * S) x round(h * sy * S) device px and each of its pixels shows the source pixel (i * w) div qw, whole numbers on
+both paths, so the GPU equals the reference (`?scale=1`, Chromium and WebKit, 0 px, with the shift and with alpha too). Scale 1 draws
+byte for byte as before; a first appearance is at its own scale; scale 0 not at all.
+
 The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
 the 2D path; `?fine=1` the subpixel shift) runs a generated map, a clean window with decorations the map does not have and holes the map shows
 through, three objects on a 25 Hz loop (one blinking), a sprite and HUD rows on the kit's clock; its hooks are

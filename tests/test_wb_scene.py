@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.9' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.10' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -361,7 +361,7 @@ def _run_page(url_tail, fn, browser='chromium'):
         srv.shutdown()
 
 
-@pytest.mark.parametrize('tail', ['?s=2&alpha=1&pair=2', '?s=1.9943&fine=1&alpha=1&mean=1', '?s=2.5&scrobj=1&mean=1', '?s=1.9943&fine=1&scrobj=1&mean=1', '?s=2&back=1', '?s=1.9943&fine=1&back=1&mean=1', '?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1', '?s=2&paltop=1&palscreen=1', '?s=1.9943&fine=1&paltop=1&palscreen=1'])
+@pytest.mark.parametrize('tail', ['?s=2&scale=1&pair=2', '?s=1.9943&fine=1&scale=1&alpha=1&mean=1', '?s=2&alpha=1&pair=2', '?s=1.9943&fine=1&alpha=1&mean=1', '?s=2.5&scrobj=1&mean=1', '?s=1.9943&fine=1&scrobj=1&mean=1', '?s=2&back=1', '?s=1.9943&fine=1&back=1&mean=1', '?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1', '?s=2&paltop=1&palscreen=1', '?s=1.9943&fine=1&paltop=1&palscreen=1'])
 def test_gpu_equals_the_reference(tail):
     """The GPU band against the CPU reference of the same composition, pixel for pixel, while the camera moves and the
     objects interpolate (as Alien Breed II checked its WebGL path: 0 of 60 M pixels)."""
@@ -529,3 +529,33 @@ def test_the_camera_mean_past_the_newest_frame():
         sc.frame(mk(6, 10000, [0, 0], 0)); sc.frame(mk(7, 10020, [0, 0], 0)); console.warn = warn;
         return [sc.frames.length, sc.frames[0].t, sc.stats.resets]; })()"""))
     assert r == [2, 10000, 1]
+
+
+def test_objects_with_a_scale():
+    """2.10 (Xenon 2 KIT-GAP 15): objects[].scale and anchor - the quad is round(w * sx * S) x round(h * sy * S), the nearest source
+    pixel in whole numbers, the anchor point stays at (x + ox, y + oy), interpolated between the pair; scale 1 draws byte for byte as
+    before, a first appearance at its own scale, scale 0 not at all."""
+    body = """(() => { const img = Uint8Array.from([1, 2, 3, 4]);   // 2 x 2
+        const a = mk(1, 0, [0, 0], 0), b = mk(2, 20, [0, 0], 0); a.sprites = []; b.sprites = [];
+        const o = { id: 5, w: 2, h: 2, idx: img, x: 40, y: 40 };
+        a.objects = [Object.assign({}, o, A_FIELDS)]; b.objects = [Object.assign({}, o, B_FIELDS)]; FIRST
+        a.limits = b.limits = { x0: 0, x1: 0, y0: 0, y1: 0 };
+        const win = Object.assign({}, a.window, { w: 100, h: 100, idx: new Uint8Array(10000).fill(255), pal: new Uint8Array(100 * 32 * 4) }); for (let r = 0; r < 100; r++) for (let i = 0; i < 32; i++) { win.pal[(r * 32 + i) * 4] = i * 10; win.pal[(r * 32 + i) * 4 + 3] = 255; }
+        a.window = b.window = win; a.map = b.map = null;
+        const c = S.compose([a, b], 10, { S: 1 }, {}, null), px = S.reference(c), R = (x, y) => px[(y * 100 + x) * 4];
+        const box = []; for (let y = 30; y < 60; y++) for (let x = 30; x < 60; x++) if (R(x, y)) box.push([x, y, R(x, y) / 10]);
+        return { sc: c.objs[0].sc, box }; })()"""
+    def run(af, bf, first=''):
+        return js(with_mk(body.replace('A_FIELDS', af).replace('B_FIELDS', bf).replace('FIRST', first)))
+    plain = run('{}', '{}')
+    assert plain['sc'] == [1, 1] and plain['box'] == [[40, 40, 1], [41, 40, 2], [40, 41, 3], [41, 41, 4]]
+    assert run('{ scale: [1, 1], anchor: [0, 0] }', '{ scale: [1, 1], anchor: [0, 0] }')['box'] == plain['box']   # scale 1 = as before
+    two = run('{ scale: [2, 2] }', '{ scale: [2, 2] }')['box']
+    assert len(two) == 16 and [40, 40, 1] in two and [43, 40, 2] in two and [40, 43, 3] in two and [43, 43, 4] in two   # nearest, whole numbers
+    mid = run('{ scale: [1, 1] }', '{ scale: [3, 1] }')                                # half way: 2 x 1
+    assert mid['sc'] == [2, 1] and len(mid['box']) == 8
+    anc = run('{ scale: [2, 2], anchor: [1, 1] }', '{ scale: [2, 2], anchor: [1, 1] }')['box']   # the image's (1, 1) stays at (40, 40)
+    assert min(p[0] for p in anc) == 38 and max(p[0] for p in anc) == 41 and [40, 40, 4] in anc
+    first = run('{}', '{ scale: [2, 2] }', 'a.objects = [];')                           # a first appearance: at its own scale
+    assert first['sc'] == [2, 2] and len(first['box']) == 16
+    assert run('{ scale: [0, 0] }', '{ scale: [0, 0] }')['box'] == []                  # scale 0: not at all
