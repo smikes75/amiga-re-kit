@@ -1,4 +1,5 @@
 import struct
+from pathlib import Path
 
 import pytest
 
@@ -324,3 +325,21 @@ def test_poke_specs_and_file(tmp_path):
     assert e['VAHL_POKE'] == p
     with pytest.raises(trace.TraceError, match='vamiga-poke-899da5d.patch'):
         trace.require_patch('/bin/ls', ['VAHL_POKE'])
+
+
+def test_input_window_and_a_list_of_shot_frames(tmp_path):
+    """1.0.36 (Amiga Dash KIT-GAPs 1, 2): VAHL_INPUTS_V = the lines whose first hit takes a frame's input (a game without a VBL
+    handler), VAHL_SHOTS_LIST = several windows and single frames in one run; both name vamiga-frames-899da5d.patch."""
+    inp = tmp_path / 'in.txt'
+    inp.write_text('R\nF\n')
+    e = trace.env(tmp_path / 'r.vtr', inputs=str(inp), inputs_v=(290, 312), shots=str(tmp_path / 's'), shot_frames='100:104,900,1500:1502')
+    assert e['VAHL_INPUTS_V'] == '290:312' and e['VAHL_SHOTS_LIST'] == '100:104,900:900,1500:1502' and 'VAHL_SHOTS_FRAMES' not in e
+    e = trace.env(tmp_path / 'r.vtr', shots=str(tmp_path / 's'), shot_frames=(100, 104))
+    assert e['VAHL_SHOTS_FRAMES'] == '100:104' and 'VAHL_SHOTS_LIST' not in e                 # one window: any build with shots
+    assert trace.shot_windows([(1, 2), 7]) == [(1, 2), (7, 7)] and trace.shot_windows('5') == [(5, 5)]
+    assert 'VAHL_INPUTS_V' not in trace.env(tmp_path / 'r.vtr', inputs=str(inp))
+    old = tmp_path / 'VAHeadless'
+    old.write_bytes(b'VAHL_TRACE VAHL_INPUTS VAHL_SHOTS VAHL_SHOTS_FRAMES')
+    with pytest.raises(trace.TraceError, match='vamiga-frames-899da5d.patch.*VAHL_SHOTS_LIST'):
+        trace.require_patch(str(old), ['VAHL_TRACE', 'VAHL_SHOTS', 'VAHL_SHOTS_LIST'])
+    assert (Path(trace.__file__).parent / 'patches' / 'vamiga-frames-899da5d.patch').read_text().count('VAHL_INPUTS_V') >= 1

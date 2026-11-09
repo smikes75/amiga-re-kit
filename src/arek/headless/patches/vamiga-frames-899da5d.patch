@@ -1,0 +1,55 @@
+--- a/Core/Components/CPU/CPU.cpp
++++ b/Core/Components/CPU/CPU.cpp
+@@ -327,7 +327,11 @@
+         if (const char *p = getenv("VAHL_INPUTS")) { std::ifstream in(p); std::string line; while (std::getline(in, line)) vahl_inputs.push_back(line); }
+     }
+     static i64 lastFrame = -1;   // only the first hit of a frame (VBL); a copper interrupt high on the screen does not take an input line
+-    if (vahl_inputs.empty() || vpos >= 100 || amiga.agnus.pos.frame == lastFrame) return;
++    // VAHL_INPUTS_V=lo:hi (amiga-re-kit 1.0.36): the lines whose first hit takes the frame's input, default 0:99 (the VBL); a game
++    // without a VBL handler that waits for a raster line low on the screen gives its own window (or 0:312 = the first hit at all)
++    static int vahl_vlo = 0, vahl_vhi = 99; static bool vahl_v_probed = false;
++    if (!vahl_v_probed) { vahl_v_probed = true; if (const char *w = getenv("VAHL_INPUTS_V")) { vahl_vlo = atoi(w); const char *c = strchr(w, ':'); vahl_vhi = c ? atoi(c + 1) : vahl_vlo; } }
++    if (vahl_inputs.empty() || vpos < vahl_vlo || vpos > vahl_vhi || amiga.agnus.pos.frame == lastFrame) return;
+     lastFrame = amiga.agnus.pos.frame;
+     std::string k = vahl_input_k < vahl_inputs.size() ? vahl_inputs[vahl_input_k] : std::string(); vahl_input_k++;
+     auto &j = amiga.controlPort2.joystick;
+--- a/Core/Components/Agnus/VahlShots.h
++++ b/Core/Components/Agnus/VahlShots.h
+@@ -9,22 +9,31 @@
+ 
+ namespace vahlshots {
+ 
++// VAHL_SHOTS_LIST=a:b,c,d:e (amiga-re-kit 1.0.36) in place of VAHL_SHOTS_FRAMES: several windows or single frames in one run.
+ inline bool wanted(long long frame, std::string &path)
+ {
+     static bool probed = false;
+     static std::string prefix;
+-    static long long first = 0, last = -1;
++    static long long win[64][2]; static int nwin = 0;
+     if (!probed) {
+         probed = true;
+-        const char *p = std::getenv("VAHL_SHOTS"), *w = std::getenv("VAHL_SHOTS_FRAMES");
++        const char *p = std::getenv("VAHL_SHOTS"), *w = std::getenv("VAHL_SHOTS_LIST");
++        if (!w) w = std::getenv("VAHL_SHOTS_FRAMES");
+         if (p && w) {
+             prefix = p;
+-            first = std::atoll(w);
+-            const char *c = std::strchr(w, ':');
+-            last = c ? std::atoll(c + 1) : first;
++            for (const char *q = w; *q && nwin < 64; ) {
++                long long a = std::atoll(q), b = a;
++                const char *c = std::strchr(q, ':'), *e = std::strchr(q, ',');
++                if (c && (!e || c < e)) b = std::atoll(c + 1);
++                win[nwin][0] = a; win[nwin][1] = b; nwin++;
++                if (!e) break;
++                q = e + 1;
++            }
+         }
+     }
+-    if (prefix.empty() || frame < first || frame > last) return false;
++    bool in = false;
++    for (int i = 0; i < nwin && !in; i++) in = frame >= win[i][0] && frame <= win[i][1];
++    if (prefix.empty() || !in) return false;
+     char buf[32];
+     std::snprintf(buf, sizeof buf, "_%06lld.raw", frame);
+     path = prefix + buf;

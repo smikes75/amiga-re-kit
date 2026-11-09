@@ -41,9 +41,11 @@ track 80; reads of sector 1 succeed; the same disk and loader work on
 899da5d). The ROM `trackdisk.device` path was not affected in that test.
 Which upstream commit between the two fixed it is not known. Use 899da5d.
 
-**The kit's build (2026-11-07, kit 1.0.22):** all seven patches in the order headless, trace-ranges, inputs-reglog,
-buslog, shots-regset, poke, mouse; `arek selftest inputs|display|bus|audio|mouse` all exact on it. Name it by its
-features (`VAHeadless-899da5d-kit-mouse`) and record its sha256 next to every measurement; a build without the mouse
+**The kit's build (2026-11-09, kit 1.0.36):** all eight patches in the order headless, trace-ranges, inputs-reglog,
+buslog, shots-regset, poke, mouse, frames; `arek selftest inputs|display|bus|audio|mouse` all exact on it, `arek selftest
+inputs --inputs-v 0:312` exact and `--inputs-v 200:312` not (the test's handler runs in the VBL). Name it by its features
+(`VAHeadless-899da5d-kit-frames`, sha256 ac50eecb82807f6b...; the 1.0.22 build without the frames patch was `-kit-mouse`) and
+record its sha256 next to every measurement; a build without the mouse
 patch ignores mouse tokens silently, which is why `arek trace run --inputs` with mouse tokens refuses it.
 
 **Which build do I have?** Both commits print `vAmiga Headless v5.0b2`; only
@@ -67,6 +69,7 @@ Optional patches on top of the headless one:
 | `vamiga-poke-899da5d.patch` | 899da5d + the five above | `VAHL_POKE`: write into the machine's memory when a frame begins or at the first breakpoint hit at a PC, then go on (`arek trace run --poke`); also fixes the frame number of `VAHL_SHOTS` pictures (they were labelled one too high) and makes `VAHL_REGLOG` see the Copper's colour writes |
 | `vamiga-buslog-899da5d.patch` | 899da5d + headless + trace-ranges + inputs-reglog | `VAHL_BUSLOG` (+ `VAHL_BUSLOG_FRAMES=first:last`): the owner of every DMA slot of every line, CPU waits with their PC, every blit with its registers and end (`arek trace bus`) |
 | `vamiga-mouse-899da5d.patch` | 899da5d + the six above (apply last) | RetroShell `mouse1 move dx=DX dy=DY` and, in `VAHL_INPUTS`, `m<dx>:<dy>` (the mouse of port 1 moves by dx, dy counter steps in the frame) and `B` / `C` (its left / right button held) - kit 1.0.22, Xenon 2's crack menu driven by the mouse |
+| `vamiga-frames-899da5d.patch` | 899da5d + the seven above (apply last) | 1.0.36 (Amiga Dash KIT-GAPs 1, 2): `VAHL_INPUTS_V=lo:hi` - the lines whose first breakpoint hit in a frame takes that frame's `VAHL_INPUTS` line (default 0:99, the VBL; a game without a VBL handler that waits for a raster line low on the screen gives its own, `arek trace run --inputs-v`); `VAHL_SHOTS_LIST=a:b,c,d:e` - several windows and single frames for `VAHL_SHOTS` in one run (`--shot-frames 100:104,900`) |
 | `vamiga-inputs-reglog-899da5d.patch` | 899da5d + headless + trace-ranges | `VAHL_INPUTS` (input per frame, frame exact), `VAHL_REGLOG` (DMACON/INTENA/INTREQ/ADKCON/AUDx writes), `VAHL_AUDLOG` (Paula output samples), `VAHL_TRACE_SKIP`, `VAHL_TRACE_FROM_FRAME`, hashed ranges `start:lenh` (from the Alien Breed project) |
 | `vamiga-regtrace.patch` | c59425d | ring buffer of every custom register write (WASM builds) |
 | `vamiga-wasm.patch` | c59425d | WebAssembly build without the emulation thread |

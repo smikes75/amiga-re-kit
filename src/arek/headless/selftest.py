@@ -132,7 +132,7 @@ def keys_of(joy, cia):
     return ''.join(k for k, on in zip('RLUDF', (r, l, u, dn, not cia & 0x80)) if on)
 
 
-def inputs(conf, frames=240, seed=7, timeout=300, keep=None, mouse=True):
+def inputs(conf, frames=240, seed=7, timeout=300, keep=None, mouse=True, inputs_v=None):
     """Run the self-test; returns ``{'frames': n, 'match': n, 'mismatch': [(k, want, got)], 'mouse_match': n,
     'mouse_mismatch': [(k, want, got)]}`` - the mouse part (1.0.22) compares JOY0DAT with the sum of the lines' steps
     and CIA-A PRA bit 6 with the held left button."""
@@ -150,7 +150,7 @@ def inputs(conf, frames=240, seed=7, timeout=300, keep=None, mouse=True):
     out = os.path.join(tmp, 'selftest.vtr')
     seconds = 6 + frames / 50.0
     trace.capture(conf, out, [], 6, int(seconds) + 1, breaks=[HANDLER],
-                  ranges=[(0x4fff0, 4), (0x50000, REC * (frames + 400))], adf=path, timeout=timeout, inputs=inp)
+                  ranges=[(0x4fff0, 4), (0x50000, REC * (frames + 400))], adf=path, timeout=timeout, inputs=inp, inputs_v=inputs_v)
     recs = list(trace.records(out))
     if len(recs) < 2:
         raise trace.TraceError('the handler at $%x was not hit - see %s.log' % (HANDLER, out))

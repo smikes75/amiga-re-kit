@@ -778,7 +778,8 @@ def cmd_selftest(a):
         if not r['ok']:
             raise RuntimeError('RetroShell mouse1 move is not in this build (vamiga-mouse-899da5d.patch; files in %s)' % r['dir'])
         return
-    r = selftest.inputs(conf, frames=a.frames, timeout=a.timeout, mouse=not a.no_mouse)
+    r = selftest.inputs(conf, frames=a.frames, timeout=a.timeout, mouse=not a.no_mouse,
+                        inputs_v=[int(x) for x in a.inputs_v.split(':')] if a.inputs_v else None)
     print('%s: inputs %d/%d frames exact%s; mouse %d/%d%s' % (conf['VAHL'], r['match'], r['frames'],
                                                '' if not r['mismatch'] else ', first wrong: %s' % (r['mismatch'][:3],),
                                                r['mouse_match'], r['frames'], '' if not r['mouse_mismatch'] else ', first wrong: %s' % (r['mouse_mismatch'][:3],)))
@@ -800,8 +801,8 @@ def cmd_trace(a):
                           skip=a.skip, from_frame=a.from_frame, buslog=a.buslog,
                           bus_frames=[int(x) for x in a.bus_frames.split(':')] if a.bus_frames else None,
                           reglog_regs=a.reglog_regs, shots=a.shots,
-                          shot_frames=[int(x) for x in a.shot_frames.split(':')] if a.shot_frames else None,
-                          pokes=a.poke)
+                          shot_frames=a.shot_frames or None, pokes=a.poke,
+                          inputs_v=[int(x) for x in a.inputs_v.split(':')] if a.inputs_v else None)
         if a.shots:
             print('%d pictures: %s_<frame>.png' % (len(trace.shot_files(a.shots)), a.shots))
         print('%s: %d records' % (a.file, n))
@@ -1168,7 +1169,10 @@ def build_parser():
     s.add_argument('--frame', type=int, help='bus: the slot map of this frame, one line per raster line')
     s.add_argument('--reglog-regs', metavar='SPEC', help='run: registers --reglog records, hex, e.g. 0e0-0f6,08e,090,180-1be')
     s.add_argument('--shots', metavar='PREFIX', help='run: the picture of every frame in --shot-frames (PREFIX_<frame>.png)')
-    s.add_argument('--shot-frames', metavar='FIRST:LAST', help='run: frames --shots covers')
+    s.add_argument('--shot-frames', metavar='FIRST:LAST[,N,...]', help='run: frames --shots covers; 1.0.36: several windows or single '
+                   'frames, e.g. 100:104,900,1500:1502 (needs vamiga-frames-899da5d.patch)')
+    s.add_argument('--inputs-v', metavar='LO:HI', help='run: the lines whose first breakpoint hit in a frame takes its --inputs line '
+                   '(default 0:99, the VBL); a game without a VBL handler gives its own, e.g. 290:312 (1.0.36, vamiga-frames-899da5d.patch)')
     s.add_argument('--poke', nargs='*', metavar='F<frame>|PC:ADDR=HEX|@FILE',
                    help='run: write into the machine when frame F begins (decimal) or at the first breakpoint hit '
                         'at PC (hex, give it with --break), then go on; e.g. F8600:c00ffc=0002, c01b06:c00faa=@world.bin')
@@ -1327,6 +1331,7 @@ def build_parser():
     s.add_argument('what', choices=['inputs', 'display', 'bus', 'audio', 'mouse'])
     s.add_argument('--c', action='store_true', help='display: the C renderer (arek_display.h) instead of arek.display')
     s.add_argument('--no-mouse', action='store_true', help='inputs: skip the mouse tokens (a build without vamiga-mouse-899da5d.patch)')
+    s.add_argument('--inputs-v', metavar='LO:HI', help='inputs: the input line window of the run (1.0.36): 0:312 must match, 200:312 must not (the test\'s handler runs in the VBL)')
     s.add_argument('--conf', default='local.conf', help='needs ROM (and VAHL unless --vahl)')
     s.add_argument('--vahl', help='the binary to test instead of VAHL from the conf')
     s.add_argument('--frames', type=int, default=240)

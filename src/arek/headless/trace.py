@@ -34,6 +34,10 @@ Needs a VAHeadless built with one of the trace patches:
     breakpoint hit at a PC, then go on (``write_pokes``, ``arek trace run --poke``) - e.g. a game's
     own password bytes, to reach a later world without playing there.
 ``vamiga-buslog-899da5d.patch`` (on top of inputs-reglog)
+``vamiga-frames-899da5d.patch`` (1.0.36, on top of all seven, apply last)
+    ``VAHL_INPUTS_V=lo:hi``: the lines whose first breakpoint hit in a frame takes that frame's input (default 0:99, the
+    VBL) - a game without a VBL handler, waiting for a raster line low on the screen, gives its own window (Amiga Dash);
+    ``VAHL_SHOTS_LIST=a:b,c,d:e``: several frame windows or single frames for ``VAHL_SHOTS`` in one run.
     ``VAHL_BUSLOG=<file>``, ``VAHL_BUSLOG_FRAMES=first:last``: who used the chip bus in every DMA
     slot of every line, the cycles the CPU waited for it (with its PC) and every blit
     (``read_buslog``, ``bus_summary``, ``bus_line``; ``arek trace bus``). The ground truth for a
@@ -222,8 +226,9 @@ def inputs_use_mouse(path):
 
 def env(path, ranges=None, length=None, inputs=None, reglog=None, audlog=None, skip=None,
         from_frame=None, buslog=None, bus_frames=None, reglog_regs=None, shots=None, shot_frames=None,
-        poke=None):
-    """Environment for a traced run of the patched VAHeadless."""
+        poke=None, inputs_v=None):
+    """Environment for a traced run of the patched VAHeadless. ``shot_frames``: (first, last), or (1.0.36) a list of
+    windows and single frames [(a, b), c, ...] or the text 'a:b,c'; ``inputs_v``: (lo, hi) lines for the input of a frame."""
     e = {'VAHL_TRACE': str(path)}
     if ranges:
         e['VAHL_TRACE_RANGES'] = ranges_arg(ranges)
@@ -232,6 +237,8 @@ def env(path, ranges=None, length=None, inputs=None, reglog=None, audlog=None, s
     if inputs:
         check_inputs(inputs)
         e['VAHL_INPUTS'] = os.path.abspath(inputs)
+        if inputs_v is not None:
+            e['VAHL_INPUTS_V'] = '%d:%d' % tuple(inputs_v)
     if reglog:
         e['VAHL_REGLOG'] = os.path.abspath(reglog)
     if audlog:
@@ -250,10 +257,28 @@ def env(path, ranges=None, length=None, inputs=None, reglog=None, audlog=None, s
         if not shot_frames:
             raise TraceError('shots need a frame window (first, last)')
         e['VAHL_SHOTS'] = os.path.abspath(shots)
-        e['VAHL_SHOTS_FRAMES'] = '%d:%d' % tuple(shot_frames)
+        wins = shot_windows(shot_frames)
+        if len(wins) == 1:
+            e['VAHL_SHOTS_FRAMES'] = '%d:%d' % wins[0]
+        else:                                               # 1.0.36: several windows need vamiga-frames-899da5d.patch
+            e['VAHL_SHOTS_LIST'] = ','.join('%d:%d' % w for w in wins)
     if poke:
         e['VAHL_POKE'] = os.path.abspath(poke)
     return e
+
+
+def shot_windows(frames):
+    """(first, last), [(a, b), c, ...] or 'a:b,c' -> [(a, b), ...] (1.0.36)."""
+    if isinstance(frames, str):
+        out = []
+        for part in frames.split(','):
+            a, _, b = part.strip().partition(':')
+            out.append((int(a), int(b) if b else int(a)))
+        return out
+    frames = list(frames)
+    if len(frames) == 2 and all(isinstance(x, int) for x in frames):
+        return [(frames[0], frames[1])]
+    return [(w, w) if isinstance(w, int) else (int(w[0]), int(w[1])) for w in frames]
 
 
 def parse_poke(spec):
@@ -435,7 +460,8 @@ PATCH_OF = {'VAHL_TRACE': 'vamiga-trace*.patch', 'VAHL_TRACE_RANGES': 'vamiga-tr
             'VAHL_BUSLOG': 'vamiga-buslog-899da5d.patch', 'VAHL_BUSLOG_FRAMES': 'vamiga-buslog-899da5d.patch',
             'VAHL_REGLOG_REGS': 'vamiga-shots-regset-899da5d.patch', 'VAHL_SHOTS': 'vamiga-shots-regset-899da5d.patch',
             'VAHL_SHOTS_FRAMES': 'vamiga-shots-regset-899da5d.patch', 'VAHL_POKE': 'vamiga-poke-899da5d.patch',
-            'VAHL_MOUSE_OFF': 'vamiga-mouse-899da5d.patch'}   # 1.0.22: the mouse in VAHL_INPUTS and `mouse1 move` (the env switches it off)
+            'VAHL_MOUSE_OFF': 'vamiga-mouse-899da5d.patch',
+            'VAHL_INPUTS_V': 'vamiga-frames-899da5d.patch', 'VAHL_SHOTS_LIST': 'vamiga-frames-899da5d.patch'}   # 1.0.36   # 1.0.22: the mouse in VAHL_INPUTS and `mouse1 move` (the env switches it off)
 
 
 def require_patch(vahl, variables):
@@ -451,7 +477,7 @@ def require_patch(vahl, variables):
 
 def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None, adf=None,
             timeout=1200, setup=(), inputs=None, reglog=None, audlog=None, skip=None, from_frame=None,
-            buslog=None, bus_frames=None, reglog_regs=None, shots=None, shot_frames=None, pokes=None):
+            buslog=None, bus_frames=None, reglog_regs=None, shots=None, shot_frames=None, pokes=None, inputs_v=None):
     """Run the original with ``events`` (``[(second, retroshell command)]``),
     arm the trace at ``t_arm`` and stop at ``t_end``. Writes ``out`` (the
     trace), ``out + '.retrosh'`` (the script) and ``out + '.log'``; returns
@@ -463,7 +489,7 @@ def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None,
     adf = shot.check_disk(conf, adf or conf.get('ADF1'))
     e = env(out, ranges, inputs=inputs, reglog=reglog, audlog=audlog, skip=skip, from_frame=from_frame,
             buslog=buslog, bus_frames=bus_frames, reglog_regs=reglog_regs, shots=shots, shot_frames=shot_frames,
-            poke=poke)
+            poke=poke, inputs_v=inputs_v)
     needed = [k for k in e if k != 'VAHL_TRACE_LEN']
     if any(len(r) > 2 and r[2] for r in ranges or ()):
         needed.append('VAHL_TRACE_SKIP')            # hashed ranges came with the inputs/reglog patch
