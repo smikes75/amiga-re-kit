@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.8' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.9' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -41,7 +41,7 @@ def test_window_mean_over_the_interpolated_value():
     with the last velocity for at most tau; 'past' = a triangle over the last tau ms (the vertical smoothing)."""
     fr = '[{t: 0, v: 0}, {t: 20, v: 10}, {t: 40, v: 20}]'
     assert js('S.windowMean(%s, 20, 20, (f) => f.v)' % fr) == 10                               # a ramp: its middle
-    assert abs(js('S.windowMean(%s, 60, 20, (f) => f.v)' % fr) - 245 / 9) < 1e-9             # 40..80: 20, 22.5, 25, 27.5, then 30 (capped at tau)
+    assert js('S.windowMean(%s, 60, 20, (f) => f.v)' % fr) == 30                               # 2.9: 40..80 past the newest - the mean up to 40, carried by the slope (the ramp)
     assert js('S.windowMean(%s, 200, 20, (f) => f.v)' % fr) == 30                              # far past the newest: tau only
     assert js('S.windowMean(%s, 40, 20, (f) => f.v, { shape: "past" })' % fr) == 17.5          # the triangle over 20..40 of the ramp
     assert js('[S.valueAt(%s.map((x) => x), 10, (f) => f.v, 20), S.valueAt(%s, -5, (f) => f.v, 20), S.valueAt(%s, 50, (f) => f.v, 20)]' % (fr, fr, fr)) == [5, 0, 25]
@@ -514,3 +514,18 @@ def test_objects_with_alpha():
         if plain['px'][i:i + 3] != under[i:i + 3]:
             assert half['px'][i:i + 3] == [(under[i + k] * 128 + plain['px'][i + k] * 128 + 128) >> 8 for k in range(3)]
     assert any(plain['px'][i:i + 3] != under[i:i + 3] for i in range(0, 16, 4))
+
+
+def test_the_camera_mean_past_the_newest_frame():
+    """2.9 (Xenon 2 KIT-GAP 11): a camera moving a row every 3-frame pass with the newest frame a few ms late - the window
+    past it is the mean up to the newest frame carried by the slope over 2 tau, so the steps stay even (they were 0.07-0.28 px
+    uneven with the last two frames' velocity); and a frame stamped before the previous one starts a new history."""
+    r = js("""(() => { const fr = []; let cy = 5000; for (let i = 0; i < 300; i++) { if (i % 3 === 0) cy -= 1; fr.push({ t: i * 19.968, v: cy }); }
+        const out = []; for (let ts = 2000; ts < 4000; ts += 16.667) { const vis = fr.filter((f) => f.t <= ts - 9); out.push(S.windowMean(vis.slice(-32), ts - 28, 29.952, (f) => f.v, { step: 1 })); }
+        const st = out.slice(1).map((v, i) => v - out[i]); return [Math.min(...st), Math.max(...st)]; })()""")
+    assert r[1] - r[0] < 0.01 and abs((r[0] + r[1]) / 2 + 0.278) < 0.01
+    r = js(with_mk("""(() => { const sc = new S.Scene({}); const warn = console.warn; console.warn = () => {};
+        for (let i = 0; i < 5; i++) sc.frame(mk(i + 1, 60000 + i * 20, [0, 0], 0));
+        sc.frame(mk(6, 10000, [0, 0], 0)); sc.frame(mk(7, 10020, [0, 0], 0)); console.warn = warn;
+        return [sc.frames.length, sc.frames[0].t, sc.stats.resets]; })()"""))
+    assert r == [2, 10000, 1]

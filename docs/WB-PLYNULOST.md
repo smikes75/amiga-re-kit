@@ -477,6 +477,14 @@ quantised once to a = round(alpha * 256) and blended after the palette lookup in
 them in whole numbers, so the GPU equals the reference (Chromium and WebKit, 0 px, `?alpha=1` on the synthetic page); alpha 1 draws
 byte for byte as before, alpha 0 not at all.
 
+2.9 (kit 1.0.35, Xenon 2 KIT-GAP 11): Xenon 2's camera moves a row every 3-frame pass and its newest frame came a few ms after
+the end of camMean's window (latC 28, tau 29.952); past the newest frame the value was carried by the last two frames' velocity -
+0 or a whole row on that staircase - and the camera stepped 0.07 px unevenly (0.09 / 0.20 / 0.28 px with the newest frame 0 / 9 /
+15 ms late in a simulation). The window past the newest frame is now the mean of the window that ends at the newest frame,
+carried on by the slope over 2 tau: 0.0005 px at any of those delays. Where the window does not reach past the newest frame
+(a page whose engine runs ahead) nothing changes. `scene.frame()` also starts a new history when a frame's time goes back: after
+a clock reset the old frames kept the mean on the oldest camera for 280 ms (a 10-row step in Xenon 2's measurement).
+
 The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
 the 2D path; `?fine=1` the subpixel shift) runs a generated map, a clean window with decorations the map does not have and holes the map shows
 through, three objects on a 25 Hz loop (one blinking), a sprite and HUD rows on the kit's clock; its hooks are

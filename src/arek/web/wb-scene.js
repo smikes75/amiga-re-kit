@@ -1,4 +1,4 @@
-// wb-scene.js 2.8 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
+// wb-scene.js 2.9 - the scene of a rebuild on the display's clock (amiga-re-kit, docs/WB-PLYNULOST.md, module G, kit 0.9.0; 1.1 kit 0.9.1
 // after Superfrog's switch - KIT-GAPS 40-43: screen-fixed sprites, the means over the interpolated camera, a layer of
 // drawings without identity, a guard for a pass that never changes, one timebase; 1.2 kit 0.9.2 - KIT-GAPS 44-46: no
 // interpolation across a jump, sprites[].id, camMean for both axes; 1.3 kit 0.9.3 - objects[].ox/oy, the drawing's offset
@@ -34,7 +34,11 @@
 // = true marks an object fixed on the screen in every pass (also when the camera stood still between the pair);
 // 2.8 kit 1.0.34 - objects[].alpha (Xenon 2 KIT-GAP 14: enemies the game spawns in an experimental band below the window fade in):
 // interpolated between the pair like the position, quantised to a = round(alpha * 256), blended after the palette lookup in RGB
-// with what is drawn below in whole numbers on both paths, (below * (256 - a) + colour * a + 128) >> 8; alpha 1 draws as before.
+// with what is drawn below in whole numbers on both paths, (below * (256 - a) + colour * a + 128) >> 8; alpha 1 draws as before;
+// 2.9 kit 1.0.35 - camMean's window past the newest frame (Xenon 2 KIT-GAP 11: a camera moving a row every 3-frame pass, the newest
+// frame a few ms late, gave 0.07-0.28 px of jitter): the mean of the window that ends at the newest frame, carried on by the slope
+// over 2 tau, instead of the last two frames' velocity (0 or a whole row on a staircase); frame() starts a new history when a
+// frame's time goes back (a clock reset left the old frames, and the mean held the oldest one for 280 ms).
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -127,7 +131,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '2.8';
+    const VERSION = '2.9';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -166,6 +170,16 @@ const WBSCENE = (() => {
     function windowMean(frames, t, tau, pick, opts) {
         if (!frames.length) return null;
         const step = (opts && opts.step) || 5, past = !!(opts && opts.shape === 'past');
+        if (!past && !(opts && opts.held) && frames.length > 1) {
+            // 2.9 (Xenon 2 KIT-GAP 11): the window reaches past the newest frame by d - the mean of the window that ends at
+            // the newest frame, carried on by the slope over 2 tau (a whole pass of a game that moves every few frames)
+            const last = frames[frames.length - 1], d = t + tau - last.t;
+            if (d > 0 && d <= 2 * tau) {
+                let k = frames.length - 2; while (k > 0 && frames[k].t > last.t - 2 * tau + 1e-6) k--;
+                const v = last.t > frames[k].t ? (pick(last) - pick(frames[k])) / (last.t - frames[k].t) : 0;
+                return windowMean(frames, t - d, tau, pick, Object.assign({}, opts, { held: true })) + v * d;
+            }
+        }
         let sum = 0, wsum = 0;
         for (let s = t - tau; s <= (past ? t : t + tau) + 1e-9; s += step) {
             const w = past ? (s - (t - tau)) / tau : 1; if (w <= 0) continue;
@@ -537,6 +551,11 @@ const WBSCENE = (() => {
         }
         /** A game frame record (see the header); keeps the last `ring` frames in time order. */
         frame(rec) {
+            const prev = this.frames.length ? this.frames[this.frames.length - 1] : null;
+            if (prev && rec.t < prev.t - 1e-6) {               // 2.9: time went back (the clock was reset) - a new history
+                this.frames.length = 0; this.last = null; this.stats.resets = (this.stats.resets || 0) + 1;
+                if (!this.warnedBack) { this.warnedBack = true; console.warn('wb-scene: a frame stamped ' + Math.round(prev.t - rec.t) + ' ms before the previous one - the history starts again (reset the scene with the clock)'); }
+            }
             if (rec.objects) for (const ob of rec.objects) if (ob.key === undefined) ob.key = fnv1a(ob.idx, (ob.w << 16) ^ ob.h);
             if (rec.map && rec.map.dirty) for (let i = 0; i < rec.map.dirty.length; i++) this.dirty.add(rec.map.dirty[i]);   // G56: a frame that is never B still changed the atlas
             this.frames.push(rec); if (this.frames.length > this.ring) this.frames.shift(); this.stats.frames++;
