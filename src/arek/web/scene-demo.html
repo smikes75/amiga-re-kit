@@ -62,6 +62,7 @@ function cleanWindow(cx, cy) {
 // (a row every 4 frames), a 64 x 48 picture repeating on both axes; stars ORed onto it through the holes (window.or)
 const BACK = Q.get('back') === '1';
 const SCROBJ = Q.get('scrobj') === '1';
+const ALPHA = Q.get('alpha') === '1';                                     // 2.8: objects fading in (0, .25, .5, .75, 1) and one at half
 const BACKIMG = new Uint8Array(64 * 48); for (let y = 0; y < 48; y++) for (let x = 0; x < 64; x++) BACKIMG[y * 64 + x] = 4 + (((x >> 3) ^ (y >> 3)) & 3) + ((x + y) % 7 === 0 ? 8 : 0);
 const ORS = new Uint8Array(W0 * H0);
 function orLayer(cx, cy) { ORS.fill(0); for (let y = 0; y < H0; y++) for (let x = 0; x < W0; x++) if (((cx + x) * 7 + (cy + y) * 13) % 89 === 0) ORS[y * W0 + x] = 16; return ORS; }
@@ -100,7 +101,7 @@ function step() {
   // 2.4: a third sprite standing in the world at (400, 150) (KIT-GAP 29), only while the hardware would show it
   scene.frame({ n: done, t, pass: scene.lastPass || t, cam: cam.slice(), limits, window: { w: W0, h: H0, idx: cleanWindow(cam[0], cam[1]), pal: PAL, palTop: PALTOP === null ? undefined : PALTOP, over: overLayer(done), or: BACK ? orLayer(cam[0], cam[1]) : undefined }, map: BACK ? undefined : map,   // the back layer shows where window and map leave a hole
     back: BACK ? { cam: [Math.floor(cam[0] / 2), Math.floor(cam[1] / 2) - (done >> 2)], w: 64, h: 48, idx: BACKIMG, origin: [0, 0], wrap: 'xy' } : undefined,
-    objects: objs.filter((o) => !(OBJ[o.id - 1].blink && (done & 1))).map((o) => ({ id: o.id, w: OBJ[o.id - 1].w, h: OBJ[o.id - 1].h, idx: OBJ[o.id - 1].idx, x: o.x, y: o.y, steady: o.id === 2 }))
+    objects: objs.filter((o) => !(OBJ[o.id - 1].blink && (done & 1))).map((o) => ({ id: o.id, w: OBJ[o.id - 1].w, h: OBJ[o.id - 1].h, idx: OBJ[o.id - 1].idx, x: o.x, y: o.y, steady: o.id === 2, alpha: ALPHA ? (o.id === 1 ? ((done >> 3) % 5) / 4 : o.id === 3 ? 0.5 : 1) : undefined }))
       .concat(SCROBJ ? [{ id: 9, w: 16, h: 16, idx: OBJ[0].idx, x: cam[0] + 40, y: cam[1] + 30, screen: true }] : []),   // 2.7: ?scrobj=1 an object fixed on the screen   // 1.6: object 2 stays on whole pixels under ?fine=1
     sprites: [{ k: 0, h: 24, idx: SPR, x: 152 + lean, y: UNDER ? -EXTY - 6 : 88 }, { k: 1, h: 10, idx: BADGE, x: 4, y: 4, screen: true }].concat(400 - cam[0] > -16 && 400 - cam[0] < W0 ? [{ k: 2, h: 10, idx: BADGE, x: 400 - cam[0], y: 150 - cam[1] }] : []), hud: { top: { h: HUD, rgba: HUDT, split: [60, 180, 260] }, bottom: { h: HUD, rgba: HUDB, split: [160] }, under: UNDER } });
 }

@@ -470,6 +470,13 @@ smoothings. An object on the screen - by its pair (2.4) or by `objects[].screen`
 position less its own frame's camera) and is drawn at round((ext + screen) * S), the same on both paths (objDev); with
 `screen` it stays there also when the camera stood still between the pair, and under the shift it is not glued to the ground.
 
+2.8 (kit 1.0.34, Xenon 2 KIT-GAP 14): `objects[].alpha` (0..1, default 1) - an object the game spawns in Xenon 2's experimental
+band below the window fades in instead of appearing out of nothing. The alpha interpolates between the pair like the position, is
+quantised once to a = round(alpha * 256) and blended after the palette lookup in RGB with whatever is below:
+(below * (256 - a) + colour * a + 128) >> 8. On the GPU the pixels under the quad are copied (copyTexImage2D) and the shader blends
+them in whole numbers, so the GPU equals the reference (Chromium and WebKit, 0 px, `?alpha=1` on the synthetic page); alpha 1 draws
+byte for byte as before, alpha 0 not at all.
+
 The synthetic page `scene-demo.html` (`arek web demo`, then `/scene-demo.html?s=2&pair=2&soft=1&smooth=1`; `?gl=0`
 the 2D path; `?fine=1` the subpixel shift) runs a generated map, a clean window with decorations the map does not have and holes the map shows
 through, three objects on a 25 Hz loop (one blinking), a sprite and HUD rows on the kit's clock; its hooks are

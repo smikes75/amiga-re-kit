@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.7' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.8' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -310,7 +310,7 @@ def test_gpu_equals_the_reference_at_a_fractional_scale_in_both_browsers(browser
         p.keyboard.up('ArrowRight')
         return res, p.evaluate('wbSceneTest.gl()')
     try:
-        res, gl = _run_page('?s=1.9943&fine=1&pair=2', go, browser)
+        res, gl = _run_page('?s=1.9943&fine=1&pair=2&alpha=1', go, browser)   # 2.8: with objects fading in
     except Exception as e:                                    # a browser not installed for playwright
         pytest.skip('no %s: %s' % (browser, str(e)[:80]))
     if not gl:
@@ -361,7 +361,7 @@ def _run_page(url_tail, fn, browser='chromium'):
         srv.shutdown()
 
 
-@pytest.mark.parametrize('tail', ['?s=2.5&scrobj=1&mean=1', '?s=1.9943&fine=1&scrobj=1&mean=1', '?s=2&back=1', '?s=1.9943&fine=1&back=1&mean=1', '?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1', '?s=2&paltop=1&palscreen=1', '?s=1.9943&fine=1&paltop=1&palscreen=1'])
+@pytest.mark.parametrize('tail', ['?s=2&alpha=1&pair=2', '?s=1.9943&fine=1&alpha=1&mean=1', '?s=2.5&scrobj=1&mean=1', '?s=1.9943&fine=1&scrobj=1&mean=1', '?s=2&back=1', '?s=1.9943&fine=1&back=1&mean=1', '?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1', '?s=2&paltop=1&palscreen=1', '?s=1.9943&fine=1&paltop=1&palscreen=1'])
 def test_gpu_equals_the_reference(tail):
     """The GPU band against the CPU reference of the same composition, pixel for pixel, while the camera moves and the
     objects interpolate (as Alien Breed II checked its WebGL path: 0 of 60 M pixels)."""
@@ -492,3 +492,25 @@ def test_an_object_on_the_screen_stands_still():
     assert xs == [360] and ys == [400]                                                  # (152 - 8) * 2.5, 160 * 2.5: still
     xs, ys = js(with_mk(body.replace('SCREEN', 'false')))
     assert xs == [360] and len(ys) <= 2                                                 # by the pair alone: on the screen while the camera moves
+
+
+def test_objects_with_alpha():
+    """2.8 (Xenon 2 KIT-GAP 14): objects[].alpha fades an object in - interpolated between the pair, a = round(alpha * 256),
+    (below * (256 - a) + colour * a + 128) >> 8 after the palette lookup; alpha 1 draws byte for byte as before, 0 not at all."""
+    body = """(() => { const a = mk(1, 0, [0, 0], 0), b = mk(2, 20, [0, 0], 0); a.sprites = []; b.sprites = [];
+        A_ALPHA; B_ALPHA;
+        const c = S.compose([a, b], 10, { S: 1 }, {}, null), px = S.reference(c);
+        return { a: c.objs[0].a, px: Array.from(px.slice(0, 16)) }; })()"""
+    def run(aa, ba):
+        return js(with_mk(body.replace('A_ALPHA', aa).replace('B_ALPHA', ba)))
+    plain = run('', '')
+    one = run('a.objects[0].alpha = 1', 'b.objects[0].alpha = 1')
+    assert plain['a'] == 256 and one == plain                                          # alpha 1 = as before
+    zero = run('a.objects[0].alpha = 0', 'b.objects[0].alpha = 0')
+    half = run('a.objects[0].alpha = 0', 'b.objects[0].alpha = 1')                    # half way between the pair: a = 128
+    assert zero['a'] == 0 and half['a'] == 128
+    under = zero['px']                                                                  # the window and the map where the object would be
+    for i in range(0, 16, 4):
+        if plain['px'][i:i + 3] != under[i:i + 3]:
+            assert half['px'][i:i + 3] == [(under[i + k] * 128 + plain['px'][i + k] * 128 + 128) >> 8 for k in range(3)]
+    assert any(plain['px'][i:i + 3] != under[i:i + 3] for i in range(0, 16, 4))
