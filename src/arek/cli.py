@@ -385,10 +385,14 @@ def cmd_diff(a):
     from . import contract
     x, y = contract.load(a.a), contract.load(a.b)
     ranges = [tuple(a.range)] if a.range else None
-    print(contract.format_runs(contract.compare(x['ram'], y['ram'], ranges)))
+    for name in contract.same_assets(x, y):
+        print('warning: the captures were made with a different %s (cpu.json assets)' % name, file=sys.stderr)
+    runs = contract.compare(x['ram'], y['ram'], ranges)
+    print(contract.format_runs(runs))
     regs = contract.diff_regs(x, y)
     if regs:
         print('registers: ' + ', '.join('%s %08x->%08x' % (k, v[0], v[1]) for k, v in sorted(regs.items())))
+    return 1 if runs or regs else 0                     # 1.0.39: a difference is an exit status
 
 
 def cmd_kb(a):
@@ -578,6 +582,8 @@ def cmd_parity(a):
         print(json.dumps(rows, indent=1))
     else:
         print(parity.format_suite(rows))
+    # 1.0.39: a scenario that compared nothing, lacks a side or ends early is exit 1; --fail: any difference is
+    return 0 if parity.suite_ok(rows, strict=a.fail) else 1
 
 
 def cmd_shots(a):
@@ -587,7 +593,7 @@ def cmd_shots(a):
         print(json.dumps(r, indent=1))
     else:
         print(parity.format_shots(r, a.all))
-    return 0 if r['pairs'] and r['equal'] == r['pairs'] else 1
+    return 0 if r['complete'] else 1
 
 
 def cmd_profile(a):
@@ -844,9 +850,9 @@ def cmd_trace(a):
             print(json.dumps(r, indent=1, default=str))
         else:
             print(parity.format_compare(r))
-        if r['first'] and a.fail:
-            raise RuntimeError('the traces differ')
-        return
+        if a.fail and not r['complete']:           # 1.0.39: no pairs, a rebuild that ends early or nothing to compare fail too
+            raise RuntimeError('the traces differ' if r['first'] else 'the comparison is not complete (see above)')
+        return 0 if r['pairs'] and not r['empty'] else 1
     if a.what == 'targets':
         from .headless import tracetools
         if not a.other:
@@ -1261,6 +1267,7 @@ def build_parser():
     s.add_argument('suite', help='SUITE.json (see arek.parity.suite)')
     s.add_argument('--base', default='.', help='paths in the suite are relative to this folder')
     s.add_argument('--no-run', action='store_true', help="do not run a scenario's make command for a missing original trace")
+    s.add_argument('--fail', action='store_true', help='exit 1 unless every scenario is complete and equal (without it: exit 1 only when a scenario has a PROBLEM - a side missing, nothing compared, a rebuild that ends early)')
     s.add_argument('--json', action='store_true')
     s.set_defaults(fn=cmd_parity)
     s = sp.add_parser('shots', help='the pictures of two runs (PREFIX_<frame>.raw, RGB24) paired by frame, with a screen-shake alignment')

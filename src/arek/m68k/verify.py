@@ -35,12 +35,19 @@ def call_pairs(records, image, base=0, vbl=None, max_per=3):
 
 
 def run_call(driver, tgt, before, after, chip_size=0x80000, timeout=5):
-    """One pair through the driver. Returns ``{'frame', 'chip_diff', 'slow_diff', 'regs_equal', 'first', 'notes'}``
-    or ``{'frame', 'error'}``."""
-    tmp = tempfile.mkdtemp(prefix='arek-verify')
+    """One pair through the driver. Returns ``{'frame', 'chip_diff', 'slow_diff', 'regs_equal', 'ccr_equal', 'first',
+    'notes'}`` or ``{'frame', 'error'}`` (1.0.39: the flags X N Z V C are compared too, the record after the call must
+    carry the chip RAM, and the work folder is removed)."""
     chip = before['ranges'].get(0)
     if chip is None:
         return {'frame': before['frame'], 'error': 'the record carries no chip RAM range from 0'}
+    if not after['ranges'].get(0):
+        return {'frame': before['frame'], 'error': 'the record after the call carries no chip RAM range from 0 (nothing to compare with)'}
+    with tempfile.TemporaryDirectory(prefix='arek-verify') as tmp:
+        return _run_call(tmp, driver, tgt, before, after, chip, chip_size, timeout)
+
+
+def _run_call(tmp, driver, tgt, before, after, chip, chip_size, timeout):
     slow_base = next((b for b in before['ranges'] if b >= chip_size), None)
     c_in, regs, c_out, log = (os.path.join(tmp, n) for n in ('c.bin', 'regs.txt', 'co.bin', 'log.txt'))
     with open(c_in, 'wb') as f:
@@ -75,7 +82,9 @@ def run_call(driver, tgt, before, after, chip_size=0x80000, timeout=5):
     with open(log) as f:
         rows = f.read().split('\n')
     regs_ok = [int(x, 16) for x in rows[:16]] == list(after['d']) + list(after['a'])
-    return {'frame': before['frame'], 'chip_diff': len(dc), 'slow_diff': len(ds), 'regs_equal': regs_ok,
+    want = after['sr']
+    ccr_ok = len(rows) > 16 and rows[16].split() == [str((want >> b) & 1) for b in (4, 3, 2, 1, 0)]
+    return {'frame': before['frame'], 'chip_diff': len(dc), 'slow_diff': len(ds), 'regs_equal': regs_ok, 'ccr_equal': ccr_ok,
             'first': ['$%x' % i for i in dc[:3]] + ['$%x' % i for i in ds[:3]],
             'notes': [l for l in rows if l.startswith(('note', 'hwreg', 'oob', 'exit'))][:6]}
 
@@ -92,11 +101,14 @@ def format_calls(res):
     L = []
     for t, lst in sorted(res.items()):
         for x in lst:
-            L.append('f_%06x fr %5d  %s' % (t, x['frame'], x.get('error') or 'chip %d slow %d regs %s %s %s' % (
-                x['chip_diff'], x['slow_diff'], x['regs_equal'], x['first'], x['notes'])))
-    ok = sum(1 for lst in res.values() for x in lst if not x.get('error') and not x['chip_diff'] and not x['slow_diff'] and x['regs_equal'])
+            L.append('f_%06x fr %5d  %s' % (t, x['frame'], x.get('error') or 'chip %d slow %d regs %s flags %s %s %s' % (
+                x['chip_diff'], x['slow_diff'], x['regs_equal'], x.get('ccr_equal'), x['first'], x['notes'])))
+    ok = sum(1 for lst in res.values() for x in lst if not x.get('error') and not x['chip_diff'] and not x['slow_diff']
+             and x['regs_equal'] and x.get('ccr_equal', True))
     n = sum(len(lst) for lst in res.values())
-    L.append('%d of %d calls equal (RAM and registers)' % (ok, n))
+    L.append('%d of %d calls equal (RAM, registers and flags)' % (ok, n))
+    if not n:
+        L.append('NOTHING COMPARED: the trace holds no call pair (a record at a jsr abs.l and the one at its return)')
     return '\n'.join(L)
 
 

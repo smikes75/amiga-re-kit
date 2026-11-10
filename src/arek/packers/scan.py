@@ -190,6 +190,10 @@ def atomik_blocks(data, align=2, max_output=4 << 20):
             rec['hint'] = ('24 bytes into a sector of a DOS disk: an OFS data block, the stream '
                            'continues in other blocks - list the files (arek adf ls) and unpack the file')
         hdr = atomik.header(data[off:off + 12])
+        if hdr is None:                               # 1.0.39: the magic in the last bytes of the input crashed the whole scan
+            rec.update(unpacked=0, packed=0, end=off, verified=False, error='truncated header')
+            out.append(rec)
+            continue
         rec.update(unpacked=hdr['unpacked'], packed=hdr['packed'], end=off + hdr['length'])
         try:
             res = atomik.unpack(data[off:], max_output=max_output)

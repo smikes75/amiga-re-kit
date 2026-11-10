@@ -50,8 +50,8 @@ def regname(r):
     if 0x180 <= r < 0x1c0:
         return "COLOR%02d" % ((r - 0x180) // 2)
     if 0x0a0 <= r < 0x0e0:
-        return "AUD%d%s" % ((r - 0x0a0) // 16,
-                            ["LCH", "LCL", "LEN", "PER", "VOL", "DAT"][((r - 0x0a0) % 16) // 2])
+        k = ((r - 0x0a0) % 16) // 2                 # 1.0.39: $xC / $xE of a channel are not registers (regname raised IndexError)
+        return "AUD%d%s" % ((r - 0x0a0) // 16, ["LCH", "LCL", "LEN", "PER", "VOL", "DAT"][k]) if k < 6 else "$%03X" % r
     return "$%03X" % r
 
 

@@ -434,7 +434,10 @@ def trace_compare(original: str, rebuild: str, ranges: list = None, ignore: list
     """Long parity: record k of the original trace against record k+shift of the rebuild's
     (same VTR layout, see arek.headless.trace.encode). ``ranges``/``ignore``: hex "START:LEN".
     Returns the first differing record with its words, the records that differ and the
-    addresses that differ most often; with ``best_shift`` N the equal pairs for shifts -N..N."""
+    addresses that differ most often; with ``best_shift`` N the equal pairs for shifts -N..N.
+    Only ``complete`` true is a pass (1.0.39): every original record had a partner (``short`` 0), the pairs
+    carried bytes or hashes to compare (``bytes``, ``hashes``) and all are equal; bytes the rebuild did not
+    capture are differences."""
     from . import parity
     from .headless import trace
     ta, tb = list(trace.records(original)), list(trace.records(rebuild))

@@ -45,16 +45,19 @@ class BitReader:
         roxr.l #1,d0     ; X -> bit31, novy spodni bit -> C
     """
 
-    def __init__(self, data, end, checksum=0):
+    def __init__(self, data, end, checksum=0, start=0):
+        if end > len(data) or end < start + 4:
+            raise ValueError("the packed stream (%d-%d) is not inside the data (%d bytes)" % (start, end, len(data)))
         self.data = data
+        self.start = start      # 1.0.39: the stream's first byte - reading below it is an error, not the bytes before the block
         self.pos = end          # a0, ukazuje ZA konec proudu
         self.checksum = checksum  # d5 (format BK starts it at the header's checksum)
         self.buf = self._long()  # d0
 
     def _long(self):
         self.pos -= 4
-        if self.pos < 0:
-            raise ValueError("proud dosel - poskozena data nebo spatny offset")
+        if self.pos < self.start:
+            raise ValueError("the packed stream ran out - damaged data or a wrong offset")
         v = int.from_bytes(self.data[self.pos:self.pos + 4], "big")
         self.checksum ^= v
         return v
@@ -122,9 +125,11 @@ def unpack_b(data, off=0):
     size = int.from_bytes(data[off:off + 4], "big")
     packed = int.from_bytes(data[off + 4:off + 8], "big")
     if size == 0 or size > 8 << 20:
-        raise ValueError("nesmyslna delka rozbalenych dat: %d" % size)
+        raise ValueError("implausible unpacked length: %d" % size)
+    if packed < 4 or off + 8 + packed > len(data):     # 1.0.39: a length past the data read as zeros and "verified" (checksum 0)
+        raise ValueError("implausible packed length: %d" % packed)
 
-    br = BitReader(data, off + 8 + packed)
+    br = BitReader(data, off + 8 + packed, start=off + 8)
     out = _decode_b(br, size)
     br._long()                                  # zaverecny longword (0x9c)
     return bytes(out), br.checksum == 0
@@ -135,10 +140,10 @@ def unpack_bk(data, off=0):
     size = int.from_bytes(data[off + 4:off + 8], "big")
     chk = int.from_bytes(data[off + 8:off + 12], "big")
     if size == 0 or size > 8 << 20:
-        raise ValueError("nesmyslna delka rozbalenych dat: %d" % size)
+        raise ValueError("implausible unpacked length: %d" % size)
     if packed < 4 or off + 12 + packed > len(data):
-        raise ValueError("nesmyslna delka zabalenych dat: %d" % packed)
-    br = BitReader(data, off + 12 + packed, chk)
+        raise ValueError("implausible packed length: %d" % packed)
+    br = BitReader(data, off + 12 + packed, chk, start=off + 12)
     out = _decode_b(br, size)
     return bytes(out), br.checksum == 0
 
@@ -216,7 +221,9 @@ def unpack_a(data, off=0):
     size = int.from_bytes(data[off:off + 4], "big")
     packed = int.from_bytes(data[off + 4:off + 8], "big")
     if size == 0 or size > 8 << 20:
-        raise ValueError("nesmyslna delka rozbalenych dat: %d" % size)
+        raise ValueError("implausible unpacked length: %d" % size)
+    if packed < 2 or off + 8 + packed > len(data):       # 1.0.39
+        raise ValueError("implausible packed length: %d" % packed)
 
     out = bytearray(size)
     br = BitReaderA(data, off + 8 + packed)

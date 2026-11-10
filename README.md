@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.38 on PyPI, 2640 tests. Extracted from five game
+- **The kit:** version 1.0.39 on PyPI, 2661 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -47,7 +47,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2640 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2661 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -126,6 +126,8 @@ arek web seal build/present/engine.wasm --set disk1.adf --label "disk 1, retail"
 arek web seal build/present/engine.wasm --payload build/payload.bin --payload-label "the game files" --out build/present/sealed  # any disk version with the same game data opens it
 arek web check build/present                           # a bundle: no game data, derived files sealed, manifest right
 arek parity  suite.json                                # scenarios against the original: state, picture, sound per tick
+#    1.0.39: equal means covered - a rebuild that ends early, a side that is missing, bytes it did not capture or frames
+#    without a picture are differences (PROBLEM lines, exit 1; --fail: any difference is exit 1); docs/HEADLESS.md
 arek web copy web/                                     # also wb-nastaveni.js (the shared Display / Sound menu; never overwrites a file that is not from the kit), wb-zvuk.js (sound contract 1.1), wb-atn.js + wb-content.js (the game's files from the visitor's disks)
 arek web payload --atn ADF1:0x57800 ADF2:0x64a00 --out build/payload.bin --content web/content.json   # the payload for --payload and the hashes the page matches
 arek web serve build/present --port 8930               # the bundle with the disks of local.conf at /local-disks/diskN.adf (localhost)

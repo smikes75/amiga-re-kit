@@ -60,9 +60,11 @@ def test_suite_state_picture_sound(tmp_path):
     pic = rows[0]['picture']
     assert pic['pairs'] == 4 and pic['equal'] == 3 and pic['worst'] == (15, 6) and pic['differing'] == 6
     snd = rows[0]['sound']
-    assert snd['shift'] == 14 and snd['frames'] == 20 and snd['equal'] == 18 and snd['first'] == 8   # DMACON missing at 8, wrong at 9
+    # 1.0.39: 10 frames with writes (the rebuild's moved back by the shift), 8 agree - not 18 of 20 with the frames nobody wrote in
+    assert snd['shift'] == 14 and snd['frames'] == 10 and snd['equal'] == 8 and snd['first'] == 8   # DMACON missing at 8, wrong at 9
     assert rows[1]['state']['best_shift'] == -1 and rows[1]['state']['equal_shifted'] == 19 and rows[1]['picture'] is None
-    assert rows[2] == {'name': 'none', 'state': None, 'picture': None, 'sound': None}
+    assert rows[2]['state'] is None and rows[2]['picture'] is None and rows[2]['sound'] is None
+    assert rows[2]['problems'] and not rows[2]['complete']                    # 1.0.39: a scenario that compares nothing says so
     text = parity.format_suite(rows)
     assert '12/20 (60.0%)' in text and '3/4' in text and 's+14' in text and 'none' in text
 

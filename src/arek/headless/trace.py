@@ -497,22 +497,37 @@ def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None,
         needed.append('VAHL_MOUSE_OFF')             # 1.0.22: mouse tokens need the mouse patch, else they are silently ignored
     if conf.get('VAHL') and os.path.isfile(conf['VAHL']):
         require_patch(conf['VAHL'], needed)
-    if os.path.exists(out):
-        os.unlink(out)
+    from . import config
+    config.require(conf, 'ROM')
+    # 1.0.39: nothing of an earlier run may survive into this one - a stale reglog or picture was returned as this run's
+    for old in [out, out + '.log', out + '.png', reglog, audlog, buslog]:
+        if old and os.path.exists(old):
+            os.unlink(old)
+    for _, raw in shot_files(shots) if shots else ():
+        for old in (raw, raw[:-4] + '.png'):
+            if os.path.exists(old):
+                os.unlink(old)
     arm = arm_events(t_arm, breaks, watches) if (breaks or watches) else []
     script = shot.build_script(conf, adf, list(events) + arm,
                                t_end, out + '.png', setup)
     with open(out + '.retrosh', 'w') as f:
         f.write(script)
-    log = shot.run_script(conf, script, capture=True, timeout=timeout, env=e)
-    with open(out + '.log', 'w') as f:
-        f.write(log)
+    shot.run_script(conf, script, capture=True, timeout=timeout, env=e, log_path=out + '.log')
     if not os.path.exists(out):
         if not (buslog or reglog or audlog or shots or pokes):
             raise TraceError('no trace written - is VAHL a build with a trace patch? (see %s.log)' % out)
         open(out, 'wb').close()                      # only logs or pictures were wanted; no breakpoint was hit
+    got = set()
     for frame, raw in shot_files(shots) if shots else ():
         shot.raw_to_png(raw, raw[:-4] + '.png')
+        got.add(frame)
+    if shots:                                        # 1.0.39: every asked picture must be there
+        want = [f for a, b in shot_windows(shot_frames) for f in range(a, b + 1)]
+        lost = [f for f in want if f not in got]
+        if lost:
+            raise TraceError('%d of %d asked pictures were not written (frames %s%s): the run ended before them, or the '
+                             'build takes at most 64 windows (see %s.log)' % (len(lost), len(want), ', '.join(str(f) for f in lost[:8]),
+                                                                           ', ...' if len(lost) > 8 else '', out))
     return sum(1 for _ in records(out))
 
 

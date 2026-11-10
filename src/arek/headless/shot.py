@@ -86,21 +86,41 @@ def build_script(conf, adf, events, t_shot, out_png, setup=()):
     return '\n'.join(lines) + '\n'
 
 
-def run_script(conf, text, capture=False, env=None, timeout=600):
-    """Run a RetroShell script; ``timeout`` in seconds of wall time (HeadlessError when exceeded)."""
+def run_env(env=None):
+    """The environment of an emulator run: the caller's, WITHOUT any VAHL_* variable it happens to export (1.0.39: a
+    VAHL_INPUTS or VAHL_TRACE left over from a manual experiment silently changed every later measurement), plus
+    the run's own ``env``."""
+    return {**{k: v for k, v in os.environ.items() if not k.startswith('VAHL_')}, **(env or {})}
+
+
+def run_script(conf, text, capture=False, env=None, timeout=600, log_path=None):
+    """Run a RetroShell script; ``timeout`` in seconds of wall time (HeadlessError when exceeded). 1.0.39: the
+    emulator's exit status is checked (HeadlessError with the end of its output), its output is always collected
+    and, with ``log_path``, written there also when the run fails or times out."""
     config.require(conf, 'VAHL')
     fd, path = tempfile.mkstemp(prefix='arek', suffix='.retrosh')
     with os.fdopen(fd, 'w') as f:
         f.write(text)
+
+    def keep(out):
+        text = (out or b'').decode('utf-8', 'replace')
+        if log_path:
+            with open(log_path, 'w') as f:
+                f.write(text)
+        return text
     try:
         args = [conf['VAHL']] + (['-v'] if capture else []) + [path]
-        p = subprocess.run(args, stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-                           stderr=subprocess.STDOUT if capture else subprocess.DEVNULL,
-                           timeout=timeout, env={**os.environ, **(env or {})})
-        return p.stdout.decode('utf-8', 'replace') if capture else ''
-    except subprocess.TimeoutExpired:
+        p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, env=run_env(env))
+        log = keep(p.stdout)
+        if p.returncode:
+            raise HeadlessError('VAHeadless ended with status %d: %s%s\n%s' % (
+                p.returncode, conf['VAHL'], ' (log: %s)' % log_path if log_path else '', log[-600:].strip()))
+        return log if capture else ''
+    except subprocess.TimeoutExpired as e:
+        keep(e.stdout)
         raise HeadlessError('VAHeadless did not finish within %d s: %s (a build that hangs, or a '
-                            'script waiting for input; see docs/HEADLESS.md)' % (timeout, conf['VAHL'])) from None
+                            'script waiting for input; see docs/HEADLESS.md%s)'
+                            % (timeout, conf['VAHL'], '; log: %s' % log_path if log_path else '')) from None
     finally:
         os.unlink(path)
 

@@ -76,10 +76,11 @@ def test_capture_builds_script_and_reads_back(tmp_path, monkeypatch):
     out = str(tmp_path / 'run.vtr')
     seen = {}
 
-    def fake_run(conf, script, capture=False, env=None, timeout=0):
+    def fake_run(conf, script, capture=False, env=None, timeout=0, log_path=None):
         seen['script'], seen['env'] = script, env
         with open(env['VAHL_TRACE'], 'wb') as f:
             f.write(_vtr2(0x100, 0, [(0, b'ab')]) + _vtr2(0x100, 1, [(0, b'cd')]))
+        open(log_path, 'w').write('log')                 # 1.0.39: the runner writes the log (also when the run fails)
         return 'log'
 
     monkeypatch.setattr(shot, 'run_script', fake_run)
@@ -181,7 +182,7 @@ def test_capture_passes_inputs_and_logs(tmp_path, monkeypatch):
     from arek.headless import shot
     seen = {}
 
-    def fake_run(conf, script, capture=False, env=None, timeout=0):
+    def fake_run(conf, script, capture=False, env=None, timeout=0, log_path=None):
         seen['env'] = env
         with open(env['VAHL_TRACE'], 'wb') as f:
             f.write(_vtr2(0x100, 0, [(0, b'ab')]))
@@ -295,7 +296,7 @@ def test_capture_with_only_pictures_needs_no_breakpoint(tmp_path, monkeypatch):
     from arek.headless import shot
     seen = {}
 
-    def fake_run(conf, script, capture=False, env=None, timeout=0):
+    def fake_run(conf, script, capture=False, env=None, timeout=0, log_path=None):
         seen['script'], seen['env'] = script, env
         open(env['VAHL_SHOTS'] + '_000300.raw', 'wb').write(bytes(716 * 285 * 3))
         return ''

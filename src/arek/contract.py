@@ -15,6 +15,7 @@ Typical use::
 ``compare`` returns a list of differing runs ``(start, end, expected, got)``
 truncated to ``max_runs``; an empty list is the only pass.
 """
+import hashlib
 import json
 from pathlib import Path
 
@@ -23,9 +24,18 @@ def load(folder):
     folder = Path(folder)
     meta = json.loads((folder / 'cpu.json').read_text())
     meta['ram'] = (folder / ('ram_%x_%d.bin' % (meta['breakpoint'], meta['skip']))).read_bytes()
+    if meta.get('ram_sha256') and hashlib.sha256(meta['ram']).hexdigest() != meta['ram_sha256']:      # 1.0.39
+        raise ValueError('%s: the RAM dump is not the one cpu.json describes (sha256 differs)' % folder)
     for r in meta.get('regions', []):
         r['data'] = (folder / r['file']).read_bytes()
     return meta
+
+
+def same_assets(x, y):
+    """The assets (emulator, ROM, disk) two captures were made with that differ: ``[name, ...]`` - captures of
+    different disks or emulator builds are not comparable byte for byte."""
+    ax, ay = x.get('assets') or {}, y.get('assets') or {}
+    return sorted(k for k in set(ax) | set(ay) if ax.get(k) != ay.get(k))
 
 
 def diff_runs(a, b, base=0, max_runs=64, max_show=16):
@@ -47,11 +57,15 @@ def diff_runs(a, b, base=0, max_runs=64, max_show=16):
 
 def compare(expected, got, ranges=None, base=0, **kw):
     """Compare ``got`` with ``expected`` inside ``ranges`` (absolute
-    addresses; whole buffer when None)."""
+    addresses; whole buffer when None). A range that is empty or not wholly inside both buffers is an error
+    (1.0.39: it used to compare two empty slices and report no difference)."""
     if ranges is None:
         return diff_runs(expected, got, base, **kw)
     out = []
     for lo, hi in ranges:
+        if not (base <= lo < hi <= base + min(len(expected), len(got))):
+            raise ValueError('range %x-%x is not inside the compared memory (%x-%x): nothing to compare'
+                             % (lo, hi, base, base + min(len(expected), len(got))))
         a = expected[lo - base:hi - base]
         b = got[lo - base:hi - base]
         out += diff_runs(a, b, lo, **kw)

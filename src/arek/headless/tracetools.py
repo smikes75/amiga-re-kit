@@ -98,7 +98,8 @@ def pc_compare(orig, host, tick=None, from_frame=0, lines=313, hpos=227, drift_l
             drift.append((k, d, d - prev, o[1], o[0], o[2], o[3], O[k - 1][1] if k else None))
         prev = d
     return {'seq': seq, 'exact': exact, 'first_time_diff': first_time, 'seq_diff': seq_diff, 'drift': drift,
-            'original': len(O), 'host': len(H)}
+            'original': len(O), 'host': len(H),
+            'short': None if seq_diff or len(H) >= len(O) else len(H)}      # 1.0.39: the host log ends before the original
 
 
 def format_pc_compare(r, image=None, base=0):
@@ -117,6 +118,8 @@ def format_pc_compare(r, image=None, base=0):
     if r['seq_diff']:
         k, o, h, p = r['seq_diff']
         L.append('pc sequence parts at pass %d: original %06x, host %06x%s' % (k, o, h, insn(p)))
+    if r.get('short') is not None:
+        L.append('NOT COMPLETE: the host log ends at pass %d, the original has %d' % (r['short'], r['original']))
     for k, d, dd, pc, frame, v, h, p in r['drift']:
         L.append('%7d %+5d (%+d) at %06x frame %d (%d,%d)%s' % (k, d, dd, pc, frame, v, h, insn(p)))
     return '\n'.join(L)
@@ -136,8 +139,11 @@ def filter_pcs(src, out, pcs, skip=0):
 
 def pair_diff(a, b, from_frame=0, ignore=(), limit=40):
     """Records of two traces paired by (frame, pc, order within the frame); every byte that differs
-    in the ranges both carry (``ignore``: [(start, length)] left out). Returns rows
-    ``{'key': (frame, pc, n), 'only': 'orig'|'host'|None, 'a_beam', 'b_beam', 'diffs': [(addr, va, vb)]}``."""
+    in the original's ranges (``ignore``: [(start, length)] left out). Returns rows
+    ``{'key': (frame, pc, n), 'only': 'orig'|'host'|None, 'a_beam', 'b_beam', 'diffs': [(addr, va, vb)], 'missing':
+    [(start, bytes)], 'hashes': [start]}`` - 1.0.39: ``missing`` = bytes of the original the host's record does not
+    carry (a range it lacks, or a shorter one), ``hashes`` = hashed ranges that differ or that the host lacks; a row
+    is equal only with all three empty. When ``limit`` cuts the list, the last row is ``{'more': True}``."""
     def key(recs):
         c, out = collections.Counter(), {}
         for r in recs:
@@ -154,19 +160,26 @@ def pair_diff(a, b, from_frame=0, ignore=(), limit=40):
         if not ra or not rb:
             rows.append({'key': k, 'only': 'orig' if ra else 'host', 'a_beam': (ra or rb)['v'], 'b_beam': None, 'diffs': []})
         else:
-            diffs = []
+            diffs, missing = [], []
             for base, p in ra['ranges'].items():
                 q = rb['ranges'].get(base)
                 if q is None:
+                    if p:
+                        missing.append((base, len(p)))
                     continue
+                if len(q) < len(p):
+                    missing.append((base + len(q), len(p) - len(q)))
                 for i in range(min(len(p), len(q))):
                     ad = base + i
                     if any(s <= ad < s + l for s, l in ignore):
                         continue
                     if p[i] != q[i]:
                         diffs.append((ad, p[i], q[i]))
-            rows.append({'key': k, 'only': None, 'a_beam': (ra['v'], ra['h']), 'b_beam': (rb['v'], rb['h']), 'diffs': diffs})
+            hashes = [s for s, h in ra.get('hashes', {}).items() if rb.get('hashes', {}).get(s) != h]
+            rows.append({'key': k, 'only': None, 'a_beam': (ra['v'], ra['h']), 'b_beam': (rb['v'], rb['h']), 'diffs': diffs,
+                         'missing': missing, 'hashes': hashes})
         if len(rows) >= limit:
+            rows.append({'more': True})
             break
     return rows
 
@@ -174,11 +187,19 @@ def pair_diff(a, b, from_frame=0, ignore=(), limit=40):
 def format_pair_diff(rows):
     L = []
     for r in rows:
+        if r.get('more'):
+            L.append('... the row limit is reached; later records are not shown (--limit)')
+            continue
         f, pc, n = r['key']
         if r['only']:
             L.append('%5d %06x #%d only in %s' % (f, pc, n, r['only']))
         else:
-            d = r['diffs']
-            L.append('%5d %06x #%d beam o%s h%s %s' % (f, pc, n, r['a_beam'], r['b_beam'],
-                     'EQUAL' if not d else '%d B: %s' % (len(d), ' '.join('$%x:%02x/%02x' % x for x in d[:10]))))
+            d, parts = r['diffs'], []
+            if d:
+                parts.append('%d B: %s' % (len(d), ' '.join('$%x:%02x/%02x' % x for x in d[:10])))
+            if r.get('missing'):
+                parts.append('NOT IN THE HOST RECORD: ' + ' '.join('$%x+%d' % m for m in r['missing'][:6]))
+            if r.get('hashes'):
+                parts.append('hash differs or is missing: ' + ' '.join('$%x' % s for s in r['hashes'][:6]))
+            L.append('%5d %06x #%d beam o%s h%s %s' % (f, pc, n, r['a_beam'], r['b_beam'], '; '.join(parts) or 'EQUAL'))
     return '\n'.join(L)

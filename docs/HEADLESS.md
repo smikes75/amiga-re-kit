@@ -209,6 +209,32 @@ words, the records that differ and the addresses that differ most often; `--regs
 D0-D7/A0-A7/SR, hashed ranges (`start:lenh`) are compared by hash (or against the bytes the
 other side captured). `arek.parity` is the API, MCP `trace_compare` the tool.
 
+**What counts as equal (1.0.39).** The original is the reference, and a comparison passes only when it
+covered it - `complete` in the result, exit 0 of `--fail`:
+
+- every record of the original has a partner; a rebuild that ends early is `NOT COMPLETE` (`short`), an
+  empty side or no pair at all is `NOTHING COMPARED`;
+- every byte the original captured (inside `--range`, outside `--ignore`) is in the rebuild's record: bytes
+  it did not capture are differences (`missing`), so is a hashed range it lacks; a part of `--range` the
+  original itself never captured is `uncaptured` - asked for, never checked;
+- bytes are compared one by one (an odd address or a one-byte range counts), words are only how a
+  difference is printed;
+- the first line prints the records of both sides and how many bytes and hashes the pairs put to the test.
+
+The same rule holds for the pictures (`arek shots`, the suite: a frame of the original without a picture
+from the rebuild is not equal; pairs moved by `--align` are listed), for the sound (frames in which either
+side wrote to Paula, the rebuild's moved back by the shift - a write only one side makes is unequal at any
+shift), for `arek trace pairdiff`, `arek trace pcs`, `arek diff` (a range outside the captured memory is an
+error; exit 1 on a difference) and `arek verify calls` (the flags X N Z V C too). `arek parity` prints a
+`PROBLEM` line for every scenario with a missing side, nothing compared or a rebuild that ends early and
+exits 1 then; `--fail` makes any difference exit 1. Before 1.0.39 these cases read as equal or 100 %:
+measure again what was measured with an older kit.
+
+A run of the emulator (`arek trace run`, `shot`, `bpstate`): its exit status is checked, the log is kept
+also when it fails or times out, the reglog / audlog / buslog and pictures of an earlier run under the
+same names are removed first, every asked picture must have been written, and VAHL_* variables exported
+in the calling shell are not passed on.
+
 A rebuild writes VTR2 records (little endian) - in C:
 
 ```c
