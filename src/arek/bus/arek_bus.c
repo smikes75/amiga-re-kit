@@ -7,7 +7,7 @@
 void arek_bus_init(ArekBus *b, int hpos, int lines, int maxlines, uint8_t *own, uint16_t *regs, arek_bus_rd16_fn rd16, void *ctx) {
     memset(b, 0, sizeof *b);
     b->hpos = hpos; b->lines = lines; b->maxlines = maxlines; b->own = own; b->regs = regs; b->rd16 = rd16; b->ctx = ctx;
-    b->chipmask = 0x7fffe; b->slotoff = 1; b->cop_int = -1; b->cop_irq_n = 0;
+    b->chipmask = 0x7fffe; b->slotoff = 1; b->cop_int = -1; b->cop_irq_n = 0; b->cdang = -1;
     memset(own, 0, (size_t)maxlines * hpos);
 }
 
@@ -39,8 +39,11 @@ double arek_bus_access(ArekBus *b, double tt) {
 }
 
 double arek_bus_insn_end(ArekBus *b, double t) {
-    int rem = (int)b->in_n - (int)b->in_pre - 4 * (int)(b->in_l + b->in_da); if (rem > 0) t += rem * 0.5;
-    b->in_n = b->in_l = b->in_da = b->in_pre = 0;
+    int rem = (int)b->in_n - (int)b->in_pre - 4 * (int)(b->in_l + b->in_da + b->in_tail); if (rem > 0) t += rem * 0.5;
+    /* 1.0.47 (SWIV KIT-GAP 2): the reads an instruction makes after its internal clocks - move to SR / CCR reads two
+     * words after 4 clocks, andi/ori/eori to SR / CCR after 8, lea d8(An,Xn) its last word after 2. They were made at the
+     * instruction's start: the same length on a free bus, another slot (and another wait) beside bitplane DMA */
+    { uint32_t n = b->in_tail; b->in_n = b->in_l = b->in_da = b->in_pre = b->in_tail = 0; for (uint32_t k = 0; k < n; k++) t = arek_bus_access(b, t); }
     return t;
 }
 

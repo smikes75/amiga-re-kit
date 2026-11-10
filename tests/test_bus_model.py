@@ -79,6 +79,19 @@ int main(int argc, char **argv) {
         cop(&a2, 0x6407, 0xfffe); cop(&a2, 0x009c, 0x8010); cop(&a2, 0xffff, 0xfffe);                  /* the second list: WAIT 100, INTREQ SET|COPER */
         arek_bus_frame(&B, 312);
         printf("cop_int %.1f\n", B.cop_int);
+    } else if (!strcmp(mode, "ill")) {                        /* 1.0.47: a MOVE to an illegal register stops the Copper */
+        B.cdang = atoi(argv[3]); uint32_t reg = (uint32_t)strtoul(argv[4], 0, 16);
+        at = 0x1000; cop(&at, 0x0180, 0x0123); cop(&at, (uint16_t)reg, 0);
+        for (int k = 0; k < 2000; k++) cop(&at, 0x0000, 0x0000);                                         /* the rest: zeros, as an unset list */
+        memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
+        long n = 0; for (long k = 0; k < 312L * 227; k++) n += own[k] == 24;
+        printf("copper %ld\n", n);
+    } else if (!strcmp(mode, "tail")) {                       /* 1.0.47: reads at the instruction's end, after its internal clocks */
+        regs[0x096 >> 1] = 0; memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
+        double t = 1000, t0 = t; int tail = atoi(argv[3]);
+        t = arek_bus_insn(&B, t, 16, 3 - tail, 0); B.in_tail = (uint32_t)tail;       /* move #imm,sr: 16 clocks, 3 reads */
+        t = arek_bus_insn_end(&B, t);
+        printf("dt %.1f slots", t - t0); for (long k = 1000; k < 1012; k++) if (own[k] == AREK_BUS_CPU) printf(" %ld", k - 1000); printf("\n");
     } else if (!strcmp(mode, "cpu")) {
         double t = atof(argv[3]);
         double t2 = arek_bus_insn(&B, t, 12, 1, 0);           /* move.l d0,(a0): 1 prefetch */
@@ -484,3 +497,31 @@ def test_copjmp2_continues_in_the_second_list(harness):
     out = harness('8380', 'cop2')
     t = float(out.split('cop_int')[1].split()[0])
     assert 100 * 227 <= t < 101 * 227, out                      # the INTREQ write of the second list at line 100, not line 200
+
+
+def test_an_illegal_move_stops_the_copper(harness):
+    """1.0.47 (SWIV KIT-GAP 1): a Copper list of zeros is MOVE #0,$000 over and over - the original stops at the first
+    one (3 Copper slots a frame: vAmiga, OCS, register below $40), the model read on in every other free slot (18 407).
+    $40-$7E is legal only with CDANG; with COPCON unknown (a state does not carry it) such a MOVE is let through."""
+    n = lambda cdang, reg: int(harness('8380', 'ill', cdang, reg).split('copper')[1].split()[0])
+    assert n(-1, '000') == n(0, '03e') == n(1, '000') <= 6                       # two MOVEs and the vertical-blank slot
+    assert n(0, '066') <= 6 and n(1, '066') == n(-1, '066') <= 12                # BLTDMOD: stops without CDANG; else the zeros after it stop it
+    assert n(0, '180') <= 12                                                      # a legal MOVE, then the zeros
+
+
+def test_reads_at_the_end_of_an_instruction(harness):
+    """1.0.47 (SWIV KIT-GAP 2): move to SR reads its operand, spends 4 clocks, then reads two words (Moira execMoveToSr);
+    the model made all three reads first. The same 8 colour clocks on a free bus - but the reads sit in other slots, and
+    beside bitplane DMA they wait differently (SWIV: 35 CPU slots of three lines elsewhere, 0 after)."""
+    from arek.m68k import decode, timing
+    assert harness('0000', 'tail', 0).split() == ['dt', '8.0', 'slots', '1', '3', '5']      # as before: read read read, 4 clocks
+    assert harness('0000', 'tail', 2).split() == ['dt', '8.0', 'slots', '1', '5', '7']      # read, 4 clocks, read read
+    ent = lambda hx: timing.bus_table_entry(decode(bytes.fromhex(hx) + bytes(8), 0, 0))
+    T = timing.TAB_TAIL_SHIFT
+    assert ent('46fc2300') == (2, 1, 2 << T) and ent('46df') == (1, 1, 2 << T) and ent('46c0') == (1, 1, 2 << T)   # move #,sr / (a7)+,sr / d0,sr
+    assert ent('44fc0000') == (2, 1, 2 << T)                                                                       # move #,ccr
+    assert ent('027c0700') == (2, 1, 2 << T) and ent('003c0001') == (2, 1, 2 << T)                                  # andi #,sr; ori #,ccr
+    assert ent('45f00800') == (2, 0, timing.TAB_PRE_2 | 1 << T) and ent('41fa0000') == (2, 0, 0)                    # lea d8(a0,d0),a2; lea d16(pc)
+    assert ent('40e7') == (1, 1, timing.TAB_PRE_2)                                                                  # move sr,-(a7): unchanged
+    i = decode(bytes.fromhex('46c0') + bytes(8), 0, 0)
+    assert timing.cycles(i) == 12 and timing.bus(i) == (2, 0)                                                       # "nn np np"

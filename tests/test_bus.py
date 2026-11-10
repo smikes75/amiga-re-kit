@@ -56,7 +56,7 @@ MANUAL = [
     ('c108', (3, 1), 18),           # abcd -(a0),-(a0)
     ('40c0', (1, 0), 6),            # move sr,d0
     ('40d0', (2, 1), 12),           # move sr,(a0)
-    ('46d0', (2, 0), 16),           # move (a0),sr
+    ('46d0', (3, 0), 16),           # move (a0),sr - the manual says 16(2/0); the 68000 reads two words after loading SR (Moira, measured on SWIV, 1.0.47)
     ('6100 0010', (2, 2), 18),      # bsr.w
     ('6000 0010', (2, 0), 10),      # bra.w
     ('50c0', (1, 0), 6),            # st d0

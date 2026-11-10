@@ -306,7 +306,9 @@ def bus(i, taken=True, dbcc='loop'):
         c = ea_class(i.ea)
         if i.which == 'from_sr':
             return (1, 0) if c == 'dn' else (1 + _EA_R[c][0], 1)
-        return 1 + _EA_R[c][0], 0
+        # 1.0.47 (SWIV KIT-GAP 2; Moira execMoveToSr / execMoveToCcr): the operand, 4 clocks, then TWO reads (the 68000
+        # fetches both words again after loading SR) - move Dn,SR is 12 clocks "nn np np", one read more than the manual's 12(1/0)
+        return 2 + _EA_R[c][0], 0
     if k == 'bcd':
         return (3, 1) if i.mem else (1, 0)
     if k == 'addx':
@@ -368,6 +370,7 @@ def performed(i):
 
 
 TAB_BCC_S, TAB_DBCC, TAB_PRE_ALL, TAB_PRE_2, TAB_PUSH2 = 1, 2, 4, 8, 16
+TAB_TAIL_SHIFT = 5                                      # bits 5-6: reads made at the instruction's END (1.0.47)
 
 
 def bus_table_entry(i):
@@ -410,6 +413,15 @@ def bus_table_entry(i):
             if (k == 'move' and name == 'dst') or (k == 'movem' and i.to_mem):
                 continue
             flags |= TAB_PRE_2
+    # 1.0.47 (SWIV KIT-GAP 2): reads that come after the instruction's internal clocks, as Moira makes them
+    tail = 0
+    if k == 'sr' and i.which != 'from_sr':
+        tail = 2                                        # operand, 4 clocks, read, prefetch
+    elif k == 'alui' and ea_class(i.ea) == 'imm':
+        tail = 2                                        # to CCR / SR: the immediate, 8 clocks, read, prefetch
+    elif k == 'lea' and ea_class(i.ea) in ('d8x', 'pcd8x'):
+        tail = 1                                        # 2 clocks, the extension word, 2 clocks, prefetch
+    flags |= tail << TAB_TAIL_SHIFT
     return words, extra, flags
 
 

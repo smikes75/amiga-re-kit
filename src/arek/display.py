@@ -125,7 +125,7 @@ _CHIP_REGS = {('agnus', 'DMACON'): 0x096, ('agnus', 'BPLCON0'): 0x100, ('agnus',
               ('denise', 'BPLCON1'): 0x102, ('denise', 'BPLCON2'): 0x104}
 
 
-def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES):
+def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES, cdang=None):
     """One frame from chip RAM (bytes from address 0). ``cop1lc``: the Copper list (default:
     ``chips['copper']['COP1LC']``); ``chips``: cpu.json "chips" for the registers the Copper
     does not set; ``colors``: COLOR00-31 at the start of the frame (default 0);
@@ -225,6 +225,10 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES):
             w2 = rd(cop['pc'])
             cop['pc'] += 2
             cop['st'] = 1
+            ill = cop['w1'] & 0x1fe                     # 1.0.47 (SWIV KIT-GAP 1): an illegal MOVE stops the Copper for the frame -
+            if ill < 0x040 or (ill < 0x080 and cdang is False):   # below $40 always (OCS), $40-$7E unless CDANG (unknown: let through)
+                cop['st'] = 0
+                return
             if cop['skip']:
                 cop['skip'] = False
             else:

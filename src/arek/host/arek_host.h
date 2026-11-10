@@ -168,6 +168,7 @@ void hw_write_hook(uint32_t off, uint32_t v) {
     arek_bus_cpu_write(arek_glue_bus(), off);                     /* the CPU's write is the later one (G50) */
     if ((off >= 0x080 && off <= 0x086) || (off >= 0x08e && off <= 0x094) || (off >= 0x0e0 && off <= 0x10a) ||
         (off >= 0x120 && off <= 0x1be)) { ard_until((int)(h_now() / HOST_HPOS)); ard_write(off, (uint16_t)v); }
+    if (off == 0x02e) { ard_until((int)(h_now() / HOST_HPOS)); ARD_CDANG = (int)((v >> 1) & 1); arek_glue_bus()->cdang = ARD_CDANG; }   /* 1.0.47: COPCON */
     if (off == 0x096) ard_until((int)(h_now() / HOST_HPOS));   /* the lines before a DMACON write see the old value (the runtime applies it) */
     if (h_wr_cb) h_wr_cb(off, v);
     if (off == 0x09c) {

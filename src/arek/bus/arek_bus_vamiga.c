@@ -80,6 +80,10 @@ void arek_bus_frame_map(ArekBus *b) {
                 if (!freeb) { cnext = v * H + h + 1; break; }
                 L[h] = 24; c2 = b->rd16(b->ctx, cp); cp += 2; cst = 1; cnext = v * H + h + 2;
                 { uint32_t reg = c1 & 0x1fe;
+                  /* 1.0.47 (SWIV KIT-GAP 1; vAmiga Copper::isIllegalAddress, OCS): a MOVE below $40 stops the Copper until the
+                   * next frame, one to $40-$7E does unless CDANG is set - a list of zeros (MOVE #0,$000) took every other
+                   * free slot of the frame (18 407 against the original's 3). CDANG unknown (-1): $40-$7E is let through */
+                  if (reg < 0x040 || (reg < 0x080 && b->cdang == 0)) { cst = 0; break; }
                   if (reg == 0x088) { cp = ((uint32_t)R[0x080 >> 1] << 16 | R[0x082 >> 1]) & b->chipmask; }
                   else if (reg == 0x08a) { cp = ((uint32_t)R[0x084 >> 1] << 16 | R[0x086 >> 1]) & b->chipmask; }   /* 1.0.7: COPJMP2 (Turrican II KIT-GAPS 8: the intro jumps to a second list) */
                   else if (reg == 0x09c) { if ((c2 & 0x8010) == 0x8010 && b->cop_int < 0) b->cop_int = v * H + h + b->cop_lat;   /* INTREQ SET|COPER; zda preruseni dojde, rozhodne volajici */

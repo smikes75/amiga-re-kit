@@ -3,6 +3,18 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.47 (2026-11-11)
+
+- Copper (SWIV KIT-GAP 1): a MOVE to a register below $40 stops the Copper until the next frame, one to $40-$7E does
+  unless the CPU set CDANG (COPCON not written in the run: let through) - bus model, `arek.display` and
+  `arek_display.h`; a list of zeros took every other free slot of the frame (18 407 slots against the original's 3)
+
+- CPU bus slots (SWIV KIT-GAP 2; Moira's order): move to SR / CCR reads two words AFTER its 4 internal clocks (and
+  one read more than was counted), andi/ori/eori to SR / CCR after 8, lea d8(An,Xn) its last word after 2 - the bus
+  table carries the count in bits 5-6, the model makes those reads at the instruction's end. Clock counts unchanged;
+  beside bitplane DMA the CPU's slots now equal the original's (SWIV: 35 slots of three lines elsewhere, 0 after).
+  Translations must be regenerated (`arek recomp --bus-table`) to get the new table
+
 ## 1.0.46 (2026-11-11)
 
 - inputs per frame on both sides in the same frames (Turrican II): `host_trace --inputs-first FRAME`, `arek trace

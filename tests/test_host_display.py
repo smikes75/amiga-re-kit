@@ -81,6 +81,9 @@ CASES = {
     # the Copper's comparator sees the beam two CCK ahead: at the end of line 255 that is line 256, whose low byte is 0,
     # so a WAIT for line $21 set there passes on line 289 (0x121), not at once (Alien Breed II, G36)
     'copper wait wraps to the next line': ram_with(with_colours(setup(1, ptrs=[PLANES[0][0]])) + [0xffdf, 0xfffe, 0x2101, 0xfffe, 0x180, 0x0f0] + END, PLANES[:1]),
+    # 1.0.47 (SWIV KIT-GAP 1): a MOVE below $40 stops the Copper for the frame - the green of line $60 never comes
+    'copper stops at an illegal move': ram_with(with_colours(setup(1, ptrs=[PLANES[0][0]])) + [0x4007, 0xfffe, 0x180, 0x00f, 0x5007, 0xfffe, 0x000, 0x0000,
+                                                                                         0x6007, 0xfffe, 0x180, 0x0f0] + END, PLANES[:1]),
     'ddfstrt 24 with sprites 3 and 4': ram_with(with_colours(setup(3, con1=0x88, ddfstrt=0x24, ptrs=[p for p, _ in PLANES[:3]]))
                                                 + sprite_copper([0x20200, 0x20200, 0x20200, 0x20000, 0x20100]) + END,
                                                 PLANES[:3] + [sprite(0x20000, 0x40, 0x50, 0x180, [(0xf0f0, 0x0ff0)] * 16),
@@ -205,3 +208,16 @@ def test_bitplane_dma_off_band_keeps_the_pointers_and_hides_the_sprite():
     assert any(band[0x47][h] != bg for h in range(0x121, 0x131))                    # the sprite is there outside the band
     strip = lambda row: row[0x81:0x11f]                                             # the playfield left of the sprite
     assert strip(band[0x50]) == strip(plain[0x48])                                  # 8 lines without a fetch: the data is 8 rows behind
+
+
+def test_an_illegal_move_stops_the_copper_in_python():
+    """1.0.47 (SWIV KIT-GAP 1; vAmiga Copper::isIllegalAddress on OCS): a MOVE to a register below $40 stops the Copper
+    until the next frame; one to $40-$7E does unless CDANG is set - and is let through when COPCON is not known."""
+    regs = {0x096: 0x83e0}
+    f = display.render(CASES['copper stops at an illegal move'], COP, regs=regs)
+    assert f.pixels[0x48][0x40] == 0x00f and f.pixels[0x70][0x40] == 0x00f           # blue from line $40 on, never green
+    assert not any(w[2] == 0x180 and w[3] == 0x0f0 for w in f.writes)
+    blit = ram_with(with_colours(setup(1, ptrs=[PLANES[0][0]])) + [0x4007, 0xfffe, 0x180, 0x00f, 0x5007, 0xfffe, 0x066, 0x0000,
+                                                                  0x6007, 0xfffe, 0x180, 0x0f0] + END, PLANES[:1])
+    green = lambda **k: any(w[2] == 0x180 and w[3] == 0x0f0 for w in display.render(blit, COP, regs=regs, **k).writes)
+    assert green() and green(cdang=True) and not green(cdang=False)                  # BLTDMOD: legal only with CDANG

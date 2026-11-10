@@ -18,7 +18,8 @@
  *
  * BUS_TAB[i] = {words, extra, flags}; flags (arek.m68k.timing): 1 a taken short branch reads one more word (clocks 10),
  * 2 an expired dbcc reads one more (clocks 14), 4 a jump spends its internal cycles before its accesses, 8 -(An)/d8(An,Xn)
- * wait 2 cycles before the operand, 16 jsr/bsr push two words after the jump. */
+ * wait 2 cycles before the operand, 16 jsr/bsr push two words after the jump, bits 5-6 (1.0.47) = how many of the
+ * instruction's reads come at its end, after its internal clocks (move to SR / CCR, andi/ori/eori to SR / CCR, lea d8(An,Xn)). */
 #ifndef AREK_BUS_GLUE_H
 #define AREK_BUS_GLUE_H
 #include "arek_bus.h"
@@ -71,7 +72,10 @@ static inline void arek_glue_insn(uint32_t pc, uint32_t clocks) {
     uint32_t acc = words + extra + ((flags & 16) ? 2 : 0);
     if (flags & 4) pre = clocks > 4 * acc ? clocks - 4 * acc : 0;
     else if (flags & 8) pre = 2;
-    AREK_GLUE.t = arek_bus_insn(&AREK_GLUE.bus, AREK_GLUE.t, clocks, words + extra, pre);
+    uint32_t tail = (flags >> 5) & 3, head = words + extra;      /* 1.0.47: bits 5-6 = the accesses made at the instruction's end */
+    if (tail > head) tail = head;
+    AREK_GLUE.t = arek_bus_insn(&AREK_GLUE.bus, AREK_GLUE.t, clocks, head - tail, pre);
+    AREK_GLUE.bus.in_tail = tail;
 }
 
 #ifndef AREK_GLUE_NO_TICK

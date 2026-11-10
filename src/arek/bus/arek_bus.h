@@ -42,6 +42,7 @@ typedef struct ArekBus {
                                   a zapisy copperu do DMACON propisuje i sem (jeden registr pro blitter i DMACONR) */
     arek_bus_rd16_fn rd16; void *ctx;
     uint32_t chipmask;         /* maska adres DMA (512 KB chip RAM: 0x7fffe) */
+    int cdang;                 /* 1.0.47: COPCON bit 1 as the CPU last wrote it; -1 = not written in this run (a capture does not carry it) */
     uint32_t cop_default;      /* copper list, dokud COP1LC neni zapsany (start ze stavu, kdy registry nejsou v RAM); 0 = zadny */
     int slotoff;               /* slot procesoru: takty po zacatku sbernicoveho cyklu (Moira SYNC: 1) */
     double cop_lat;            /* latence preruseni copperu v taktech (pricte se k casu zapisu INTREQ) */
@@ -55,7 +56,7 @@ typedef struct ArekBus {
     uint16_t copr[0x100]; uint8_t copw[0x100];
     struct { int on, busy, phase, pc, lockD; uint32_t left, bt; const uint8_t *prog; } bl;
     int bls;
-    uint32_t in_n, in_l, in_da, in_pre;
+    uint32_t in_n, in_l, in_da, in_pre, in_tail;   /* in_tail (1.0.47): accesses the instruction makes at its END, after its remaining internal clocks */
 } ArekBus;
 
 /* Zalozeni: own = pole maxlines * hpos bajtu volajiciho, regs = registry volajiciho (0x100 slov), rd16 + ctx = cteni chip RAM. */

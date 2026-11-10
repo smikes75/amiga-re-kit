@@ -49,6 +49,7 @@ typedef struct { uint32_t pt; uint16_t pos, ctl, da, db; int armed, dma, vstop; 
 #define ARD_VSTART(s) (((s)->pos >> 8) | ((((s)->ctl >> 2) & 1) << 8))
 #define ARD_VSTOP(s) (((s)->ctl >> 8) | ((((s)->ctl >> 1) & 1) << 8))
 typedef struct { int k, hs; uint16_t da, db; int att; } ArdSpriteLine;   /* a sprite on the current line */
+static int ARD_CDANG = -1;                             /* 1.0.47: COPCON bit 1 as the CPU last wrote it, -1 = unknown */
 static uint16_t ARD_R[0x100];                          /* the display registers as the renderer sees them */
 static uint32_t ARD_BPL[6], ARD_LC[2];
 static ArdSprite ARD_SPR[8], ARD_SPRI[8];              /* ARD_SPRI: the sprites at full DMA (ard_spri_cb) */
@@ -120,7 +121,7 @@ static void ard_write(uint32_t off, uint16_t v) {
 static void ard_reset(void) {
     memset(ARD_R, 0, sizeof ARD_R); memset(ARD_BPL, 0, sizeof ARD_BPL); memset(ARD_LC, 0, sizeof ARD_LC);
     memset(ARD_SPR, 0, sizeof ARD_SPR); memset(ARD_SPRI, 0, sizeof ARD_SPRI); memset(&ARD_COP, 0, sizeof ARD_COP);
-    memset(ARD_HR, 0, sizeof ARD_HR); ARD_NEXT = 0; ARD_LAST = 311;
+    memset(ARD_HR, 0, sizeof ARD_HR); ARD_NEXT = 0; ARD_LAST = 311; ARD_CDANG = -1;
 }
 static void ard_frame_start(void) {
     ARD_COP.pc = ARD_LC[0] & 0x1ffffe; ARD_COP.st = 1; ARD_COP.next = 2; ARD_COP.skip = 0; ARD_COP.skipcmd = 0;   /* COP_VBLANK: the fetch at cycle 2 */
@@ -157,8 +158,9 @@ static void ard_copper(int v, int c, int busy) {
         ARD_COP.st = (ARD_COP.w1 & 1) ? 3 : 2; break;
     case 2: {                                          /* MOVE: the second word, the write */
         uint16_t w2 = ard_rd(ARD_COP.pc); ARD_COP.pc += 2; ARD_COP.st = 1;
-        if (ARD_COP.skip) { ARD_COP.skip = 0; break; }
         uint32_t off = ARD_COP.w1 & 0x1fe;
+        if (off < 0x040 || (off < 0x080 && ARD_CDANG == 0)) { ARD_COP.st = 0; return; }   /* 1.0.47: an illegal MOVE stops the Copper for the frame (as the bus model) */
+        if (ARD_COP.skip) { ARD_COP.skip = 0; break; }
         if (off == 0x088 || off == 0x08a) ARD_COP.pc = ARD_LC[(off - 0x088) >> 1] & 0x1ffffe;
         else ard_write(off, w2);
         break; }
