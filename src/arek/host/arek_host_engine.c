@@ -201,6 +201,7 @@ API int engine_init(const uint8_t *p, int n) {
     host_display_init();
     h_frame_cb = e_frame_start; h_frame_done_cb = e_frame_done;
     G_DONE = 0; G_END = 0; G_WAIT = 0; G_ERR = 0; G_AW = 0;
+    __atomic_store_n(&G_AWT, 0, __ATOMIC_SEQ_CST); __atomic_store_n(&G_ARD, -1, __ATOMIC_SEQ_CST);   /* with G_AW: the worklet's place is count % n */
     return 0;
 }
 API int engine_set_disk(int n, const uint8_t *p, int len) { return ahd_set(n, p, len); }

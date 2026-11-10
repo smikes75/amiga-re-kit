@@ -142,6 +142,45 @@ def test_threaded_engine_native_and_wasm(tmp_path):
     assert r.stdout.strip().splitlines()[-1] == want
 
 
+def test_threaded_engine_restart_starts_the_sound_count_again(tmp_path):
+    """Xenon 2 KIT-GAP 16: the worklet turns the count of samples written into a place in the ring (count % n), so a restart
+    (engine_stop, engine_init, engine_run) has to take the count back with the write position; the count read stays
+    'none' until the worklet reads again, or the thread would see an old reserve."""
+    if not (shutil.which('emcc') and shutil.which('node')):
+        pytest.skip('no emcc + node')
+    build_state(tmp_path)
+    host.engine_build(str(tmp_path / 'w'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', thread=True, src=str(tmp_path / 'externs.c'), defines=['HOST_L4=f_001180'])
+    script = tmp_path / 'drive.js'
+    script.write_text('''
+const fs = require('fs');
+(async () => {
+  const M = await require(%s)({ wasmBinary: fs.readFileSync(%s) });
+  const st = fs.readFileSync(%s), p = M._engine_alloc(st.length); M.HEAPU8.set(st, p);
+  const disk = fs.readFileSync(%s), q = M._engine_alloc(disk.length); M.HEAPU8.set(disk, q);
+  const until = async (f) => { const t0 = Date.now(); while (!f() && Date.now() - t0 < 20000) await new Promise((r) => setTimeout(r, 1)); if (!f()) throw new Error('hung'); };
+  const go = async (n) => { M._engine_set_disk(0, q, disk.length); M._engine_allow(0); if (M._engine_run()) throw new Error('run'); for (let f = 1; f <= n; f++) { M._engine_allow(f); await until(() => M._engine_done() >= f); } };
+  const W = M._engine_aud_written() >> 2, R = M._engine_aud_read() >> 2;
+  if (M._engine_init(p, st.length)) throw new Error('init');
+  await go(40);
+  const first = Atomics.load(M.HEAP32, W);
+  Atomics.store(M.HEAP32, R, first - 720);                // the worklet's place when the page restarts
+  M._engine_stop(); await until(() => M._engine_parked());
+  if (M._engine_init(p, st.length)) throw new Error('init');
+  console.log(Atomics.load(M.HEAP32, W), Atomics.load(M.HEAP32, R));
+  await go(30);
+  const n = M._engine_done(), last = n - 1, size = M._engine_aud_size();
+  console.log(n, first, Atomics.load(M.HEAP32, W), size, (M._engine_fr_aud0(last) + M._engine_fr_naud(last)) %% size);
+  process.exit(0);
+})().catch((e) => { console.error(e); process.exit(1); });
+''' % tuple(repr(str(x)) for x in (tmp_path / 'w' / 'engine_mt.js', tmp_path / 'w' / 'engine_mt.wasm', tmp_path / 'state.bin', tmp_path / 'disk.adf')))
+    r = subprocess.run(['node', str(script)], capture_output=True, text=True, timeout=240)
+    assert r.returncode == 0, r.stderr
+    after, read = map(int, r.stdout.splitlines()[0].split())
+    n, first, written, size, end = map(int, r.stdout.splitlines()[1].split())
+    assert n == 30 and first > 0 and (after, read) == (0, -1)
+    assert written % size == end and 0 < written < first
+
+
 CIA_PROG = {
     MAIN: '4df900dff000'          # lea $dff000,a6
           '3d7cc020009a'          # move.w #$c020,$9a(a6)    INTENA: master + VERTB

@@ -305,7 +305,8 @@ module D reads the ring from the shared memory and writes the count read (`engin
 interrupt the sound. Such a frame takes the page's live input (the keys as held now), not an input scheduled
 by frame - that entry does not exist yet (Alien Breed SE92 lost fire presses that way; the kit's engine reads
 `engine_keys` live). `engine_stop` parks the thread (a longjmp in its own thread), `engine_parked` tells when it
-has, and `engine_run` after a new `engine_init` wakes it (a restart, a saved position). The coroutine build
+has, and `engine_run` after a new `engine_init` wakes it (a restart, a saved position). `engine_init` takes the ring's write position and the count written back to zero and the count read to none
+(1.0.38, Xenon 2 KIT-GAP 16): the worklet reads the place `count % n`, sees the count go back and primes again. The coroutine build
 (`arek host engine` without `--thread`) stays the fallback for a page without COOP / COEP; interrupt handlers are
 called directly (G37), so both builds sleep in a handler's wait loop.
 
