@@ -17,6 +17,95 @@ FILES = ('wb-obraz.js', 'wb-seal.js', 'wb-nastaveni.js', 'wb-zvuk.js', 'wb-atn.j
 # the Workbench bar (1.0.17, Turrican II KIT-GAP 25): the games wrote these two first; a page's own copy is kept without an error
 SHELL = ('wb-menu.js', 'wb.css')
 CONTENT_KIND = 'arek-atn-files-1'
+MANIFEST = 'wb-kit.json'
+
+
+def _sha(path):
+    with open(path, 'rb') as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def module_version(path):
+    """The VERSION constant of a kit module (None: the file has none)."""
+    with open(path, encoding='utf-8', errors='replace') as f:
+        m = re.search(r"\b(?:VERSION|version)\s*[=:]\s*'([\d.]+)'", f.read())
+    return m.group(1) if m else None
+
+
+def manifest(dest):
+    """``wb-kit.json`` of a folder ``arek web copy`` wrote into, or None (a copy made before 1.0.41)."""
+    try:
+        with open(os.path.join(dest, MANIFEST), encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def status(dest):
+    """What the kit files in ``dest`` are against this kit: ``[(name, state, note)]`` with state ``current`` (the
+    kit's file), ``stale`` (unchanged since it was copied from an older kit), ``modified`` (edited since it was
+    copied - or, without wb-kit.json, simply not this kit's file), ``own`` (the page's own file under a kit name) or
+    ``missing``. A game runs what is in its folder: this is how it learns that a module is behind or was changed."""
+    from .. import __version__
+    man = manifest(dest) or {}
+    rows = []
+    for name in FILES:
+        path = os.path.join(dest, name)
+        if not os.path.exists(path):
+            rows.append((name, 'missing', ''))
+            continue
+        with open(path, 'rb') as f:
+            head = f.read(4096)
+        sha, rec = _sha(path), (man.get('files') or {}).get(name)
+        if sha == _sha(os.path.join(HERE, name)):
+            rows.append((name, 'current', 'kit %s' % __version__))
+        elif b'amiga-re-kit' not in head:
+            rows.append((name, 'own', "the page's own file"))
+        elif rec and rec.get('sha256') == sha:
+            rows.append((name, 'stale', 'from kit %s%s; this kit: %s' % (man.get('kit', '?'), ', module %s' % rec['version'] if rec.get('version') else '',
+                                                                       module_version(os.path.join(HERE, name)) or __version__)))
+        else:
+            rows.append((name, 'modified', 'edited since kit %s copied it' % man['kit'] if rec else 'not the file of this kit, and no wb-kit.json says which kit it came from'))
+    return rows
+
+
+def copy(dest, force=False):
+    """Copy the kit's web files into ``dest`` and write ``wb-kit.json`` (the kit version, per file its sha256 and
+    module version). Returns ``{'copied': [(path, sha256)], 'kept': [...], 'own_bar': [...], 'edited': [...]}``: a
+    file that is not the kit's (the page's own under a kit name) is kept, and so is a kit file that was edited since
+    it was copied (1.0.41: it used to be overwritten without a word) - ``force`` replaces both."""
+    import shutil
+    from .. import __version__
+    os.makedirs(dest, exist_ok=True)
+    before = {name: state for name, state, _ in status(dest)}
+    had_manifest = manifest(dest) is not None
+    res = {'copied': [], 'kept': [], 'own_bar': [], 'edited': [], 'replaced_unknown': []}
+    for name in FILES:
+        out = os.path.join(dest, name)
+        st = before[name]
+        if st == 'own' and not force:
+            res['own_bar' if name in SHELL else 'kept'].append(out)
+            continue
+        if st == 'modified' and had_manifest and not force:
+            res['edited'].append(out)
+            continue
+        if st == 'modified' and not had_manifest:
+            res['replaced_unknown'].append(out)
+        shutil.copyfile(os.path.join(HERE, name), out)
+        res['copied'].append((out, _sha(out)))
+    files = {}
+    for name in FILES:
+        out = os.path.join(dest, name)
+        if os.path.exists(out) and _sha(out) == _sha(os.path.join(HERE, name)):
+            files[name] = {'sha256': _sha(out), 'version': module_version(out)}
+    old = manifest(dest) or {}
+    for name, rec in (old.get('files') or {}).items():          # a file kept as it was stays on record with the kit it came from
+        if name not in files and name in FILES and os.path.exists(os.path.join(dest, name)):
+            files[name] = dict(rec, kit=rec.get('kit', old.get('kit')))
+    with open(os.path.join(dest, MANIFEST), 'w', encoding='utf-8') as f:
+        json.dump({'kit': __version__, 'files': files}, f, indent=1, sort_keys=True)
+        f.write('\n')
+    return res
 
 
 def payload_atn(blocks, conf=None):

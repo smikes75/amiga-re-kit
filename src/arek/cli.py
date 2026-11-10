@@ -611,22 +611,28 @@ def cmd_web(a):
     import shutil
     web = Path(__file__).parent / 'web'
     if a.what == 'copy':
-        dest = Path(a.target or '.')
-        dest.mkdir(parents=True, exist_ok=True)
-        kept, own_bar = [], []
-        from .web import FILES as WEB_FILES, SHELL as WEB_SHELL
-        for name in WEB_FILES:
-            out = dest / name
-            if out.exists() and not a.force and b'amiga-re-kit' not in out.read_bytes()[:4096]:
-                (own_bar if name in WEB_SHELL else kept).append(out)   # the game's own file under a kit name: never overwrite it
-                continue
-            shutil.copyfile(web / name, out)
-            print('%s  sha256 %s' % (out, hashlib.sha256(out.read_bytes()).hexdigest()))
-        print('(wb-obraz %s)' % _wb_version(web))
-        if own_bar:                         # the page's own Workbench bar (the games wrote it before the kit had one): fine
-            print("kept the page's own Workbench bar (--force replaces it with the kit's): %s" % ', '.join(str(k) for k in own_bar))
-        if kept:
-            print('kept, not a kit file (--force overwrites): %s' % ', '.join(str(k) for k in kept))
+        from . import web as webmod
+        dest = str(Path(a.target or '.'))
+        if a.check:                         # 1.0.41: what the folder holds against this kit - nothing is written
+            rows = webmod.status(dest)
+            for name, state, note in rows:
+                print('%-22s %-9s %s' % (name, state, note))
+            man = webmod.manifest(dest)
+            print('(%s; this kit: %s)' % ('copied by kit %s' % man.get('kit') if man else 'no wb-kit.json: copied before kit 1.0.41', __import__('arek').__version__))
+            return 1 if any(state in ('stale', 'modified', 'missing') for _, state, _ in rows) else 0
+        r = webmod.copy(dest, force=a.force)
+        for out, sha in r['copied']:
+            print('%s  sha256 %s' % (out, sha))
+        print('(wb-obraz %s; %s)' % (_wb_version(web), os.path.join(dest, webmod.MANIFEST)))
+        if r['replaced_unknown']:
+            print('replaced a kit file that was not this kit\'s (an older kit\'s or an edited one - no wb-kit.json to tell): %s' % ', '.join(r['replaced_unknown']))
+        if r['own_bar']:                    # the page's own Workbench bar (the games wrote it before the kit had one): fine
+            print("kept the page's own Workbench bar (--force replaces it with the kit's): %s" % ', '.join(str(k) for k in r['own_bar']))
+        if r['edited']:
+            print('kept, a kit file EDITED since it was copied (--force overwrites): %s' % ', '.join(r['edited']))
+        if r['kept']:
+            print('kept, not a kit file (--force overwrites): %s' % ', '.join(str(k) for k in r['kept']))
+        if r['kept'] or r['edited']:
             return 1
     elif a.what == 'check':
         from . import seal
@@ -1328,7 +1334,8 @@ def build_parser():
     s.add_argument('--gzip', action='store_true', help='seal: gzip the files before sealing (wb-seal.js inflates)')
     s.add_argument('--port', type=int, default=8920, help='demo: port of the local server (Ctrl+C stops it)')
     s.add_argument('--quick', action='store_true', help='test: fewer combinations')
-    s.add_argument('--force', action='store_true', help='copy: overwrite a file under a kit name that is not from the kit')
+    s.add_argument('--force', action='store_true', help='copy: overwrite a file under a kit name that is not from the kit, or a kit file edited since it was copied')
+    s.add_argument('--check', action='store_true', help='copy: write nothing - say per file whether the folder holds this kit\'s (current), an older kit\'s (stale), an edited one (modified) or the page\'s own; exit 1 unless all are current or own')
     s.add_argument('--atn', nargs='*', metavar='DISK:OFFSET', help='payload: ATN! blocks in order (DISK = path or a local.conf key, e.g. ADF1:0x57800)')
     s.add_argument('--content', help='payload: write content.json (sizes and hashes, no game data) here for wb-content.js')
     s.add_argument('--conf', default='local.conf', help='payload/serve: the local.conf with the disks')

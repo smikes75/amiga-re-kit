@@ -13,7 +13,7 @@ license-files = ["LICENSE", "THIRD-PARTY.md"]
 authors = [{ name = "smikes75" }]
 keywords = ["amiga", "68000", "reverse-engineering", "adf", "powerpacker", "bytekiller", "vamiga", "mcp", "recompiler"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
   "Topic :: Software Development :: Disassemblers",
@@ -53,3 +53,7 @@ version = {attr = "arek.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "browser: drives a browser through playwright (deselect with -m \"not browser\" for the fast suite)",
+  "timing: holds wall-clock behaviour to a limit; can fail on a loaded machine",
+]

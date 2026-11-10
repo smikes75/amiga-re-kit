@@ -68,5 +68,5 @@ def test_page_side_loads():
     if not node:
         pytest.skip('no node')
     code = "const O = require(%s); console.log(JSON.stringify([O.VERSION, O.PRESETS.shared, typeof O.create]));" % json.dumps(str(WEB / 'wb-zvuk-out.js'))
-    assert json.loads(subprocess.run([node, '-e', code], capture_output=True, text=True, check=True).stdout) == ['1.0', {'prefill': 20, 'target': 30, 'low': 15}, 'function']
+    assert json.loads(subprocess.run([node, '-e', code], capture_output=True, text=True, check=True).stdout) == ['1.1', {'prefill': 20, 'target': 30, 'low': 15}, 'function']
     assert 'wb-zvuk-out.js' in web.FILES and 'wb-zvuk-worklet.js' in web.FILES

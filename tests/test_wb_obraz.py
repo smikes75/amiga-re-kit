@@ -22,7 +22,7 @@ def js(expr):
 
 
 def test_version_and_scale():
-    assert js('O.VERSION') == '1.8'
+    assert js('O.VERSION') == '1.9'
     assert js('O.deviceScale(2, 320, 320, 1.25, 10)') == 3          # round(2 * 1.25)
     assert js('O.deviceScale(2, 336, 448, 2, 10)') == 3             # wider window: zoom counts in W0
     assert js('O.deviceScale(6, 320, 320, 2, 2.4)') == 4            # limited by the window
@@ -104,7 +104,7 @@ def test_web_copy_and_package_files(tmp_path, capsys):
     assert cli.main(['web', 'copy', str(tmp_path / 'web')]) == 0
     out = capsys.readouterr().out
     data = (tmp_path / 'web' / 'wb-obraz.js').read_bytes()
-    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.8' in out
+    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.9' in out
 
 
 def test_png_decoder_reads_the_kits_png():
@@ -142,7 +142,7 @@ def test_presenter_2d_path_and_patterns():
         return { gl: p.gl, sz, noDraw, css: c.style, w: c.width, h: c.height, calls: calls.length, rows: calls.filter((k) => k[0] === 'fill' && k[1].startsWith('rgb(')).map((k) => k.slice(2)), info: p.info() }; })()""")
     assert r['gl'] is False and r['noDraw'] is False and r['sz'] == {'backing': [20, 5], 'content': [16, 4], 'redrawn': False}
     assert r['w'] == 20 and r['h'] == 5 and r['css']['width'] == '16px' and r['css']['height'] == '4px'   # padded to the quantum 5 at dpr 1.25
-    assert r['rows'] == [[0, 0, 16, 2], [0, 2, 16, 2]] and r['info'] == {'gl': False, 'content': [16, 4], 'backing': [20, 5]}
+    assert r['rows'] == [[0, 0, 16, 2], [0, 2, 16, 2]] and r['info'] == {'gl': False, 'content': [16, 4], 'backing': [20, 5], 'lost': False, 'restores': 0}
     assert js("(() => { try { new O.Presenter({ getContext: () => null }, { gl: 'on' }); return 'no'; } catch (e) { return e.message; } })()") == 'wb-obraz: no WebGL2'
 
 

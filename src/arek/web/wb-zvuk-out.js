@@ -9,7 +9,7 @@
 // No game data.
 'use strict';
 const WBZVUKOUT = (() => {
-  const VERSION = '1.0';
+  const VERSION = '1.1';
   const PRESETS = { shared: { prefill: 20, target: 30, low: 15 }, messages: { prefill: 40, target: 50, low: 0 } };   // ms
   async function create(ctx, opts) {
     opts = opts || {};
@@ -21,7 +21,14 @@ const WBZVUKOUT = (() => {
       version: VERSION, node, mode: 'messages', preset: PRESETS.messages,
       setTarget(prefill, target) { node.port.postMessage({ prefill, target }); },
       bind(sh) { out.mode = 'shared'; out.preset = PRESETS.shared; out.setTarget(out.preset.prefill, out.preset.target); node.port.postMessage({ sab: sh.sab, ring: sh.ring, n: sh.n, widx: sh.widx, ridx: sh.ridx }); },
-      push(samples) { node.port.postMessage(samples, samples.buffer instanceof ArrayBuffer ? [samples.buffer] : []); },
+      // 1.1: the caller keeps its buffer unless the view is the whole of a plain ArrayBuffer (then it is transferred, as
+      // before); a view into a larger buffer or into the engine's memory (WebAssembly.Memory: transferring it throws,
+      // and a part of the page's own buffer would be detached with all of it) is copied first
+      push(samples) {
+        const b = samples.buffer, whole = b instanceof ArrayBuffer && samples.byteOffset === 0 && samples.byteLength === b.byteLength && !out.keep;
+        if (whole) { try { node.port.postMessage(samples, [b]); return; } catch (e) { out.keep = true; } }   // not transferable (wasm memory): copy from now on
+        const copy = samples.slice(); node.port.postMessage(copy, [copy.buffer]);
+      },
       flush() { node.port.postMessage('flush'); },
       stats() { return { reserve: st.fill, dropouts: st.under, dropped: st.drop, primed: st.primed, shared: st.shared, mode: out.mode,
                          latency: 1000 * ((ctx.outputLatency || 0) + (ctx.baseLatency || 0)) }; },

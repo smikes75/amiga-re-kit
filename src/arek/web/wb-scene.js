@@ -136,7 +136,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '2.10';
+    const VERSION = '2.11';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -290,10 +290,11 @@ const WBSCENE = (() => {
             const al = (o) => (o.alpha === undefined ? 1 : Math.min(Math.max(o.alpha, 0), 1)), alpha = from ? lerp(al(from), al(pr.to), Math.min(Math.max(pr.f, 0), 1)) : al(pr.to);
             return { o: pr.to, x: from ? lerp(from.x, pr.to.x, pr.f) : pr.to.x, y: from ? lerp(from.y, pr.to.y, pr.f) : pr.to.y, sx, sy, scr, screen, a: Math.round(alpha * 256), sc: scaleOf(from, pr.to, pr.f) }; });   // 2.8: a /256; 2.10: the size
         const shist = frames.filter((fr) => fr.t < A.t);
-        const sprs = pairById(A, B, f, (fr) => (fr.sprites || []).map((s) => Object.assign({ id: s.id !== undefined ? s.id : s.k }, s)), o.pairOlder || 0, shist, 1 + extC).map((pr) => {
+        const sprs = pairById(A, B, f, (fr) => (fr.sprites || []).map((s) => Object.assign({ id: s.id !== undefined ? s.id : s.k, _cam: fr.cam }, s)), o.pairOlder || 0, shist, 1 + extC).map((pr) => {
             if (pr.to.screen) return { s: pr.to, x: vcam[0] + ext.x + pr.to.x, y: vcam[1] + ext.y + pr.to.y, screen: true, sx: true, sy: true };   // 1.1: fixed on the screen
             // screen px relative to the window -> world (window of its own frame) -> the view; a jump is not crossed (1.2)
-            const fc = pr.from ? frameCam(frames, pr.from, A) : null, fw = fc ? [pr.from.x + fc[0], pr.from.y + fc[1]] : null, tw = [pr.to.x + B.cam[0], pr.to.y + B.cam[1]];
+            // 2.11: the camera of the frame the sprite is FROM (the copies made above were never found in the frames: an older frame's sprite got A's camera)
+            const fc = pr.from ? (pr.from._cam || frameCam(frames, pr.from, A)) : null, fw = fc ? [pr.from.x + fc[0], pr.from.y + fc[1]] : null, tw = [pr.to.x + B.cam[0], pr.to.y + B.cam[1]];
             const from = fw && !jumped(fw, tw) ? fw : null;
             const sx = !!from && pr.from.x === pr.to.x && from[0] !== tw[0], sy = !!from && pr.from.y === pr.to.y && from[1] !== tw[1];   // 2.4 (KIT-GAP 29): on the screen only when the hardware position held and the world one moved
             return { s: pr.to, x: from ? lerp(from[0], tw[0], pr.f) : tw[0], y: from ? lerp(from[1], tw[1], pr.f) : tw[1], sx, sy };
@@ -594,7 +595,14 @@ const WBSCENE = (() => {
         /** Attach to the presenter's WebGL2 context (wb-obraz 1.5 Presenter.g); false without WebGL2 - the page then draws
          *  the reference on the 2D path (reference(compose(...)) into present({pixels})). */
         attach(presenter) {
-            const gl = presenter && presenter.g; if (!gl) return false;
+            const gl = presenter && presenter.g; if (!gl || presenter.lost) return false;
+            // 2.11: the context can be lost and come back (wb-obraz 1.9): everything on the GPU is gone then - the scene
+            // forgets its textures and attaches again when the presenter says the context is restored
+            if (presenter.onRestore && this.hooked !== presenter) {
+                this.hooked = presenter;
+                presenter.onLost(() => { this.gl = null; });
+                presenter.onRestore((pr) => { this._forget(); this.attach(pr); });
+            }
             try {
                 this.gl = gl; this.presenter = presenter;
                 const sh = (t, src) => { const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
@@ -608,10 +616,12 @@ const WBSCENE = (() => {
                 gl.bindVertexArray(null);
                 this.texWin = this._tex(); this.texPal = this._tex(); this.texGrid = this._tex(); this.texAtlas = this._tex(); this.texHud = [this._tex(), this._tex()]; this.texOver = this._tex(); this.texBack = this._tex(); this.texOr = this._tex(); this.texBelow = this._tex();
                 this.quad = new Float32Array(24);
-                gl.canvas.addEventListener('webglcontextlost', () => { this.gl = null; });
+                if (!(presenter.onRestore) && !this.listening) { this.listening = true; gl.canvas.addEventListener('webglcontextlost', () => { this.gl = null; }); }
                 return true;
-            } catch (e) { this.gl = null; return false; }
+            } catch (e) { this.gl = null; console.warn('wb-scene: no WebGL drawer - ' + (e && e.message || e)); return false; }
         }
+        /** What lived on the GPU (after a lost context): object textures, the sprite pool, the atlas, the HUD, the middle and own framebuffers. */
+        _forget() { this.cache.clear(); this.pool = []; this.atlasGen = -1; this.hudUp = null; this.mid = null; this.own = null; this.last = null; }
         _tex() { const gl = this.gl, t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); return t; }
         _r8(t, w, h, data) { const gl = this.gl; gl.bindTexture(gl.TEXTURE_2D, t); gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, w, h, 0, gl.RED, gl.UNSIGNED_BYTE, data); }
         _quad(x0, y0, w, h) {

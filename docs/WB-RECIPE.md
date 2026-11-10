@@ -15,6 +15,7 @@ game writes. The contract is frozen at kit 1.0: wb-takt 1.4, wb-obraz 1.6, wb-sc
 const takt = WBTAKT.create({ fps: 50.08, ahead: 2, latC: 20 /* 30 with a coroutine engine */, latO: 40, lock: 'auto', allow: (n) => engine_allow(n) });
 // the presenter: ONE canvas (<canvas id="screen"> before <canvas class="crt-layer"> in .game), WebGL2 or 2D, the CRT above it;
 // no border on the canvas (the presenter sets its CSS size; a 1 px border with border-box resamples the picture by 2 px)
+// (wb.css of kit 1.0.41 draws the frame as a box-shadow; `arek web test` checks the canvas's content box against its backing)
 const pr = new WBOBRAZ.Presenter(document.getElementById('screen'), { gl: 'auto' });
 const screen = new WBOBRAZ.Screen(document.querySelector('.game'), pr.canvas);
 // the scene: one record per game frame in, the composition out - into the presenter's framebuffer, nowhere else
@@ -79,6 +80,22 @@ geometry, the CRT, one canvas under the CRT layer).
     arek web replay URL --hz 50,60,120,144 --frames 300 --route 1:120,2:60,0:120
     scene.read() against WBSCENE.reference(composition)   # 0 mismatches at any time, any scale
     # (the reference is a CPU composition of the whole band - run the check on its own, not during a smoothness measurement: it drops a frame)
+
+## The page's life (kit 1.0.41)
+
+- **A lost WebGL context** (a phone in the background, a GPU switch): the presenter asks for it back and rebuilds
+  itself, the scene attaches again - the page only keeps presenting. While it is gone `presenter.lost` is true and
+  `present()` returns false; `presenter.onLost(fn)` / `onRestore(fn)` for a note or a pause.
+- **A hidden tab**: rAF stops, the sound and an engine thread do not. `WBTAKT.lifecycle({ onHide, onShow(ms) })` - pause
+  the game and suspend the AudioContext in `onHide`; in `onShow` resume, then `takt.reset(done)`, `scene.reset()` and
+  `out.flush()`, as after any restart.
+- **Keys**: `WBTAKT.keyboard()` leaves a key pressed with Cmd / Ctrl / Alt to the browser and releases every key when
+  Meta goes up, the window loses the focus or the page is hidden. A page with its own key code needs the same three.
+- **Sound, messages mode**: `out.push(view)` keeps the caller's buffer unless the view is the whole of a plain
+  ArrayBuffer - a view into the engine's memory can be pushed as it is.
+- **The modules in the game's folder**: `arek web copy DIR` writes `wb-kit.json`; `arek web copy DIR --check` says per
+  file current / stale (which kit it came from) / modified / own, and exits 1 unless all are current or the page's
+  own. A kit file the game edited is kept (`--force` replaces it). Run the check in the game's build.
 
 ## The Workbench bar (wb-menu.js + wb.css, kit 1.0.17)
 

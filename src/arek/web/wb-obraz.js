@@ -35,7 +35,7 @@
 // names the pattern drawn and `arek web test` expects it. Default 'screen': Enhanced keeps its own fixed grid of device pixels.
 'use strict';
 const WBOBRAZ = (() => {
-    const VERSION = '1.8';
+    const VERSION = '1.9';
     const CRT_DETAILS = ['fine', 'standard', 'strong'];
     const CRT_SHAPES = ['lines', 'grid'];
     // 1.3 values (Alien Breed / Turrican II, 2026-10-22: larger steps between the levels)
@@ -230,21 +230,44 @@ const WBOBRAZ = (() => {
      *        row 0 at the bottom (GL); the presenter restores its own state afterwards. On the 2D path draw is not
      *        possible: present returns false and the game sends pixels (check .gl first).
      *    fill(kind) -> true                                  the test pattern (§5) through the same path
-     *    info() -> { gl, content, backing } */
+     *    info() -> { gl, content, backing, lost, restores }
+     *  1.9: the WebGL context can be lost at any time (a phone in the background, a GPU switch, a driver reset). The
+     *  presenter asks for it back (preventDefault on webglcontextlost), draws nothing while it is gone (.lost true,
+     *  present() false) and on webglcontextrestored builds its programs, textures and framebuffers again at the
+     *  current size; then it calls every onRestore(fn) callback (wb-scene attaches again by itself) - the page presents
+     *  its next frame as always. onLost(fn) tells the page (to pause, to show a note). */
     class Presenter {
         constructor(canvas, opts) {
             opts = opts || {};
             this.canvas = canvas; this.W = 0; this.H = 0; this.S = 1; this.par = 1; this.dpr = 1;
             this.content = [0, 0]; this.backing = [0, 0]; this.lookv = { brightness: 100, contrast: 100, saturation: 100, blur: 0 };
+            this.lost = false; this.restores = 0; this._onLost = []; this._onRestore = [];
             const want = opts.gl || 'auto';
             this.g = null; this.gl = false;
             if (want !== 'off' && canvas.getContext) {
                 const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: !!opts.preserve });
-                if (gl) { this._glInit(gl); this.gl = true; }
+                if (gl) {
+                    this._glInit(gl); this.gl = true;
+                    if (canvas.addEventListener) {
+                        canvas.addEventListener('webglcontextlost', (e) => {
+                            if (e.preventDefault) e.preventDefault();          // without it the browser never restores the context
+                            this.lost = true; this.last = null;
+                            for (const fn of this._onLost) { try { fn(this); } catch (err) { console.error(err); } }
+                        });
+                        canvas.addEventListener('webglcontextrestored', () => {
+                            this._glInit(this.g);                             // every program, texture and framebuffer is gone
+                            this.lost = false; this.restores++; this.last = null;
+                            if (this.W && this.H) this.size(this.W, this.H, this.S, this.par, this.dpr);
+                            for (const fn of this._onRestore) { try { fn(this); } catch (err) { console.error(err); } }
+                        });
+                    }
+                }
                 else if (want === 'on') throw new Error('wb-obraz: no WebGL2');
             }
             if (!this.g) { this.ctx = canvas.getContext('2d'); this.frame = null; }
         }
+        onLost(fn) { this._onLost.push(fn); return this; }
+        onRestore(fn) { this._onRestore.push(fn); return this; }
         _program(gl, fs) {
             const mk = (type, src) => { const sh = gl.createShader(type); gl.shaderSource(sh, src); gl.compileShader(sh);
                 if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('wb-obraz shader: ' + gl.getShaderInfoLog(sh)); return sh; };
@@ -280,8 +303,9 @@ const WBOBRAZ = (() => {
             const c = this.canvas, resized = c.width !== bw || c.height !== bh;
             if (resized) { c.width = bw; c.height = bh; }                          // clears the canvas (both paths)
             if (c.style) { c.style.width = bw / dpr + 'px'; c.style.height = bh / dpr + 'px'; }
-            const gl = this.g;
+            const gl = this.lost ? null : this.g;                               // 1.9: nothing can be allocated without the context
             let fboChanged = false, frameChanged = false;
+            if (this.lost) return { backing: this.backing, content: this.content, redrawn: false };
             if (gl) {
                 const fw = Math.round(W * S), fh = Math.round(H * S);
                 if (this.fboSize[0] !== fw || this.fboSize[1] !== fh) {
@@ -310,6 +334,10 @@ const WBOBRAZ = (() => {
                 if (!redrawn) this.last = null;
             }
             return { backing: this.backing, content: this.content, redrawn };
+        }
+        _unshared(p) {
+            if (!this.copy || this.copy.length !== p.length) this.copy = new Uint8Array(p.length);
+            this.copy.set(p); return this.copy;
         }
         _blit2d(src) {
             const g = this.ctx, [bw, bh] = this.backing;
@@ -361,7 +389,7 @@ const WBOBRAZ = (() => {
         present(content) {
             content = content || {};
             const W = this.W, H = this.H, S = this.S;
-            if (!W || !H) return false;
+            if (!W || !H || this.lost) return false;                            // 1.9: a lost context draws nothing
             if (content.rect && (content.source || content.pixels)) return this._rect(content);
             if (!this.g) {
                 if (content.draw && !content.pixels && !content.source) return false;
@@ -370,8 +398,9 @@ const WBOBRAZ = (() => {
                 if (content.pixels) {
                     if (!this.frame) this.frame = document.createElement('canvas');
                     if (this.frame.width !== W || this.frame.height !== H) { this.frame.width = W; this.frame.height = H; }
-                    const p = content.pixels.data || content.pixels;
-                    const img = content.pixels.data ? content.pixels : new ImageData(new Uint8ClampedArray(p.buffer, p.byteOffset, W * H * 4), W, H);
+                    let p = content.pixels.data || content.pixels;
+                    if (isShared(p)) p = this._unshared(p);                 // 1.9: ImageData refuses a view over shared memory (a threaded engine without WebGL2)
+                    const img = content.pixels.data && !isShared(content.pixels.data) ? content.pixels : new ImageData(new Uint8ClampedArray(p.buffer, p.byteOffset, W * H * 4), W, H);
                     this.frame.getContext('2d').putImageData(img, 0, 0); src = this.frame;
                 }
                 if (src) { this._blit2d(src); this.last = content.draw ? null : { src, W, H }; }
@@ -400,8 +429,9 @@ const WBOBRAZ = (() => {
                 if (content.pixels) {
                     if (!this.rectFrame) this.rectFrame = document.createElement('canvas');
                     if (this.rectFrame.width !== sz[0] || this.rectFrame.height !== sz[1]) { this.rectFrame.width = sz[0]; this.rectFrame.height = sz[1]; }
-                    const p = content.pixels.data || content.pixels;
-                    this.rectFrame.getContext('2d').putImageData(content.pixels.data ? content.pixels : new ImageData(new Uint8ClampedArray(p.buffer, p.byteOffset, sz[0] * sz[1] * 4), sz[0], sz[1]), 0, 0); src = this.rectFrame;
+                    let p = content.pixels.data || content.pixels;
+                    if (isShared(p)) p = this._unshared(p);
+                    this.rectFrame.getContext('2d').putImageData(content.pixels.data && !isShared(content.pixels.data) ? content.pixels : new ImageData(new Uint8ClampedArray(p.buffer, p.byteOffset, sz[0] * sz[1] * 4), sz[0], sz[1]), 0, 0); src = this.rectFrame;
                 }
                 g.fillStyle = '#000'; g.fillRect(0, 0, bw, bh);
                 g.imageSmoothingEnabled = !!content.smooth; if (content.smooth) g.imageSmoothingQuality = 'high';
@@ -431,7 +461,7 @@ const WBOBRAZ = (() => {
             if (!this.g) { testPattern(this.canvas, kind, this.W, this.H, this.S, this.par); this.last = null; return true; }
             return this.present({ pixels: patternPixels(kind, this.W, this.H) });
         }
-        info() { return { gl: this.gl, content: this.content, backing: this.backing }; }
+        info() { return { gl: this.gl, content: this.content, backing: this.backing, lost: this.lost, restores: this.restores }; }
     }
 
     /** The game box .game: the CRT layer (redrawn only when its key changes), --crt-on, data-crt / data-mode,
@@ -481,6 +511,7 @@ const WBOBRAZ = (() => {
             const dpr = dprNow(), r = this.canvas.getBoundingClientRect(), l = this.layer.getBoundingClientRect();
             return { version: VERSION, origin: [(r.left + (this.canvas.clientLeft || 0)) * dpr, (r.top + (this.canvas.clientTop || 0)) * dpr],
                      backing: [this.canvas.width, this.canvas.height], crtLayer: [this.layer.width, this.layer.height],
+                     box: [(r.width - 2 * (this.canvas.clientLeft || 0)) * dpr, (r.height - 2 * (this.canvas.clientTop || 0)) * dpr],   // 1.9: the canvas's content box in device pixels - it must be the backing (a border with border-box shrinks it: the picture is resampled)
                      crtOrigin: [l.left * dpr, l.top * dpr], crtOn: this.on, crtP: this.pd.P, crtD: this.pd.D, crtShape: this.pd.shape,
                      crtMode: this.game.dataset.mode, crtLook: this.look || this.game.dataset.mode, crtDetail: this.game.dataset.crt, offset: [this.ax, this.ay] };
         }

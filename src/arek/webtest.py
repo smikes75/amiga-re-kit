@@ -121,6 +121,9 @@ def check_layout(info, mode, detail, dpr, fails, tag):
        'backing %s not the content rounded up to the layout quantum %d' % (info['backing'], q))
     ok(all(abs(v - round(v)) < TOL_POS and round(v) % q == 0 for v in info['origin']),
        'origin %s not on a multiple of %d device pixels' % (info['origin'], q))
+    if info.get('box'):                                  # wb-obraz 1.9: one backing pixel per device pixel - no CSS that resizes the canvas
+        ok(all(abs(a - b) < TOL_POS for a, b in zip(info['box'], info['backing'])),
+           "the canvas's content box %s is not its backing %s (a border with box-sizing: border-box, or a CSS width)" % (info['box'], info['backing']))
     ok(info['crtLayer'] == info['backing'], 'CRT layer %s != backing' % info['crtLayer'])
     ok(all(abs(a - b) < TOL_POS for a, b in zip(info['crtOrigin'], info['origin'])), 'CRT layer not over the content')
     P, D = info['P'], info['D']

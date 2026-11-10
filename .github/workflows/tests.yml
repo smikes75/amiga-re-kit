@@ -1,0 +1,27 @@
+# The fast suite on every push: everything that needs no browser and no emulator (synthetic data only).
+# A C compiler and node are required (AREK_REQUIRE_TOOLS): a test that would skip without them fails instead.
+# The browser tests (-m browser) and the self-tests against the headless emulator run on the developer's machine.
+name: tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -e '.[dev]' cryptography build
+      - run: python -m pytest -q -m "not browser"
+        env:
+          AREK_REQUIRE_TOOLS: '1'

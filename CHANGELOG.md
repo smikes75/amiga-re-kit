@@ -1,0 +1,425 @@
+# Changelog
+
+One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
+the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
+
+## 1.0.41 (2026-11-10)
+
+- wb-obraz 1.9: a lost WebGL context is asked back and everything rebuilt (`onLost` / `onRestore`, `.lost`); the 2D path
+  takes pixels in shared memory; `Screen.info().box` and the check of it in `arek web test`
+- wb-scene 2.11: attaches again after a restored context; a sprite paired with an older frame keeps that frame's camera
+- wb-takt 1.5: `keyboard()` leaves keys with Cmd / Ctrl / Alt to the browser and releases every key on Meta up, window
+  blur and a hidden page; `lifecycle({ onHide, onShow })`
+- wb-zvuk-out 1.1: `push()` copies a view that is not the whole of a plain buffer (the engine's memory, a part of a buffer)
+- wb.css: no border on the game canvas (it resized the picture by 2 px); the frame is a box-shadow
+- `arek web copy` writes `wb-kit.json`, keeps a kit file edited since it was copied, `--check` says what a folder holds
+- tests: markers `browser` and `timing` (`pytest -m "not browser"`), `AREK_REQUIRE_TOOLS=1` fails instead of skipping
+  without a C compiler or node; a CI workflow; git tags for 0.9.6-1.0.38; this file
+
+## 1.0.40 (2026-11-10)
+
+- silent errors of the translation and the host found by the audit of 2026-11-10
+
+## 1.0.39 (2026-11-10)
+
+- equal means covered - the comparisons no longer pass on what they did not compare
+
+## 1.0.38 (2026-11-10)
+
+- a restart starts the sound count again (Xenon 2 KIT-GAP 16)
+
+## 1.0.37 (2026-11-09)
+
+- wb-scene 2.10, objects[].scale and anchor (Xenon 2 KIT-GAP 15)
+
+## 1.0.36 (2026-11-09)
+
+- headless - the input line window and a list of shot frames (vamiga-frames-899da5d.patch)
+
+## 1.0.35 (2026-11-09)
+
+- wb-scene 2.9 - camMean past the newest frame, a new history when time goes back
+
+## 1.0.34 (2026-11-09)
+
+- wb-scene 2.8 - objects[].alpha
+
+## 1.0.33 (2026-11-08)
+
+- wb-scene 2.7 - an object on the screen stands still
+
+## 1.0.32 (2026-11-08)
+
+- wb-obraz 1.8 - the Original CRT in Enhanced for a game whose Enhanced only smooths the motion
+
+## 1.0.31 (2026-11-08)
+
+- arek web smooth - a camera jump ends a moving stretch
+
+## 1.0.30 (2026-11-08)
+
+- wb-scene 2.6 - camMean never averages across a camera jump; camMean.step passed on
+
+## 1.0.29 (2026-11-08)
+
+- arek web smooth judges what the page adds to the game's own key delay
+
+## 1.0.28 (2026-11-08)
+
+- wb-scene 2.5 - a back layer with a camera of its own (parallax), window.or
+
+## 1.0.27 (2026-11-07)
+
+- run-time jump targets on 24 bits, arek web smooth for vertical scrollers
+
+## 1.0.26 (2026-11-07)
+
+- TRAP, rte through the stacked PC, recomp --resume for tasks with their own stacks, arek difftest against Moira
+
+## 1.0.25 (2026-11-07)
+
+- arek kb - the knowledge base of the rebuilds
+
+## 1.0.24 (2026-11-07)
+
+- rts is a jump through the stack when the routine changed it (Xenon 2 KIT-GAP 4)
+
+## 1.0.23 (2026-11-07)
+
+- recomp reads the source before the destination moves the same register (Xenon 2 KIT-GAP 3)
+
+## 1.0.22 (2026-11-07)
+
+- the mouse in the headless emulator (Xenon 2 KIT-GAP 2)
+
+## 1.0.21 (2026-11-07)
+
+- arek rnc - Rob Northen Compression method 1 (Xenon 2 KIT-GAP 1)
+
+## 1.0.20 (2026-11-07)
+
+- REBUILD-PLAYBOOK and the Node harness of the engine
+
+## 1.0.19 (2026-11-06)
+
+- wb-scene 2.4 - the anchor per pair for sprites and objects (KIT-GAP 29)
+
+## 1.0.18 (2026-11-06)
+
+- dev server backlog 128, wb-scene 2.3 palAnchor and objects with the ground (KIT-GAPS 26-28)
+
+## 1.0.17 (2026-11-06)
+
+- wb-scene 2.2 window.palTop, the Workbench bar in the kit (KIT-GAPS 24, 25)
+
+## 1.0.16 (2026-11-05)
+
+- ENGINE_FRAME_RECORD - a scene record of each frame from the kit's engine (Turrican II M9)
+
+## 1.0.15 (2026-11-04)
+
+- overlay_call finds a loaded module by its extent (Turrican II KIT-GAPS 23)
+
+## 1.0.14 (2026-11-04)
+
+- a branch nowhere is a frontier; the pointer scan tries every start position (Turrican II KIT-GAPS 21, 22)
+
+## 1.0.13 (2026-11-04)
+
+- only a fall-through off the image end is a frontier (Turrican II KIT-GAPS 20, a 1.0.12 regression)
+
+## 1.0.12 (2026-11-04)
+
+- roots that decode, a flow leaving the image is a frontier, level 1/2/6 vector handlers and the key's PORTS (Turrican II KIT-GAPS 17, 18, 19)
+
+## 1.0.11 (2026-11-04)
+
+- a module's own direct calls are translated; --auto-soft drops a root whose call tree reaches data (Turrican II KIT-GAPS 15, 16)
+
+## 1.0.10 (2026-11-04)
+
+- ORI/ANDI/EORI #imm,CCR|SR decoded as 4 bytes and translated (Turrican II KIT-GAPS 14)
+
+## 1.0.9 (2026-11-04)
+
+- the runtime's area blitter ignores bit 0 of a modulo and subtracts it in descending mode (Turrican II KIT-GAPS 13)
+
+## 1.0.8 (2026-11-04)
+
+- host_spend() - an --extern spends the original's elapsed time with interrupts served; host_trace --reglog-regs (Turrican II KIT-GAPS 11, 12)
+
+## 1.0.7 (2026-11-04)
+
+- COPJMP2 in the frame map, the overlay fingerprint as a raw read, a CPU slot wait stops at the frame end (Turrican II KIT-GAPS 8, 9, 10)
+
+## 1.0.6 (2026-11-04)
+
+- the Copper's INTREQ writes of any bit raised at their times, HOST_VECTOR_HANDLER, --adf number or path (Turrican II KIT-GAPS 6, 7)
+
+## 1.0.5 (2026-11-03)
+
+- host - no second COPER after a mid-frame start, INTREQ BLIT when a CPU-started blit ends (Turrican II KIT-GAPS 2, 3)
+
+## 1.0.4 (2026-11-03)
+
+- Bytekiller format BK (the classic 12-byte header) - Turrican II's cracktro layer (Turrican-recomp KIT-GAPS 1)
+
+## 1.0.3 (2026-11-02)
+
+- wb-obraz 1.7 present({source | pixels + size, rect, smooth}) (Alien Breed SE92 G3), wb-scene 2.1.1 view.hudY
+
+## 1.0.2 (2026-11-02)
+
+- wb-scene 2.1 - the 0.9.15 transition and the 0.9.16 freshSprites removed (G60: counterproductive in every game)
+
+## 1.0.1 (2026-11-02)
+
+- whole-number sampling on both paths (Alien Breed II G59, WebKit), the HUD narrowed at its splits (Superfrog KIT-GAPS 52), player() with the sprite's image (53), the recipe revised by Alien Breed SE92's notes
+
+## 1.0.0 (2026-11-02)
+
+- the display layer's contract frozen - WB-RECIPE.md (one page a game writes from), wb-scene 2.0 without softClamp / smoothY
+
+## 0.9.16 (2026-11-02)
+
+- wb-scene 1.9 freshSprites (a tracked player answers a key one display delay sooner), arek web smooth key -> player
+
+## 0.9.15 (2026-11-02)
+
+- wb-scene 1.8 - the mode transition from the kit, any scale (GPU = reference at a fractional S), the one-canvas rule
+
+## 0.9.14 (2026-11-01)
+
+- wb-obraz 1.5.2 - the CRT layer kept above the game canvas (Superfrog), arek web test §5.5, the canon's measurements
+
+## 0.9.13 (2026-11-01)
+
+- wb-takt 1.4 - the grant horizon (Alien Breed II G57), takt.timeOf (Superfrog KIT-GAPS 51), replay reads done + state in one call
+
+## 0.9.12 (2026-11-01)
+
+- the inventory's clean-up - wb-scene 1.7 extrapolateObjects + HUD cache, wb-takt 1.3 fixed latencies, INVENTURA.md
+
+## 0.9.10 (2026-11-01)
+
+- wb-scene 1.6 - the objects move with the ground under subpixel (objects[].steady for a tracked player), unexplained() for window.over
+
+## 0.9.9 (2026-11-01)
+
+- arek host copy takes every source of the host (Alien Breed II G55), AHDD_INSERTED, the subpixel texture on its own unit (Superfrog KIT-GAPS 50)
+
+## 0.9.8 (2026-11-01)
+
+- wb-scene 1.5 - subpixel: the playfield moved by fractions of a device pixel (even motion on a 60 / 144 Hz display)
+
+## 0.9.7 (2026-11-01)
+
+- a data disk the game writes (arek_host_datadisk.h + wb-datadisk.js) - the Team17 "custom datadisk" in the browser
+
+## 0.9.6 (2026-11-01)
+
+- arek web replay (module H) + a fall-through or branch into an --extern routine is the host call (Alien Breed II G54)
+
+## 0.9.5 (2026-10-31)
+
+- a write to CIA-A SDR is stored (Alien Breed II G53 - a held key repeated)
+
+## 0.9.4 (2026-10-31)
+
+- wb-scene 1.4 - the sprites above the HUD rows (hud.under), the sprites' anchor in the contract
+
+## 0.9.3 (2026-10-31)
+
+- wb-scene 1.3 - objects[].ox/oy, the drawing's offset from the object's logical position
+
+## 0.9.2 (2026-10-31)
+
+- wb-scene 1.2 after Superfrog's measurements on 1.1 (its KIT-GAPS 44-46)
+
+## 0.9.1 (2026-10-31)
+
+- wb-scene 1.1 after Superfrog's switch (its KIT-GAPS 40-43)
+
+## 0.9.0 (2026-10-30)
+
+- the scene - the wider, smoother view composed on the GPU for every rebuild (wb-scene.js 1.0, module G)
+
+## 0.8.6 (2026-10-30)
+
+- a stereo gain matrix with ramps in arek_audio.h, strip with HTML markers (Alien Breed II G51, G52)
+
+## 0.8.5 (2026-10-30)
+
+- the kit's documents in the wheel, smooth 1.4 for a mode without interpolation (Superfrog KIT-GAPS 37, 38)
+
+## 0.8.4 (2026-10-29)
+
+- fixes from Alien Breed II's full-game runs (G47, G48, G50)
+
+## 0.8.3 (2026-10-29)
+
+- wb-obraz 1.5.1 (no blank canvas after a resize), smooth 1.3 (G44, G45, ready() gating), wb-takt 1.2
+
+## 0.8.2 (2026-10-28)
+
+- smooth 1.1 after Alien Breed II's baseline (G41-G43), wb-takt 1.1
+
+## 0.8.1 (2026-10-28)
+
+- the canon of a smooth picture and sound (modules C, D, E, F, docs/WB-PLYNULOST.md)
+
+## 0.8.0 (2026-10-28)
+
+- display contract 1.5 - the presenter (WebGL2 or 2D, one canvas, one API)
+
+## 0.7.2 (2026-10-28)
+
+- the host and the renderers after Alien Breed II's switch (G35-G40, G37)
+
+## 0.7.1 (2026-10-27)
+
+- whole-game translation, display gaps, the web engine, Paula's state machine with interrupts
+
+## 0.7.0 (2026-10-26)
+
+- the Alien Breed II tool pass - host of a translation, Paula DMA model, bus and display fixes, trace tools, content key
+
+## 0.6.4 (2026-10-26)
+
+- menu 1.2 (Superfrog KIT-GAPS 32-36), recomp -DCIA_HOOK, METHOD.md on CIA seeds
+
+## 0.6.3 (2026-10-26)
+
+- an exact snapped zoom survives a reload (Alien Breed K2 KIT-GAP)
+
+## 0.6.2 (2026-10-26)
+
+- ship wb-nastaveni.js in the wheel (0.6.1's package-data still named wb-menu.js); test pins the list
+
+## 0.6.1 (2026-10-26)
+
+- sound contract 1.1 and menu 1.1 (wb-nastaveni.js), web copy keeps foreign files
+
+## 0.6.0 (2026-10-26)
+
+- the shared Display / Sound menu and the sound contract 1.0 (MENU-ZVUK.md)
+
+## 0.5.19 (2026-10-26)
+
+- the PAL pixel aspect is 1.04 (14.75 / 14.1875 MHz), any par value allowed; where a 312-line frame comes from
+
+## 0.5.18 (2026-10-26)
+
+- movem.w and rte read and write through the hooks again (Superfrog KIT-GAPS 29)
+
+## 0.5.17 (2026-10-26)
+
+- the runtime's blitter moves its words raw, not as CPU bus accesses (Superfrog KIT-GAPS 28)
+
+## 0.5.16 (2026-10-26)
+
+- display contract 1.4 - the pixel aspect inside the backing (Superfrog KIT-GAPS 27)
+
+## 0.5.15 (2026-10-26)
+
+- the Amiga bus per DMA slot (arek.bus), from the Alien Breed project
+
+## 0.5.14 (2026-10-25)
+
+- Superfrog's KIT-GAPS 21-26 on the 0.5.13 tools
+
+## 0.5.13 (2026-10-25)
+
+- coverage, random input, bus cycles, a parity suite, reads outside RAM
+
+## 0.5.12 (2026-10-24)
+
+- payload keys - the game's own content opens the sealed files, whichever disk version it came from
+
+## 0.5.11 (2026-10-24)
+
+- write into the running machine (--poke), jump tables with a run-time base
+
+## 0.5.10 (2026-10-23)
+
+- arek web seal --gzip/--label, arek web check for presentation bundles
+
+## 0.5.9 (2026-10-23)
+
+- recomp --profile - calls, clocks and written pages per routine
+
+## 0.5.8 (2026-10-23)
+
+- version, README and THIRD-PARTY for arek web seal (the previous commit missed them)
+
+## 0.5.7 (2026-10-23)
+
+- wb-obraz.js reachable from ES modules, test hooks documented in the file
+
+## 0.5.6 (2026-10-22)
+
+- display contract - whole CSS pixels, column check, content outside the viewport
+
+## 0.5.5 (2026-10-22)
+
+- consecutive pictures in one run, register log for chosen registers
+
+## 0.5.4 (2026-10-22)
+
+- overlays recognised by fingerprint, run-time targets
+
+## 0.5.3 (2026-10-22)
+
+- chip bus log - who had the bus in every slot, CPU waits, blits
+
+## 0.5.2 (2026-10-22)
+
+- reference wb-obraz.js (display contract 1.3), demo page, arek web test
+
+## 0.5.1 (2026-10-22)
+
+- long parity - arek trace compare, trace pack
+
+## 0.5.0 (2026-10-22)
+
+- arek.display - the frame chip RAM shows, pixel exact against vAmiga
+
+## 0.4.6 (2026-10-22)
+
+- refusals as data - every frontier at once (routine, site, kind, operand)
+
+## 0.4.5 (2026-10-22)
+
+- input frame by frame in the emulator, register/audio logs, selftest
+
+## 0.4.4 (2026-10-22)
+
+- slow RAM in the generated C, PNG without Pillow, chip registers in bpstate
+
+## 0.4.3 (2026-10-22)
+
+- findings of the Superfrog Sonnet run (input spellings, hunk streams, timeouts)
+
+## 0.4.2 (2026-10-22)
+
+- wait-loop hook, rte ends a path, --lib --timing helpers, address spellings
+
+## 0.4.1 (2026-10-22)
+
+- data stored after a call (Flow.inline, --inline)
+
+## 0.4.0 (2026-10-22)
+
+- recomp flow options and correctness fixes, 68000 clock counts, strict decoder
+
+## 0.3.0 (2026-10-21)
+
+- decoder LINK/UNLK/PEA/EXG/CMPM/ABCD/SBCD + memory shifts, continuous trace, kit identity
+
+## 0.2.1 (2026-10-20)
+
+- version single-sourced, python -m arek, hwscan chip size, xref --callees
+
+## 0.2.0 (2026-10-20)
+
+- Atomik (ATN!) unpacker, AmigaDOS OFS/FFS reader, audit graph tests

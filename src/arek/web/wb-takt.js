@@ -25,7 +25,7 @@
 //   engine in a worker stamps its scene packet inside allow(g), before the page calls stamp(n)); no side effect.
 'use strict';
 const WBTAKT = (() => {
-    const VERSION = '1.4';
+    const VERSION = '1.5';
     const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
     /** The display's rate from the last intervals: the median (Hz), 0 before 60 samples. */
     function medianHz(dts) {
@@ -141,16 +141,41 @@ const WBTAKT = (() => {
         }
     }
     /** The keys as bits, changed at the event: map = { KeyCode: bit }; onchange(bits) runs at once (the game takes
-     *  them in its next frame, not the next display frame). Returns { bits(), dispose() }. */
+     *  them in its next frame, not the next display frame). Returns { bits(), release(), dispose() }.
+     *  1.5: no key stays down behind the page's back - a key pressed with Cmd / Ctrl / Alt is the browser's (it is neither
+     *  taken nor prevented: Cmd+R reloads), and every key is released when Meta goes up (macOS sends no keyup for a key
+     *  let go while Cmd is held), when the window loses the focus (blur does not bubble: the window is listened to as
+     *  well as the target) and when the page is hidden. */
     function keyboard(target, map, onchange) {
         let bits = 0;
-        const down = (e) => { const b = map[e.code]; if (!b) return; if (!(bits & b)) { bits |= b; if (onchange) onchange(bits); } e.preventDefault(); };
-        const up = (e) => { const b = map[e.code]; if (!b) return; if (bits & b) { bits &= ~b; if (onchange) onchange(bits); } };
-        const blur = () => { if (bits) { bits = 0; if (onchange) onchange(0); } };
-        target.addEventListener('keydown', down); target.addEventListener('keyup', up); target.addEventListener('blur', blur);
-        return { bits: () => bits, dispose() { target.removeEventListener('keydown', down); target.removeEventListener('keyup', up); target.removeEventListener('blur', blur); } };
+        const release = () => { if (bits) { bits = 0; if (onchange) onchange(0); } };
+        const down = (e) => { const b = map[e.code]; if (!b || e.metaKey || e.ctrlKey || e.altKey) return; if (!(bits & b)) { bits |= b; if (onchange) onchange(bits); } e.preventDefault(); };
+        const up = (e) => { if (e.key === 'Meta' || e.code === 'MetaLeft' || e.code === 'MetaRight') { release(); return; }
+            const b = map[e.code]; if (!b) return; if (bits & b) { bits &= ~b; if (onchange) onchange(bits); } };
+        const hidden = () => { if (typeof document !== 'undefined' && document.hidden) release(); };
+        const win = typeof window !== 'undefined' && window !== target && window.addEventListener ? window : null;
+        const doc = typeof document !== 'undefined' && document.addEventListener ? document : null;
+        target.addEventListener('keydown', down); target.addEventListener('keyup', up); target.addEventListener('blur', release);
+        if (win) win.addEventListener('blur', release);
+        if (doc) doc.addEventListener('visibilitychange', hidden);
+        return { bits: () => bits, release, dispose() { target.removeEventListener('keydown', down); target.removeEventListener('keyup', up); target.removeEventListener('blur', release);
+            if (win) win.removeEventListener('blur', release); if (doc) doc.removeEventListener('visibilitychange', hidden); } };
     }
-    return { VERSION, medianHz, lockOf, Takt, create: (o) => new Takt(o), keyboard };
+    /** 1.5: the page's life - onHide() when the tab is hidden (rAF stops there while the sound and an engine thread go
+     *  on: pause the game, suspend the AudioContext), onShow(hiddenMs) when it is back (reset the clock: takt.reset(done),
+     *  scene.reset(), flush the sound). Returns { hidden(), dispose() }. */
+    function lifecycle(handlers) {
+        handlers = handlers || {};
+        const doc = typeof document !== 'undefined' ? document : null;
+        let since = doc && doc.hidden ? nowMs() : 0;
+        const change = () => {
+            if (doc.hidden) { if (!since) { since = nowMs(); if (handlers.onHide) handlers.onHide(); } }
+            else if (since) { const ms = nowMs() - since; since = 0; if (handlers.onShow) handlers.onShow(ms); }
+        };
+        if (doc && doc.addEventListener) doc.addEventListener('visibilitychange', change);
+        return { hidden: () => !!since, dispose() { if (doc && doc.removeEventListener) doc.removeEventListener('visibilitychange', change); } };
+    }
+    return { VERSION, medianHz, lockOf, Takt, create: (o) => new Takt(o), keyboard, lifecycle };
 })();
 if (typeof globalThis !== 'undefined') globalThis.WBTAKT = WBTAKT;
 if (typeof module !== 'undefined') module.exports = WBTAKT;
