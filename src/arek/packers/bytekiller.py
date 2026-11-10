@@ -152,28 +152,193 @@ def unpack_bk(data, off=0):
     return bytes(out), br.checksum == 0
 
 
-def unpack_tail(data, off=0, end=None):
+def _decode_c(br, size):
+    """The second code table met behind a TAIL block (1.0.44, Xenon 2 KIT-GAP 17, written from that session's
+    disassembly of the decruncher): every step is a COUNT of literals (possibly 0) followed by one match, backwards
+    into ``size`` bytes; the bit reader is the classic one."""
+    out = bytearray(size)
+    p = size
+    while True:
+        n = br.bits(3)
+        if n == 7:
+            if br.bit() == 0:
+                n = br.bits(4) + 7
+            else:
+                n = br.bits(10)
+                if n == 0:
+                    n = br.bits(18)
+        if p - n < 0:
+            raise ValueError("a literal run passes the start of the output - damaged data or a wrong offset")
+        for _ in range(n):
+            p -= 1
+            out[p] = br.bits(8)
+        if p == 0:
+            break
+        c = br.bits(2)
+        if c == 0:
+            length, width = 2, 8
+        elif c == 1:
+            length, width = 3, (8 if br.bit() else 14)
+        else:
+            if c == 2:
+                length = 4
+            else:
+                e = br.bits(2)
+                length = br.bits(8) if e == 3 else br.bits(2) + 7 if e == 2 else e + 5
+            width = 16 if br.bit() == 0 else 8 if br.bit() else 12
+        ofs = br.bits(width)
+        if p - length < 0 or ofs == 0 or p - 1 + ofs >= size:
+            raise ValueError("a match passes the output - damaged data or a wrong offset")
+        for _ in range(length):
+            p -= 1
+            out[p] = out[p + ofs]
+        if p == 0:
+            break
+    return out
+
+
+TAIL_CODES = {'b': _decode_b, 'c': _decode_c}
+
+
+def unpack_tail(data, off=0, end=None, code='b'):
     """Format TAIL (1.0.43, Xenon 2 KIT-GAP 17): a crunched block whose parameters are at its END - the decruncher of
     a packed executable points a0 behind the block and takes ``move.l -(a0),a2`` (the unpacked length) and
-    ``move.l -(a0),d0`` (the first bit word); the classic Bytekiller code follows downwards to the block's start
-    ``off``. ``end``: the offset behind the block (default: the end of the data). There is no checksum in this
-    layout: the second value says whether the bit stream was used up exactly at ``off`` - the only evidence the
-    format offers. Returns (data, consumed_exactly)."""
+    ``move.l -(a0),d0`` (the first bit word); the code follows downwards to the block's start ``off``. ``end``: the
+    offset behind the block (default: the end of the data). ``code``: 'b' the classic Bytekiller table, 'c' the table
+    of counted literal runs (1.0.44) - the layout does not say which, so the caller names it (``unpack_tail_any``
+    tries both). There is no checksum in this layout: the second value says whether the bit stream was used up
+    exactly at ``off`` - the only evidence the format offers. Returns (data, consumed_exactly)."""
+    if code not in TAIL_CODES:
+        raise ValueError("code is 'b' or 'c', not %r" % (code,))
     end = len(data) if end is None else end
-    if end - off < 12 or end > len(data) or (end - off) % 4:
+    if end - off < 8 or end > len(data) or (end - off) % 4:           # 1.0.44: one bit word and the length is the smallest block
         raise ValueError("a TAIL block is whole longs between its start and its end (%d bytes)" % (end - off))
     size = int.from_bytes(data[end - 4:end], "big")
     if size == 0 or size > 8 << 20:
         raise ValueError("implausible unpacked length: %d (the last long of the block)" % size)
     br = BitReader(data, end - 4, start=off)
-    out = _decode_b(br, size)
+    out = TAIL_CODES[code](br, size)
     return bytes(out), br.pos == off
+
+
+def unpack_tail_any(data, off=0, end=None):
+    """Try both code tables on a TAIL block. Returns (data, code) of the ONE table that decodes it and uses the bit
+    stream up exactly; raises when none or both do (an answer picked from two equal candidates would be a guess)."""
+    hits, errors = [], []
+    for code in sorted(TAIL_CODES):
+        try:
+            out, exact = unpack_tail(data, off, end, code)
+        except ValueError as e:
+            errors.append('%s: %s' % (code, e))
+            continue
+        if exact:
+            hits.append((out, code))
+        else:
+            errors.append('%s: decoded, but the bit stream was not used up exactly' % code)
+    if len(hits) != 1:
+        raise ValueError('TAIL block: %s' % ('both code tables decode it exactly - name the code' if hits else '; '.join(errors)))
+    return hits[0]
+
+
+def _bit_stream(bits):
+    """Bits in decoder read order -> the backwards longword stream (the sentinel rule of ``BitReader.bit``: the long
+    read FIRST holds k <= 31 payload bits under a 1 bit, every later long 32)."""
+    longs = []
+    k = len(bits) % 32
+    v = 1 << k
+    for i, b in enumerate(bits[:k]):
+        v |= b << i
+    longs.append(v)
+    for j in range(k, len(bits), 32):
+        v = 0
+        for i, b in enumerate(bits[j:j + 32]):
+            v |= b << i
+        longs.append(v)
+    longs.reverse()
+    return b''.join(struct.pack('>I', v) for v in longs)
 
 
 def pack_tail_literal(data):
     """A TAIL block of literal runs only (for tests): the backwards longword stream, then the unpacked length."""
     b = pack_b_literal(data)
     return b[8 + 4:] + struct.pack('>I', len(data))
+
+
+def pack_tail_c(data, window=65535):
+    """A TAIL block in code 'c' (for tests and round trips; a plain greedy search, slow on large data): counted literal
+    runs and matches of 2..255 bytes."""
+    if not data:
+        raise ValueError('empty input')
+    size = len(data)
+    bits = []
+
+    def put(v, n):
+        for i in range(n - 1, -1, -1):
+            bits.append((v >> i) & 1)
+
+    def find(p):                                 # the longest match for the bytes below p: (length, ofs)
+        best = (0, 0)
+        for ofs in range(1, min(window, size - p) + 1):
+            n = 0
+            while n < 255 and p - n - 1 >= 0 and data[p - n - 1] == data[p - n - 1 + ofs]:
+                n += 1
+            if n == 2 and ofs > 255 or n == 3 and ofs > 16383:
+                n = 2 if n == 3 and ofs <= 255 else 0
+            if n > best[0]:
+                best = (n, ofs)
+        return best if best[0] >= 2 else (0, 0)
+
+    p = size
+    while p > 0:
+        lits = []
+        m = (0, 0)
+        while p > 0:
+            m = find(p)
+            if m[0]:
+                break
+            p -= 1
+            lits.append(data[p])
+        n = len(lits)
+        if n >= 1 << 18:
+            raise ValueError('a literal run of %d bytes does not fit the code' % n)
+        if n < 7:
+            put(n, 3)
+        elif n <= 22:
+            put(7, 3); put(0, 1); put(n - 7, 4)
+        elif n < 1024:
+            put(7, 3); put(1, 1); put(n, 10)
+        else:
+            put(7, 3); put(1, 1); put(0, 10); put(n, 18)
+        for v in lits:
+            put(v, 8)
+        if p == 0:
+            break
+        length, ofs = m
+        if length == 2:
+            put(0, 2); put(ofs, 8)
+        elif length == 3:
+            put(1, 2)
+            if ofs < 256:
+                put(1, 1); put(ofs, 8)
+            else:
+                put(0, 1); put(ofs, 14)
+        else:
+            if length == 4:
+                put(2, 2)
+            elif length <= 6:
+                put(3, 2); put(length - 5, 2)
+            elif length <= 10:
+                put(3, 2); put(2, 2); put(length - 7, 2)
+            else:
+                put(3, 2); put(3, 2); put(length, 8)
+            if ofs < 256:
+                put(1, 1); put(1, 1); put(ofs, 8)
+            elif ofs < 4096:
+                put(1, 1); put(0, 1); put(ofs, 12)
+            else:
+                put(0, 1); put(ofs, 16)
+        p -= length
+    return _bit_stream(bits) + struct.pack('>I', size)
 
 
 def detect(data, off=0):

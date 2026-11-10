@@ -41,6 +41,9 @@
 // frame's time goes back (a clock reset left the old frames, and the mean held the oldest one for 280 ms); 2.10 kit 1.0.37 -
 // objects[].scale and anchor (Xenon 2 KIT-GAP 15: a text line the game zooms in 16 steps): the quad is round(w * sx * S) x
 // round(h * sy * S) device px, the nearest source pixel in whole numbers on both paths, interpolated between the pair.
+// 2.12 kit 1.0.44 - camMean's carried-on window stops where a stopped camera stands (Turrican II KIT-GAP 33: 2.9's slope ran on
+// for a frame after the camera stopped or turned, 0.2-0.8 px forth and back); stopped = the newest value held as long as the one
+// before it, so a camera that moves every few frames is carried within its own cadence as before.
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
@@ -136,7 +139,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '2.11';
+    const VERSION = '2.12';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -182,7 +185,18 @@ const WBSCENE = (() => {
             if (d > 0 && d <= 2 * tau) {
                 let k = frames.length - 2; while (k > 0 && frames[k].t > last.t - 2 * tau + 1e-6) k--;
                 const v = last.t > frames[k].t ? (pick(last) - pick(frames[k])) / (last.t - frames[k].t) : 0;
-                return windowMean(frames, t - d, tau, pick, Object.assign({}, opts, { held: true })) + v * d;
+                const r = windowMean(frames, t - d, tau, pick, Object.assign({}, opts, { held: true })) + v * d;
+                // 2.12 (Turrican II KIT-GAP 33): a camera that stopped is not carried past where it stands (it ran on by the
+                // slope for a frame and came back, 0.2-0.8 px; after a single 16 px step 1-2 px). Stopped = the newest value
+                // has been held as long as the one before it was, or for the window's 2 tau (to half a frame); a shorter hold
+                // is the camera's own cadence (a row every 3-frame pass) and is carried as before
+                const pl = pick(last); let i = frames.length - 1; while (i > 0 && pick(frames[i - 1]) === pl) i--;
+                if (i > 0 && v !== 0) {
+                    const pv = pick(frames[i - 1]); let j = i - 1; while (j > 0 && pick(frames[j - 1]) === pv) j--;
+                    const held = last.t - frames[i].t + (last.t - frames[frames.length - 2].t) / 2, before = j > 0 ? frames[i].t - frames[j].t : Infinity;
+                    if (held >= Math.min(before, 2 * tau)) return v > 0 ? Math.min(r, pl) : Math.max(r, pl);
+                }
+                return r;
             }
         }
         let sum = 0, wsum = 0;

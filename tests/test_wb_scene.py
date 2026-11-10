@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.11' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.12' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -559,3 +559,21 @@ def test_objects_with_a_scale():
     first = run('{}', '{ scale: [2, 2] }', 'a.objects = [];')                           # a first appearance: at its own scale
     assert first['sc'] == [2, 2] and len(first['box']) == 16
     assert run('{ scale: [0, 0] }', '{ scale: [0, 0] }')['box'] == []                  # scale 0: not at all
+
+
+def test_cam_mean_does_not_run_on_after_a_stop():
+    """2.12 (Turrican II KIT-GAP 33): a camera 2 px a frame that stops, or turns back - the window carried past the newest
+    frame by the slope (2.9) ran on and came back. The view camera never passes the value the camera stopped at and turns
+    round only where the game's camera did; a camera on a 3-frame cadence that stops is held the same way."""
+    r = js("""(() => {
+        const run = (vals, lag, tau) => { const fr = vals.map((v, i) => ({ t: i * 20, v })), out = [];
+            for (let ts = 100; ts < (vals.length - 1) * 20; ts += 16.667) { const vis = fr.filter((f) => f.t <= ts - 9); out.push(S.windowMean(vis.slice(-32), ts - lag, tau, (f) => f.v)); }
+            return out; };
+        const stats = (o, top) => { let over = -1e9, rev = 0; for (let i = 0; i < o.length; i++) { over = Math.max(over, o[i] - top); if (i > 1 && (o[i - 1] - o[i - 2]) * (o[i] - o[i - 1]) < -1e-9) rev++; } return [over, rev]; };
+        const stop = [], turn = [], stair = [], step = []; for (let i = 0; i < 60; i++) { stop.push(Math.min(i, 30) * 2); turn.push(i < 30 ? i * 2 : 42); stair.push(Math.floor(Math.min(i, 30) / 3)); step.push(i < 30 ? 0 : 16); }
+        return { stop: stats(run(stop, 28, 20), 60), turn: stats(run(turn, 28, 20), 58), stair: stats(run(stair, 28, 30), 10), step: stats(run(step, 28, 20), 16) };
+    })()""")
+    assert abs(r['stop'][0]) < 1e-9 and r['stop'][1] == 0, r      # 2.11: past the stop and back
+    assert r['turn'][0] < 1e-9 and r['turn'][1] == 1, r       # the game's camera turns once (58 -> 42); the view never passes 58
+    assert abs(r['step'][0]) < 1e-9 and r['step'][1] == 0, r      # one 16 px step out of a long rest: 2.11 passed it by 1-2 px
+    assert r['stair'][0] <= 0.5 and r['stair'][1] <= 1, r          # a row every 3 frames: within the hold it cannot be told from moving on (half a row at most)

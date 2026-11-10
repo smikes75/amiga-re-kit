@@ -160,7 +160,9 @@ def scan_packed(path: str, deep: bool = False) -> dict:
 def unpack(path: str, out: str, kind: str = 'auto', offset: str = '0', end: str = None) -> dict:
     """Unpack a block to ``out``. kind: auto | pp20 | atn | rnc (Rob Northen method 1) | bytekiller (B or BK by checksum) | bytekiller_b | bytekiller_bk | bytekiller_a | t2 |
     bytekiller_tail (the unpacked length and the first bit word are the LAST two longs of the block, as in a crunched
-    executable: ``offset`` = its start, ``end`` = the offset behind it; checksum_ok then means the bit stream was used up exactly)."""
+    executable: ``offset`` = its start, ``end`` = the offset behind it; checksum_ok then means the bit stream was used up exactly;
+    two code tables share the layout - bytekiller_tail takes the one that fits exactly and returns its name in ``kind``,
+    bytekiller_tail_b / bytekiller_tail_c name it)."""
     from .packers import atomik, bytekiller, pp20, rnc, turrican2
     data = _bytes(path)
     off = _addr(offset)
@@ -181,8 +183,11 @@ def unpack(path: str, out: str, kind: str = 'auto', offset: str = '0', end: str 
         res, ok = bytekiller.unpack_b(data, off)
     elif kind == 'bytekiller_bk':
         res, ok = bytekiller.unpack_bk(data, off)
-    elif kind == 'bytekiller_tail':
-        res, ok = bytekiller.unpack_tail(data, off, _addr(end) if end else None)
+    elif kind == 'bytekiller_tail':               # 1.0.44: the code table that uses the stream up exactly (none or both: an error)
+        res, code = bytekiller.unpack_tail_any(data, off, _addr(end) if end else None)
+        kind, ok = 'bytekiller_tail_' + code, True
+    elif kind in ('bytekiller_tail_b', 'bytekiller_tail_c'):
+        res, ok = bytekiller.unpack_tail(data, off, _addr(end) if end else None, kind[-1])
     elif kind == 'bytekiller_a':
         res, ok = bytekiller.unpack_a(data, off)
     elif kind == 't2':

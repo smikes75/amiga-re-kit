@@ -3,6 +3,20 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.44 (2026-11-10)
+
+- Bytekiller TAIL, the second code table (Xenon 2 KIT-GAP 17: 1.0.43's table did not decode that block): counted
+  literal runs followed by one match - `unpack_tail(..., code='c')`, `unpack_tail_any` (the one table that uses the
+  stream up exactly), `pack_tail_c` for round trips, `arek bytekiller --format tail --code auto|b|c`, MCP
+  `bytekiller_tail` (finds the table), `bytekiller_tail_b`, `bytekiller_tail_c`
+- wb-scene 2.12 (Turrican II KIT-GAP 33): camMean's window carried past the newest frame (2.9) stops at that frame's
+  value - a camera that stopped or turned ran on and came back by 0.2-0.8 px
+- parity sound (Alien Breed II G61): the original's Paula frames after the end of the rebuild's register log are counted
+  (`short`) and are a PROBLEM of the suite, as a short trace is
+- parity / trace compare (Turrican II KIT-GAPS 31, 32): a range the original hashed is checked against the bytes the
+  rebuild captured wherever its range starts (a full capture against hashed ranges compared nothing before 1.0.39 and
+  read "missing hash" since); records that differ in a few bytes are diffed by 4 KB blocks (minutes per trace, not hours)
+
 ## 1.0.43 (2026-11-10)
 
 - Bytekiller format TAIL (Xenon 2 KIT-GAP 17): the unpacked length and the first bit word at the END of the block, as a

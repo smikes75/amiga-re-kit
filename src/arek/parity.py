@@ -89,20 +89,28 @@ def diff_records(ra, rb, ranges=None, ignore=(), regs=False):
                     xa, xb = da[lo - sa:hi - sa], db[lo - sb:hi - sb]
                     if xa == xb:
                         continue
-                    at = lo
-                    while at < hi:
-                        end = min(hi, (at | 1) + 1)                   # up to the end of the word ``at`` lies in
-                        wa, wb = da[at - sa:end - sa], db[at - sb:end - sb]
-                        if wa != wb:
-                            out.append((at, int.from_bytes(wa, 'big'), int.from_bytes(wb, 'big')))
-                        at = end
+                    blk = lo
+                    while blk < hi:                                    # 1.0.44 (Turrican II KIT-GAP 32): 4 KB blocks first - a few
+                        bend = min(hi, (blk | 0xfff) + 1)              # bytes off in 512 KB walked every word in Python (73 min)
+                        if da[blk - sa:bend - sa] != db[blk - sb:bend - sb]:
+                            at = blk
+                            while at < bend:
+                                end = min(bend, (at | 1) + 1)          # up to the end of the word ``at`` lies in
+                                wa, wb = da[at - sa:end - sa], db[at - sb:end - sb]
+                                if wa != wb:
+                                    out.append((at, int.from_bytes(wa, 'big'), int.from_bytes(wb, 'big')))
+                                at = end
+                        blk = bend
                 for mlo, mhi in _cut(plo, phi, covered):
                     if mhi > mlo:
                         out.append((('missing', mlo), mhi - mlo, 0))
     for start, (ln, ha) in ra.get('hashes', {}).items():
         hb = rb.get('hashes', {}).get(start)
-        if hb is None and start in rb['ranges'] and len(rb['ranges'][start]) == ln:
-            hb = (ln, trace.fnv1a64(rb['ranges'][start]))
+        if hb is None:                              # 1.0.44 (Turrican II KIT-GAP 31): the hash of the bytes the rebuild captured,
+            for sb, eb, db in spans_b:              # wherever its range starts (only a range of the same start and length counted,
+                if sb <= start and start + ln <= eb:                    # so a full capture against hashed ranges compared nothing)
+                    hb = (ln, trace.fnv1a64(db[start - sb:start - sb + ln]))
+                    break
         if hb is None:
             out.append((('missing hash', start), ln, 0))
         elif hb[0] != ln or hb[1] != ha:
@@ -214,10 +222,14 @@ def compare_audio(orig, rebuild, shifts=range(-60, 61)):
     which either side wrote, the rebuild's moved back by the shift - so a frame only one side wrote in is unequal
     whatever the shift (1.0.39: before, a shift could move the rebuild's writes onto frames nobody looked at, and
     frames in which neither side wrote at ``f + shift`` counted as equal). ``original`` / ``rebuild``: frames with
-    writes on each side. The rebuild's side comes from ``trace.encode_reglog``."""
+    writes on each side. ``short`` (1.0.44, Alien Breed II G61): frames in which the original wrote to Paula after the
+    last write of ANY logged register on the rebuild's side - the rebuild's log ended there, those frames were never
+    produced (they count as unequal, and the suite names them as a problem like a short trace). The rebuild's side
+    comes from ``trace.encode_reglog``."""
     a, b = _audio_frames(orig), _audio_frames(rebuild)
     if not a and not b:
-        return {'frames': 0, 'equal': 0, 'shift': 0, 'first': None, 'original': 0, 'rebuild': 0}
+        return {'frames': 0, 'equal': 0, 'shift': 0, 'first': None, 'original': 0, 'rebuild': 0, 'short': 0}
+    b_end = max((r['frame'] for r in trace.read_reglog(rebuild)), default=None)
     best = None
     for s in shifts:
         frames = set(a) | {g - s for g in b}
@@ -227,7 +239,8 @@ def compare_audio(orig, rebuild, shifts=range(-60, 61)):
             best = (score, s, eq, frames)
     _, s, eq, frames = best
     first = next((f for f in sorted(frames) if a.get(f, ()) != b.get(f + s, ())), None)
-    return {'frames': len(frames), 'equal': eq, 'shift': s, 'first': first, 'original': len(a), 'rebuild': len(b)}
+    short = 0 if b_end is None else sum(1 for f in a if f + s > b_end)
+    return {'frames': len(frames), 'equal': eq, 'shift': s, 'first': first, 'original': len(a), 'rebuild': len(b), 'short': short}
 
 
 def align_shot(a, b, width=716, max_shift=8, sample=4, step=1):
@@ -395,6 +408,8 @@ def suite(cfg, base='.', run=True):
                 prob.append('sound: neither side wrote to Paula (nothing compared)')
             elif not snd['original'] or not snd['rebuild']:
                 prob.append('sound: the %s wrote nothing to Paula' % ('original' if not snd['original'] else 'rebuild'))
+            elif snd['short']:
+                prob.append("sound: the rebuild's log ends %d frames with Paula writes before the original's" % snd['short'])
         if not any(x is not None for x in (row['state'], row['picture'], row['sound'])) and not prob:
             prob.append('the scenario compares nothing (no trace, shots or reglog on both sides)')
         row['complete'] = not prob and all(x is None or x.get('complete', x.get('equal') == x.get('frames')) for x in (row['state'], row['picture'], row['sound'])) \

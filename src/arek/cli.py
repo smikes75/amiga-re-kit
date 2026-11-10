@@ -4,7 +4,7 @@
     arek adf ls|cat|extract  IMAGE [-p PATH] [-o OUT] [--lenient]   (AmigaDOS OFS/FFS)
     arek scan        FILE [--deep]
     arek pp20        FILE -o OUT
-    arek bytekiller  FILE -o OUT [--format b|bk|a|tail] [--offset N] [--end N]
+    arek bytekiller  FILE -o OUT [--format b|bk|a|tail] [--offset N] [--end N] [--code auto|b|c]
     arek t2          FILE -o OUT
     arek atn         FILE -o OUT [--offset N]
     arek hunk        info|load|split  FILE ... [--chip FILE2]
@@ -162,7 +162,12 @@ def cmd_bytekiller(a):
     if fmt == 'auto':                             # 1.0.4: B (8-byte header) or BK (the classic 12-byte header)
         fmt = bytekiller.detect(data, a.offset) or 'b'
     if fmt == 'tail':                             # 1.0.43 (Xenon 2 KIT-GAP 17): the parameters at the END of the block
-        out, ok = bytekiller.unpack_tail(data, a.offset, a.end)
+        if a.code == 'auto':                      # 1.0.44: two code tables share this layout; the one that uses the stream up exactly
+            out, code = bytekiller.unpack_tail_any(data, a.offset, a.end)
+            ok = True
+            print('code table %s' % code, file=sys.stderr)
+        else:
+            out, ok = bytekiller.unpack_tail(data, a.offset, a.end, a.code)
         if not ok:
             print('warning: the bit stream was not used up exactly at the block\'s start (wrong --offset / --end, or another variant)', file=sys.stderr)
     elif fmt == 'a':
@@ -964,6 +969,9 @@ def build_parser():
                         'give --offset and --end of the block; there is no checksum, the result says whether the stream was used up exactly)')
     s.add_argument('--offset', type=A, default=0)
     s.add_argument('--end', type=A, help='tail: the offset behind the block (default: the end of the file)')
+    s.add_argument('--code', choices=['auto', 'b', 'c'], default='auto',
+                   help='tail: the code table - b the classic Bytekiller one, c counted literal runs (1.0.44); auto = the one '
+                        'that decodes the block and uses its bit stream up exactly (an error when none or both do)')
     s.set_defaults(fn=cmd_bytekiller)
 
     s = sp.add_parser('t2', help='unpack a Turrican II three-stage file')

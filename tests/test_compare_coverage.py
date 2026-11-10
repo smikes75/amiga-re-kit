@@ -276,3 +276,54 @@ def test_regname_of_every_register():
     for r in range(0, 0x200, 2):
         assert copper.regname(r)                                             # $0AC raised IndexError
     assert copper.regname(0x0ac) == '$0AC' and copper.regname(0x0a8) == 'AUD0VOL'
+
+
+# ------------------------------------------------------------------ 1.0.44 (Turrican II KIT-GAPS 31, 32)
+def test_a_hashed_range_is_checked_against_a_full_capture():
+    """The original hashed two ranges, the rebuild captured the whole RAM as bytes: the hash is taken from the rebuild's
+    bytes wherever its range starts. Before 1.0.39 the pair was skipped (100 %), 1.0.39-1.0.43 called it missing."""
+    ram = bytes((i * 7) & 255 for i in range(0x400))
+    h = {0x100: (0x80, trace.fnv1a64(ram[0x100:0x180])), 0x200: (0x100, trace.fnv1a64(ram[0x200:0x300]))}
+    a = [rec(0, {}, h)]
+    assert parity.diff_records(a[0], rec(0, {0: ram})) == []
+    r = parity.compare(a, [rec(0, {0: ram})])
+    assert r['complete'] and r['hashes'] == 2
+    bad = bytearray(ram); bad[0x250] ^= 1
+    d = parity.diff_records(a[0], rec(0, {0: bytes(bad)}))
+    assert [x[0] for x in d] == [('hash', 0x200)]
+    assert parity.diff_records(a[0], rec(0, {0: ram[:0x280]})) == [(('missing hash', 0x200), 0x100, 0)]   # not wholly captured: not checked
+
+
+def test_a_few_different_bytes_in_a_large_record_are_found_fast():
+    """512 KB records that differ in a handful of bytes took minutes each (every word in Python); found by blocks now,
+    with the same answer - odd starts, block borders and the last odd byte included."""
+    import time
+    a = bytearray(os.urandom(0x80000 + 1))
+    b = bytearray(a)
+    for at in (1, 0xfff, 0x1000, 0x2345, 0x7ffff, 0x80000):
+        b[at] ^= 0x55
+    ra, rb = rec(0, {1: bytes(a[1:])}), rec(0, {1: bytes(b[1:])})
+    t = time.time()
+    for _ in range(20):
+        d = parity.diff_records(ra, rb)
+    assert time.time() - t < 5
+    assert [x[0] for x in d] == [1, 0xffe, 0x1000, 0x2344, 0x7fffe, 0x80000]
+    assert d[0][1:] == (a[1], b[1]) and d[1][1:] == (int.from_bytes(a[0xffe:0x1000], 'big'), int.from_bytes(b[0xffe:0x1000], 'big'))
+
+
+def test_sound_after_the_end_of_the_rebuilds_log_is_named(tmp_path):
+    """1.0.44 (Alien Breed II G61): the rebuild's run ended with the level, the original went on writing to Paula - those
+    frames were counted as unequal without a word, while a short trace is a PROBLEM."""
+    o, r = str(tmp_path / 'o.reg'), str(tmp_path / 'r.reg')
+    reglog(o, [(f, 0x0a6, f) for f in range(100)])
+    reglog(r, [(f, 0x0a6, f) for f in range(78)] + [(79, 0x09a, 0x8020)])   # the last logged write of any register: frame 79
+    res = parity.compare_audio(o, r)
+    assert res['shift'] == 0 and res['equal'] == 78 and res['short'] == 20
+    reglog(r, [(f, 0x0a6, f) for f in range(78)] + [(120, 0x09a, 0x8020)])  # the log goes on: the rebuild ran, and was silent
+    assert parity.compare_audio(o, r)['short'] == 0
+    reglog(r, [(f, 0x0a6, f) for f in range(100)])
+    assert parity.compare_audio(o, r)['short'] == 0
+    cfg = {'scenarios': [{'name': 's', 'original': {'reglog': o}, 'rebuild': {'reglog': r}}]}
+    reglog(r, [(f, 0x0a6, f) for f in range(78)])
+    rows = parity.suite(cfg, base=str(tmp_path), run=False)
+    assert any('ends 22 frames' in p for p in rows[0]['problems']) and not parity.suite_ok(rows)

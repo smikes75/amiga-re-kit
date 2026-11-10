@@ -281,3 +281,61 @@ def test_length_fields_do_not_drive_the_allocation(rnd):
     for bad in (b'', bytes(3), bytes(12), b'\xff' * 64, rnd(2000)):
         with pytest.raises(ValueError):                                              # was IndexError / struct.error / a huge buffer
             turrican2.unpack_t2(bad)
+
+
+def _tail_c_data(rnd):
+    a, b = rnd(40), rnd(5000)
+    return (rnd(3) + a + rnd(10) + a[:3] + rnd(30) + a[:2] + rnd(1500) + a + b[:300] + rnd(5) + b + a[:4] + a[:6] + rnd(1)
+            + a[:9] + bytes(600) + rnd(20) + a[:5] + rnd(15) + a[:3])
+
+
+def test_bytekiller_tail_second_code_table(rnd, tmp_path):
+    """1.0.44 (Xenon 2 KIT-GAP 17): the same layout with another code - a count of literals (3 bits, then 4, 10 or 18),
+    then one match (2, 3, 4, 5-6, 7-10 or up to 255 bytes; offsets of 8, 12, 14 or 16 bits). 1.0.43 refused the block."""
+    from arek import cli, mcp_server
+    d = _tail_c_data(rnd)
+    block = bytekiller.pack_tail_c(d)
+    assert len(block) < len(d) and len(block) % 4 == 0                               # the matches were used
+    assert bytekiller.unpack_tail(block, code='c') == (d, True)
+    assert bytekiller.unpack_tail_any(block) == (d, 'c')
+    with pytest.raises(ValueError):
+        bytekiller.unpack_tail(block, code='b')                                      # what 1.0.43 answered
+    with pytest.raises(ValueError):
+        bytekiller.unpack_tail(block, code='x')
+    lit = rnd(700)
+    assert bytekiller.unpack_tail_any(bytekiller.pack_tail_literal(lit)) == (lit, 'b')
+    image = rnd(0x15a) + block + rnd(40)
+    end = 0x15a + len(block)
+    with pytest.raises(ValueError):
+        bytekiller.unpack_tail_any(image, 0x15a - 4, end)                            # no table uses it up exactly: no answer
+    src, dst = tmp_path / 'f.bin', tmp_path / 'o.bin'
+    src.write_bytes(image)
+    assert cli.main(['bytekiller', str(src), '-o', str(dst), '--format', 'tail', '--offset', '0x15a', '--end', hex(end)]) == 0
+    assert dst.read_bytes() == d
+    r = mcp_server.unpack(str(src), str(tmp_path / 'm.bin'), 'bytekiller_tail', '0x15a', hex(end))
+    assert r['kind'] == 'bytekiller_tail_c' and (tmp_path / 'm.bin').read_bytes() == d
+
+
+def test_bytekiller_tail_c_every_length_code(rnd):
+    """Every branch of the count and of the match, one at a time: runs of 0..6, 7..22, 23..1023 and above; matches of
+    each length class at each offset width."""
+    for run in (1, 6, 7, 22, 23, 1023, 1024, 3000):
+        d = rnd(run)
+        assert bytekiller.unpack_tail(bytekiller.pack_tail_c(d), code='c') == (d, True), run
+    for length in (2, 3, 4, 5, 6, 7, 10, 11, 200, 255):
+        for gap in (1, 200, 300, 5000, 20000):
+            if length == 2 and gap > 200 or length == 3 and gap > 16000:
+                continue
+            a = rnd(length)
+            d = b'\x01' + a + bytes([a[0] ^ 0xff]) + rnd(gap) + bytes([a[-1] ^ 0xff]) + a + b'\x02'
+            block = bytekiller.pack_tail_c(d)
+            assert bytekiller.unpack_tail(block, code='c') == (d, True), (length, gap)
+
+
+def test_bytekiller_tail_c_refuses_damage(rnd):
+    d = _tail_c_data(rnd)
+    block = bytekiller.pack_tail_c(d)
+    with pytest.raises(ValueError):
+        bytekiller.unpack_tail(block[:-4] + (len(d) - 100).to_bytes(4, 'big'), code='c')   # a shorter output: a run or a match leaves it
+    out, exact = bytekiller.unpack_tail(b'\0\0\0\0' + block, code='c')
+    assert out == d and exact is False                                               # four bytes too many in front
