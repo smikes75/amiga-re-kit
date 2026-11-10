@@ -32,6 +32,7 @@ tells which of B / BK verifies at an offset.
 """
 
 
+import bisect
 import struct
 
 
@@ -276,15 +277,27 @@ def pack_tail_c(data, window=65535):
         for i in range(n - 1, -1, -1):
             bits.append((v >> i) & 1)
 
+    # the positions of every byte pair, so a match is looked for only where its first two bytes are (1.0.45: every
+    # offset of the window was tried at every position - 20 KB took minutes)
+    pairs = {}
+    for q in range(size - 1):
+        pairs.setdefault(data[q:q + 2], []).append(q)
+
     def find(p):                                 # the longest match for the bytes below p: (length, ofs)
         best = (0, 0)
-        for ofs in range(1, min(window, size - p) + 1):
-            n = 0
+        if p < 2:
+            return best
+        lst = pairs.get(data[p - 2:p], ())
+        for k in range(bisect.bisect_left(lst, p - 1), min(len(lst), bisect.bisect_left(lst, p - 1) + 64)):   # the nearest 64
+            ofs = lst[k] + 2 - p                             # the pair ends at q + 2 = p + ofs
+            if ofs > window:
+                break
+            n = 2
             while n < 255 and p - n - 1 >= 0 and data[p - n - 1] == data[p - n - 1 + ofs]:
                 n += 1
             if n == 2 and ofs > 255 or n == 3 and ofs > 16383:
                 n = 2 if n == 3 and ofs <= 255 else 0
-            if n > best[0]:
+            if n > best[0] or n == best[0] and n and ofs < best[1]:
                 best = (n, ofs)
         return best if best[0] >= 2 else (0, 0)
 

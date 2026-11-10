@@ -102,3 +102,27 @@ def test_dev_server(tmp_path):
     finally:
         srv.shutdown()
     assert sorted(srv.disks) == ['/local-disks/disk1.adf', '/local-disks/disk2.adf']
+
+
+def test_bytekiller_tail_in_js_equals_python(rnd):
+    """wb-bytekiller.js 1.0 (kit 1.0.45): both code tables of the TAIL layout against arek.packers.bytekiller, inside an
+    image at an offset; the table is found, damage and an inexact start are refused as in Python."""
+    import base64
+    from arek.packers import bytekiller
+    if not node:
+        pytest.skip('no node')
+    d = sample(7, 6000) + bytes(300) + sample(8, 2000)
+    lit = rnd(700)
+    cases = {'c': bytekiller.pack_tail_c(d), 'b': bytekiller.pack_tail_literal(lit)}
+    want = {'c': d, 'b': lit}
+    for code, block in cases.items():
+        image = rnd(0x15a) + block + rnd(40)
+        end = 0x15a + len(block)
+        code_js = ("const B = require(%s); const d = new Uint8Array(Buffer.from(%s, 'base64')); const r = B.unpackTail(d, 0x15a, %d, %s); const a = B.unpackTailAny(d, 0x15a, %d);"
+                   " let bad = 0; try { B.unpackTailAny(d, 0x15a - 4, %d); } catch (e) { bad++; } try { B.unpackTail(d, 0x15a, %d - 2, %s); } catch (e) { bad++; }"
+                   " console.log(JSON.stringify({ data: Buffer.from(r.data).toString('base64'), exact: r.exact, code: a.code, same: Buffer.from(a.data).equals(Buffer.from(r.data)), bad, v: B.VERSION }));"
+                   % (json.dumps(str(WEB / 'wb-bytekiller.js')), json.dumps(base64.b64encode(image).decode()), end, json.dumps(code), end, end, end, json.dumps(code)))
+        p = subprocess.run([node, '-e', code_js], capture_output=True, text=True)
+        assert p.returncode == 0, p.stderr
+        r = json.loads(p.stdout)
+        assert base64.b64decode(r['data']) == want[code] and r['exact'] is True and r['code'] == code and r['same'] and r['bad'] == 2 and r['v'] == '1.0'

@@ -3,6 +3,12 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.45 (2026-11-10)
+
+- web: `wb-bytekiller.js` - the Bytekiller TAIL decruncher for a page (both code tables, a port of `unpack_tail` /
+  `unpack_tail_any`; asked by Xenon 2 for the BS1 disk)
+- `bytekiller.pack_tail_c` looks for matches through an index of byte pairs (the tests of 1.0.44 took four minutes)
+
 ## 1.0.44 (2026-11-10)
 
 - Bytekiller TAIL, the second code table (Xenon 2 KIT-GAP 17: 1.0.43's table did not decode that block): counted
