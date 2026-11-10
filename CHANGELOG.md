@@ -3,6 +3,21 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.43 (2026-11-10)
+
+- Bytekiller format TAIL (Xenon 2 KIT-GAP 17): the unpacked length and the first bit word at the END of the block, as a
+  crunched executable has them - `bytekiller.unpack_tail`, `arek bytekiller --format tail --offset --end`, MCP
+  `bytekiller_tail`; a run or a match that leaves the output is an error (it wrote over the end of the output)
+- recomp: an unknown jump ends the routine also when the hook returns - a jump-table offset outside the table no longer
+  runs slot off / stride, a jmp no longer goes on behind itself, an unresolved jsr takes its return address off again
+- host: a start is a clean start (`host_reset`, `ard_reset`): a restart in the same process is the first run again; raw
+  keys wait in a ring of 32, one per frame (two events inside a frame lost the first); Paula runs up to an INTREQ write
+  before the write clears the bit; the native engine takes `--key HEX:DOWN` and `--twice`
+- bus: a blit crossing the frame end is still busy in the frame's first colour clock (slot -1 as an unsigned number)
+- headless: a script time with a fraction is refused (it was cut to the whole second); inputs without a breakpoint are
+  refused (no line of the file was applied)
+- packers: RNC `max_output` (16 MB), the Turrican II lengths capped and its stream errors as ValueError
+
 ## 1.0.42 (2026-11-10)
 
 - the first CI run on Linux: the Paula check program links libm (`arek selftest audio` did not build there), two trace

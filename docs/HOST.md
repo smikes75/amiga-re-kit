@@ -254,6 +254,10 @@ test builds both (`tests/test_host_engine.py`, emcc and node when installed).
   background; sprites show from the line's first bitplane word on, so a line without a fetch (also one with no
   planes) shows none. In a host DMACON = 0 is the machine's state (`ARD_DMACON_KNOWN`), not "unknown": nothing
   is fetched, sprites included. The Copper still runs with COPEN off (not measured yet).
+- 1.0.43: `host_init` starts from a clean host (`host_reset`, `ard_reset`): what the state does not carry - the frame
+  count, the CIA timers, a pending blit, the field length, the renderer's registers and sprites - is as at the first
+  start, so the page's restart repeats the first run (the native engine's `--twice` prints both hashes). Raw keys
+  (`engine_key`) wait in a ring of 32 and reach the game one per frame.
 - 1.0.40: VPOSR / VHPOSR read past the frame's end inside an instruction (the frame rolls at the instruction's
   boundary) give line 0 on of the next field, not line 313.
 - Not modelled: NTSC, the blitter's line mode on the bus, the CIA TOD counters (a game that seeds its

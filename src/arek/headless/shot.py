@@ -73,6 +73,12 @@ def build_script(conf, adf, events, t_shot, out_png, setup=()):
     lines += list(setup)
     lines.append('regression run "%s"' % adf)
     now = 0
+    # 1.0.43: RetroShell waits in whole seconds ('wait %d' cut 2.5 to 2: the event came early, the run ended early, and
+    # nothing said so; 'wait N frames' is not exact either, docs/HEADLESS.md). A time with a fraction is refused.
+    for t in [t for t, _ in events] + [t_shot]:
+        if t != int(t):
+            raise HeadlessError('time %s: the emulator script waits in whole seconds - give a whole second (an event inside a '
+                                'second is placed by a breakpoint or by a line of the inputs file, docs/HEADLESS.md)' % t)
     for t, cmd in sorted(events, key=lambda e: e[0]):
         if t > t_shot:
             break

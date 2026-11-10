@@ -116,6 +116,12 @@ static void ard_write(uint32_t off, uint16_t v) {
     else if (off == 0x084) ARD_LC[1] = (ARD_LC[1] & 0xffff) | ((uint32_t)(v & 0x1f) << 16);
     else if (off == 0x086) ARD_LC[1] = (ARD_LC[1] & 0x1f0000) | (v & 0xfffe);
 }
+/* 1.0.43: the renderer as at the first start - its registers, pointers, the Copper and the sprites' state */
+static void ard_reset(void) {
+    memset(ARD_R, 0, sizeof ARD_R); memset(ARD_BPL, 0, sizeof ARD_BPL); memset(ARD_LC, 0, sizeof ARD_LC);
+    memset(ARD_SPR, 0, sizeof ARD_SPR); memset(ARD_SPRI, 0, sizeof ARD_SPRI); memset(&ARD_COP, 0, sizeof ARD_COP);
+    memset(ARD_HR, 0, sizeof ARD_HR); ARD_NEXT = 0; ARD_LAST = 311;
+}
 static void ard_frame_start(void) {
     ARD_COP.pc = ARD_LC[0] & 0x1ffffe; ARD_COP.st = 1; ARD_COP.next = 2; ARD_COP.skip = 0; ARD_COP.skipcmd = 0;   /* COP_VBLANK: the fetch at cycle 2 */
     ARD_NEXT = 0;                                      /* the sprites keep their state: Agnus forces VSTOP on line 25 */

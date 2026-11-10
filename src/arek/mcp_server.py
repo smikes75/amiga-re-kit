@@ -157,8 +157,10 @@ def scan_packed(path: str, deep: bool = False) -> dict:
 
 
 @mcp.tool()
-def unpack(path: str, out: str, kind: str = 'auto', offset: str = '0') -> dict:
-    """Unpack a block to ``out``. kind: auto | pp20 | atn | rnc (Rob Northen method 1) | bytekiller (B or BK by checksum) | bytekiller_b | bytekiller_bk | bytekiller_a | t2."""
+def unpack(path: str, out: str, kind: str = 'auto', offset: str = '0', end: str = None) -> dict:
+    """Unpack a block to ``out``. kind: auto | pp20 | atn | rnc (Rob Northen method 1) | bytekiller (B or BK by checksum) | bytekiller_b | bytekiller_bk | bytekiller_a | t2 |
+    bytekiller_tail (the unpacked length and the first bit word are the LAST two longs of the block, as in a crunched
+    executable: ``offset`` = its start, ``end`` = the offset behind it; checksum_ok then means the bit stream was used up exactly)."""
     from .packers import atomik, bytekiller, pp20, rnc, turrican2
     data = _bytes(path)
     off = _addr(offset)
@@ -179,6 +181,8 @@ def unpack(path: str, out: str, kind: str = 'auto', offset: str = '0') -> dict:
         res, ok = bytekiller.unpack_b(data, off)
     elif kind == 'bytekiller_bk':
         res, ok = bytekiller.unpack_bk(data, off)
+    elif kind == 'bytekiller_tail':
+        res, ok = bytekiller.unpack_tail(data, off, _addr(end) if end else None)
     elif kind == 'bytekiller_a':
         res, ok = bytekiller.unpack_a(data, off)
     elif kind == 't2':

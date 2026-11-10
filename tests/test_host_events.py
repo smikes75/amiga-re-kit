@@ -12,7 +12,7 @@ from arek.m68k import recomp
 MAIN, L3, L6 = 0x1000, 0x1100, 0x1200
 
 
-def run(tmp_path, prog, frames, auto, defines=()):
+def run(tmp_path, prog, frames, auto, defines=(), args=()):
     if not bus.compiler():
         pytest.skip('no C compiler')
     img = bytearray(0x2000)
@@ -31,11 +31,13 @@ def run(tmp_path, prog, frames, auto, defines=()):
     (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
     host.pack(str(st), str(tmp_path / 'state.bin'))
     host.engine_build(str(tmp_path / 'n'), str(tmp_path / 'game.c'), 'f_%06x' % L3, 'f_%06x' % MAIN, native=True, defines=list(defines))
-    r = subprocess.run([str(tmp_path / 'n' / 'arek_host_engine'), str(tmp_path / 'state.bin'), str(frames), '--dump', str(tmp_path / 'out.bin')],
+    r = subprocess.run([str(tmp_path / 'n' / 'arek_host_engine'), str(tmp_path / 'state.bin'), str(frames), '--dump', str(tmp_path / 'out.bin')] + list(args),
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr
     mem = (tmp_path / 'out.bin').read_bytes()
-    return lambda at: struct.unpack('>H', mem[at:at + 2])[0]
+    w = lambda at: struct.unpack('>H', mem[at:at + 2])[0]
+    w.lines = r.stdout.splitlines()
+    return w
 
 
 WAIT_VBL = ('30384002'              # loop: move.w $4002,d0
@@ -92,3 +94,36 @@ def test_the_line_counter_wraps_inside_an_instruction_that_crosses_the_frame_end
     w = run(tmp_path, prog, 60, [MAIN, L3])
     frames = w(0x4002)
     assert frames >= 59 and abs(w(0x4000) - frames) <= 1, (frames, w(0x4000))
+
+
+def test_every_key_event_reaches_the_game_one_per_frame(tmp_path):
+    """1.0.43: a press, its release and another press sent before the game's next frame. The engine kept one event: the
+    game saw only the last (a quick tap was lost; a lost release is a key held for good). The level-3 handler here
+    notes every new value of CIA-A SDR ($BFEC01 = ~((code << 1) | released))."""
+    prog = {MAIN: '4df900dff000' '3d7cc020009a' + WAIT_VBL,
+            L3: '103900bfec01'          # move.b $bfec01,d0
+                'b0384010'              # cmp.b $4010,d0
+                '6714'                  # beq.s skip
+                '11c04010'              # move.b d0,$4010
+                '32384012'              # move.w $4012,d1
+                '41f84020'              # lea $4020,a0
+                '11801000'              # move.b d0,(a0,d1.w)
+                '52784012'              # addq.w #1,$4012
+                + L3_H}                 # skip: the frame counter, the acknowledge, rte
+    w = run(tmp_path, prog, 8, [MAIN, L3], args=['--keys', 'none', '--key', '20:1', '--key', '20:0', '--key', '21:1'])
+    assert w(0x4012) == 3 and (w(0x4020), w(0x4022) >> 8) == (0xbfbe, 0xbd), (w(0x4012), hex(w(0x4020)), hex(w(0x4022)))
+
+
+def test_a_restart_is_the_first_run_again(tmp_path):
+    """1.0.43: engine_init a second time in the same process (the page's restart). The game notes CIA-B timer A's low
+    byte before it starts the timer, and counts frames; the host kept the timer running from the first run, went on
+    counting frames, and the two runs differed."""
+    prog = {MAIN: '4df900dff000'
+                  '13f900bfd40000004010'  # move.b $bfd400,$4010      the timer as the game finds it
+                  '3d7cc020009a'
+                  '13fc006400bfd400' '13fc000000bfd500' '13fc001100bfde00'   # latch 100, START + FORCE LOAD, continuous
+                  + WAIT_VBL,
+            L3: L3_H}
+    w = run(tmp_path, prog, 6, [MAIN, L3], args=['--keys', 'none', '--twice'])
+    assert len(w.lines) == 2 and w.lines[0] == w.lines[1], w.lines
+    assert w(0x4010) >> 8 == 0xff                                            # a stopped timer at its first value

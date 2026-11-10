@@ -230,6 +230,9 @@ error; exit 1 on a difference) and `arek verify calls` (the flags X N Z V C too)
 exits 1 then; `--fail` makes any difference exit 1. Before 1.0.39 these cases read as equal or 100 %:
 measure again what was measured with an older kit.
 
+1.0.43: a time with a fraction (`--arm 2.5`, `--at 2.5 CMD`) is refused - the script waits in whole seconds and cut
+it before; `--inputs` without `--break` is refused - a line of the inputs file is applied when a breakpoint is hit.
+
 A run of the emulator (`arek trace run`, `shot`, `bpstate`): its exit status is checked, the log is kept
 also when it fails or times out, the reglog / audlog / buslog and pictures of an earlier run under the
 same names are removed first, every asked picture must have been written, and VAHL_* variables exported

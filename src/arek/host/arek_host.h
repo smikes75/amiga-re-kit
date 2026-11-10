@@ -115,8 +115,10 @@ static int h_cia_reg(uint32_t a, int *i) {           /* the CIA and register of 
 static void h_sample(void *ctx, int ch, double t, int value) { (void)ctx; ara_event(ch, t, value); if (h_sample_cb) h_sample_cb(ch, t, value); }
 static void h_audio_irq(void *ctx, int ch, double t) { (void)ctx; (void)t; H_INTREQ |= (uint16_t)(0x80 << ch); }   /* AUDx: level 4 (HOST_L4) */
 
+static void host_reset(void);
 /* the host starts: t0 = beam time of the first instruction (line * 227 + slot); the environment can recalibrate */
 static void host_init(double t0) {
+    host_reset();
     if (getenv("HOST_VBL_LAT")) H_VBL_LAT = atof(getenv("HOST_VBL_LAT"));
     if (getenv("HOST_IRQ_PRE")) H_IRQ_PRE = (uint32_t)atoi(getenv("HOST_IRQ_PRE"));
     if (getenv("HOST_IRQ_CYC")) H_IRQ_CYC = (uint32_t)atoi(getenv("HOST_IRQ_CYC"));
@@ -140,6 +142,7 @@ static void host_init(double t0) {
 #include "arek_display.h"
 /* after CREG holds the capture's registers: the picture starts from them, drawn from the current line on */
 static void host_display_init(void) {
+    ard_reset();                                       /* 1.0.43: no register, pointer or sprite of an earlier run */
     for (int i = 0x40; i < 0xe0; i++) { uint32_t off = 2u * i;
         if ((off >= 0x080 && off <= 0x086) || (off >= 0x08e && off <= 0x094) || (off >= 0x0e0 && off <= 0x10a) || (off >= 0x120 && off <= 0x1be)) ard_write(off, CREG[i]); }
     ard_frame_start(); ARD_NEXT = (int)(h_now() / HOST_HPOS); ARD_LAST = H_LINES - 1;
@@ -167,7 +170,9 @@ void hw_write_hook(uint32_t off, uint32_t v) {
         (off >= 0x120 && off <= 0x1be)) { ard_until((int)(h_now() / HOST_HPOS)); ard_write(off, (uint16_t)v); }
     if (off == 0x096) ard_until((int)(h_now() / HOST_HPOS));   /* the lines before a DMACON write see the old value (the runtime applies it) */
     if (h_wr_cb) h_wr_cb(off, v);
-    if (off == 0x09c) { if (v & 0x8000) H_INTREQ |= v & 0x7fff; else H_INTREQ &= ~(v & 0x7fff); }
+    if (off == 0x09c) {
+        if (v & 0x0780) arek_paula_run(&H_PAULA, h_abs());      /* 1.0.43: Paula up to the write first - a request it raises inside this instruction is older than the write that clears it (it survived the acknowledge) */
+        if (v & 0x8000) H_INTREQ |= v & 0x7fff; else H_INTREQ &= ~(v & 0x7fff); }
     if (off == 0x058) H_BLIT_PEND = 1;                                             /* 1.0.5: BLTSIZE by the CPU - INTREQ BLIT when the bus model's blit ends */
     if (off == 0x034) { for (int k = 8; k <= 14; k += 2) if (v & (1u << (k + 1))) H_POTGOR = (uint16_t)((H_POTGOR & ~(1u << k)) | (v & (1u << k))); }   /* POTGO: an output pin reads back (G40) */
     if ((off >= 0x0a0 && off < 0x0e0) || (off == 0x096 && (v & 0x000f)) || (off == 0x09c && (v & 0x0780))) arek_paula_write(&H_PAULA, h_abs(), off, (uint16_t)v);
@@ -255,6 +260,20 @@ static void host_events(void) {
     if (!H_COP_DONE && b->cop_int >= 0 && h_now() >= b->cop_int) { H_INTREQ |= 0x0010; H_COP_DONE = 1; }
     while (H_COP_IDX < b->cop_irq_n && h_now() >= b->cop_irq[H_COP_IDX].t) { H_INTREQ |= b->cop_irq[H_COP_IDX].bits; H_COP_IDX++; }   /* 1.0.6: the Copper's other INTREQ bits (e.g. RBF: level 5) at their times*/
     if (H_BLIT_PEND && !arek_bus_bbusy(b, h_now())) { H_INTREQ |= 0x0040; H_BLIT_PEND = 0; }   /* 1.0.5: the blit finished (as BBUSY sees it) */
+}
+
+/* 1.0.43: a start is a clean start. Everything of the host the state does NOT carry goes back to its first value, so a
+ * second run in the same process (the page's restart: engine_stop, engine_init, engine_run) is the first run again -
+ * before, the frame count went on, the CIA timers kept their latch, mode and mask, a pending blit raised BLIT at the
+ * first instruction, a stop in a short field started the next run with 312 lines. What the state carries (INTREQ,
+ * CIA-A PRA / SDR / ICR, the joysticks, POTGOR, the first frame's number) is set by the caller before host_init. */
+static void host_reset(void) {
+    static const HCia cia0 = { { { 0xffff, 0xffff, 0, 0 }, { 0xffff, 0xffff, 0, 0 } }, 0 };
+    H_LINES = 313; H_LOF = 1; H_LINES_FORCED = 0;
+    H_FRAME = 0; H_COP_DONE = 0; H_COP_IDX = 0; H_BLIT_PEND = 0; H_IRQ_DEPTH = 0; H_VERTB_PEND = 0; H_NEXTMAP = 0;
+    H_CIA[0] = cia0; H_CIA[1] = cia0; H_CIAB_ICR = 0; H_CIAA_DDRA = 0x03; H_CIA_DUE = 0;
+    H_IO_UNKNOWN = 0; H_IO_LAST = 0; H_IRQS = 0; H_PC = 0;
+    RET_PC = NO_RET;
 }
 
 /* an interrupt at an instruction boundary: the highest enabled level above the mask; SR and PC to the stack, the

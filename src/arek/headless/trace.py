@@ -485,6 +485,11 @@ def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None,
     from . import shot
     if not breaks and not watches and not (buslog or reglog or audlog or shots or pokes):
         raise TraceError('nothing to trace: give breakpoints and/or watchpoints (or only logs/shots/pokes)')
+    if inputs and not breaks:
+        # 1.0.43: the patched emulator applies a line of the inputs file when a breakpoint is hit (vamiga-inputs-reglog);
+        # without one the game ran idle and the pictures / logs looked like a measurement with those inputs
+        raise TraceError('inputs are applied at breakpoint hits: give the breakpoint the frame is counted by (--break ADDR, '
+                         'e.g. the level-3 handler) - without one no line of %s would be used' % inputs)
     poke = write_pokes(pokes, out + '.poke') if pokes else None
     adf = shot.check_disk(conf, adf or conf.get('ADF1'))
     e = env(out, ranges, inputs=inputs, reglog=reglog, audlog=audlog, skip=skip, from_frame=from_frame,

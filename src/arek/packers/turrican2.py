@@ -208,7 +208,7 @@ def rle_forward(z, out_len):
             cnt = (src[p] << 24) | (src[p + 1] << 16) | (src[p + 2] << 8) | src[p + 3]; p += 4
         else:                                     # d2 == 1: 16bit pocet
             cnt = (src[p] << 8) | src[p + 1]; p += 2
-        out.extend(bytes([d1]) * cnt)
+        out.extend(bytes([d1]) * min(cnt, out_len - len(out)))   # 1.0.43: never past the announced length (a 32-bit count from 10 bytes took 268 MB)
 
     while len(out) < out_len:                     # 0x11e2
         d0 = src[p]; p += 1
@@ -230,8 +230,22 @@ def rle_forward(z, out_len):
     return bytes(out[:out_len])
 
 
+MAX_OUTPUT = 8 << 20            # 1.0.43: the largest stage a block may announce (a floppy holds 880 KB)
+
+
 def unpack_t2(data):
+    if len(data) < 12:
+        raise ValueError('a Turrican II block starts with three lengths (12 bytes)')
     l1, l2, l3 = struct.unpack('>III', data[:12])
+    if not (0 < l1 <= MAX_OUTPUT and 0 < l2 <= MAX_OUTPUT and 0 < l3 <= MAX_OUTPUT):
+        raise ValueError('implausible stage lengths %d / %d / %d' % (l1, l2, l3))
+    try:
+        return _unpack_t2(data, l1, l2, l3)
+    except (IndexError, struct.error) as e:      # the stream ran out: one error type for every packer
+        raise ValueError('the packed stream ran out - damaged data or a wrong offset (%s)' % e) from None
+
+
+def _unpack_t2(data, l1, l2, l3):
     h, pos = huffman(data, 12, l3)
     if len(h) != l3:
         raise ValueError('Huffman: %d != %d' % (len(h), l3))

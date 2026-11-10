@@ -235,3 +235,49 @@ def test_rnc_cli_scan_and_mcp(tmp_path, rnd):
     from arek import mcp_server
     r = mcp_server.unpack(str(tmp_path / 'img.bin'), str(tmp_path / 'out2.bin'), 'auto', '0x64')
     assert r['kind'] == 'rnc' and r['bytes'] == len(data) and (tmp_path / 'out2.bin').read_bytes() == data
+
+
+def test_bytekiller_tail_has_its_parameters_at_the_end(rnd, tmp_path):
+    """1.0.43 (Xenon 2 KIT-GAP 17): a crunched executable's block - the unpacked length is its last long, the first bit
+    word the one before; the block sits somewhere inside a file. The start-header formats refused it."""
+    from arek import cli
+    d = rnd(700)
+    block = bytekiller.pack_tail_literal(d)
+    assert int.from_bytes(block[-4:], 'big') == 700 and len(block) % 4 == 0
+    assert bytekiller.unpack_tail(block) == (d, True)
+    image = rnd(0x15a) + block + rnd(40)
+    assert bytekiller.unpack_tail(image, 0x15a, 0x15a + len(block)) == (d, True)
+    out, exact = bytekiller.unpack_tail(image, 0x15a - 4, 0x15a + len(block))       # a start 4 bytes early: decoded, not used up exactly
+    assert out == d and exact is False
+    with pytest.raises(ValueError):
+        bytekiller.unpack_tail(image, 0x15a, 0x15a + len(block) - 2)                 # not whole longs
+    with pytest.raises(ValueError):
+        bytekiller.unpack_tail(block[:-4] + b'\xff\xff\xff\xff')                     # an implausible length
+    src, dst = tmp_path / 'f.bin', tmp_path / 'o.bin'
+    src.write_bytes(image)
+    assert cli.main(['bytekiller', str(src), '-o', str(dst), '--format', 'tail', '--offset', '0x15a', '--end', hex(0x15a + len(block))]) == 0
+    assert dst.read_bytes() == d
+
+
+def test_bytekiller_refuses_a_stream_that_leaves_the_output(rnd):
+    """1.0.43: a run or a match that passes the start of the output used negative indices - it wrote over the END of
+    the output and the block came back "unpacked"."""
+    good = bytekiller.pack_tail_literal(rnd(300))
+    short = good[:-4] + (200).to_bytes(4, 'big')                                     # the same stream, a shorter output
+    with pytest.raises(ValueError):
+        bytekiller.unpack_tail(short)
+
+
+def test_length_fields_do_not_drive_the_allocation(rnd):
+    """1.0.43: an RNC header may announce 4 GB, a Turrican II run count 2^32 - both were taken at their word."""
+    from arek.packers import rnc, turrican2
+    packed = rnc.pack(rnd(500)) if hasattr(rnc, 'pack') else None
+    if packed:
+        assert rnc.unpack(packed) and rnc.unpack(packed, max_output=500)
+        with pytest.raises(ValueError):
+            rnc.unpack(packed, max_output=499)
+    out = turrican2.rle_forward(bytes([1, 2, 3, 3, 5, 2, 0x08, 0, 0, 0]), 10)        # a run of $08000000 into 10 bytes
+    assert len(out) == 10
+    for bad in (b'', bytes(3), bytes(12), b'\xff' * 64, rnd(2000)):
+        with pytest.raises(ValueError):                                              # was IndexError / struct.error / a huge buffer
+            turrican2.unpack_t2(bad)

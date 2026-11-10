@@ -78,7 +78,12 @@ static volatile int G_DONE = 0, G_ALLOW = 0, G_END = 0, G_WAIT = 0; static volat
 static volatile int32_t G_AWT = 0, G_ARD = -1, G_ALOW = 0; static int G_HASHON = 0;
 static void g_hash_now(void);   /* samples written (stereo frames), read by the worklet (-1 = none), the low mark */
 static M68 E_M; static uint32_t E_ENTRY = 0;
-static int E_KEYS = 0, E_KEYS2 = -1, E_KEYMODE = 0; static volatile int E_KEY_CODE = -1, E_KEY_DOWN = 0;
+static int E_KEYS = 0, E_KEYS2 = -1, E_KEYMODE = 0;
+/* 1.0.43: raw keys wait in a ring, one is given to the game per frame (the keyboard handshake needs that pace). The
+ * single slot before lost the first of two events inside one game frame - a press and its release within 20 ms left
+ * only the release, a lost release was a key held for good. The page writes (E_KQ_W), the game's side reads (E_KQ_R). */
+#define E_KEYQ 32
+static volatile int E_KQ[E_KEYQ]; static volatile unsigned E_KQ_W = 0, E_KQ_R = 0;
 
 /* the translation's run-time targets it does not know: the page sees the address (engine_error), the game sleeps */
 void unknown_hook(uint32_t a) { if (!G_ERR) G_ERR = a; }
@@ -146,8 +151,10 @@ static void e_apply_keys(void) {
         H_JOY0 = (uint16_t)((r << 1) | (r ^ d) | (l << 9) | ((l ^ u) << 8));
         H_CIAA_PRA = (uint8_t)((H_CIAA_PRA & 0xbf) | (f ? 0 : 0x40));
     }
-    int c = E_KEY_CODE;
-    if (c >= 0) { H_CIAA_SDR = (uint8_t)~((c << 1) | (E_KEY_DOWN ? 0 : 1)); H_CIAA_ICR |= 0x08; E_KEY_CODE = -1; h_cia_raise(0); }   /* 1.0.12: SP in ICR raises PORTS when the game enabled it (Turrican II KIT-GAPS 19) */
+    unsigned kr = E_KQ_R;
+    if (kr != __atomic_load_n(&E_KQ_W, __ATOMIC_SEQ_CST)) {
+        int v = E_KQ[kr % E_KEYQ], c = v & 0x7f; __atomic_store_n(&E_KQ_R, kr + 1, __ATOMIC_SEQ_CST);
+        H_CIAA_SDR = (uint8_t)~((c << 1) | ((v & 0x100) ? 0 : 1)); H_CIAA_ICR |= 0x08; h_cia_raise(0); }   /* 1.0.12: SP in ICR raises PORTS when the game enabled it (Turrican II KIT-GAPS 19) */
 }
 static void e_frame_start(void) { e_apply_keys(); }
 /* the frame is drawn (ARD_PIX): its screenshot, its samples into the ring, its record; the page may now read them */
@@ -201,6 +208,7 @@ API int engine_init(const uint8_t *p, int n) {
     host_display_init();
     h_frame_cb = e_frame_start; h_frame_done_cb = e_frame_done;
     G_DONE = 0; G_END = 0; G_WAIT = 0; G_ERR = 0; G_AW = 0;
+    E_KQ_R = 0; E_KQ_W = 0;
     __atomic_store_n(&G_AWT, 0, __ATOMIC_SEQ_CST); __atomic_store_n(&G_ARD, -1, __ATOMIC_SEQ_CST);   /* with G_AW: the worklet's place is count % n */
     return 0;
 }
@@ -266,7 +274,11 @@ API volatile int32_t *engine_aud_read(void) { return &G_ARD; }      /* ... and r
 API void engine_aud_low(int samples) { __atomic_store_n(&G_ALOW, samples, __ATOMIC_SEQ_CST); }   /* under it the thread computes on */
 API void engine_keys(int k) { E_KEYS = k; }
 API void engine_keys2(int k) { E_KEYS2 = k; }
-API void engine_key(int code, int down) { E_KEY_DOWN = down; E_KEY_CODE = code & 0x7f; }
+API void engine_key(int code, int down) {
+    unsigned w = __atomic_load_n(&E_KQ_W, __ATOMIC_SEQ_CST);
+    if (w - __atomic_load_n(&E_KQ_R, __ATOMIC_SEQ_CST) >= E_KEYQ) return;      /* 32 events behind: the newest is dropped */
+    E_KQ[w % E_KEYQ] = (code & 0x7f) | (down ? 0x100 : 0); __atomic_store_n(&E_KQ_W, w + 1, __ATOMIC_SEQ_CST);
+}
 API double engine_fr_frame(int n) { return n < 0 ? -1 : (double)G_FR[n % G_NFR].frame; }
 API int engine_fr_aud0(int n) { return G_FR[n % G_NFR].aud0; }
 API int engine_fr_naud(int n) { return G_FR[n % G_NFR].naud; }
@@ -319,13 +331,15 @@ int main(int argc, char **argv) {
     long len; uint8_t *st = rdall(argv[1], &len);
     int r = engine_init(st, (int)len);
     if (r) { fprintf(stderr, "engine_init %d\n", r); return 2; }
-    int nframes = atoi(argv[2]); E_KEYMODE = 1; const char *shot = 0, *dump = 0; G_HASHON = 1;
+    int nframes = atoi(argv[2]); E_KEYMODE = 1; const char *shot = 0, *dump = 0; G_HASHON = 1; int twice = 0;
 #ifndef ENGINE_THREAD
     G_ALLOW = nframes;
 #endif
     for (int i = 3; i < argc; i++) {
         if (!strcmp(argv[i], "--disk") && i + 2 < argc) { int n = atoi(argv[i + 1]); if (ahd_set_file(n, argv[i + 2])) { fprintf(stderr, "disk %s\n", argv[i + 2]); return 2; } i += 2; }
         else if (!strcmp(argv[i], "--keys") && i + 1 < argc) { E_KEYMODE = strcmp(argv[++i], "none") ? 1 : 0; }
+        else if (!strcmp(argv[i], "--key") && i + 1 < argc) { int code = 0, down = 1; sscanf(argv[++i], "%x:%d", &code, &down); engine_key(code, down); }   /* 1.0.43: a raw key event before the run (repeat) */
+        else if (!strcmp(argv[i], "--twice")) twice = 1;       /* 1.0.43: the run, then a restart from the same state and the run again: two lines, the same hash */
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--dump") && i + 1 < argc) dump = argv[++i];
     }
@@ -338,6 +352,12 @@ int main(int argc, char **argv) {
     }
 #else
     if (!setjmp(G_STOPJ)) engine_run();
+    if (twice) {
+        printf("frames %d frame %ld hash %s\n", G_DONE, G_DONE ? G_FR[(G_DONE - 1) % G_NFR].frame : -1L, engine_hash_hex());
+        if (engine_init(st, (int)len)) { fprintf(stderr, "engine_init (restart)\n"); return 2; }
+        G_ALLOW = nframes; G_HASHON = 1;
+        if (!setjmp(G_STOPJ)) engine_run();
+    }
 #endif
     if (G_ERR) fprintf(stderr, "unknown routine %06x\n", G_ERR);
     printf("frames %d frame %ld hash %s\n", G_DONE, G_DONE ? G_FR[(G_DONE - 1) % G_NFR].frame : -1L, engine_hash_hex());

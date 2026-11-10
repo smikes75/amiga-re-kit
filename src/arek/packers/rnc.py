@@ -135,9 +135,15 @@ def _huf(bs, table):
     return val
 
 
-def unpack(data, offset=0):
-    """The unpacked bytes of the RNC method 1 block at ``offset``; both CRCs verified, a mismatch raises."""
+MAX_OUTPUT = 16 << 20           # as the ATN! unpacker: far above anything a floppy game unpacks
+
+
+def unpack(data, offset=0, max_output=MAX_OUTPUT):
+    """The unpacked bytes of the RNC method 1 block at ``offset``; both CRCs verified, a mismatch raises. 1.0.43: a
+    block that announces more than ``max_output`` bytes is refused (671 packed bytes can announce and yield 9.8 MB)."""
     h = info(data, offset)
+    if h['unpacked'] > max_output:
+        raise ValueError('RNC block announces %d unpacked bytes (the limit is %d; unpack(..., max_output=N) raises it)' % (h['unpacked'], max_output))
     if h['method'] != 1:
         raise ValueError('RNC method %d: only method 1 is unpacked here' % h['method'])
     body = bytes(data[h['start']:h['start'] + h['packed']])

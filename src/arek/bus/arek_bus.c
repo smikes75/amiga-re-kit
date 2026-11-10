@@ -55,11 +55,14 @@ double arek_bus_insn(ArekBus *b, double t, uint32_t cycles, uint32_t accesses, u
 double arek_bus_data(ArekBus *b, double t) { b->in_da++; return arek_bus_access(b, t); }
 double arek_bus_slow(ArekBus *b, double t, double cck) { b->in_da++; return t + cck; }
 
+/* 1.0.43: the slot the blitter has reached at time t. In the first colour clocks of a frame t - 2 + slotoff is below
+ * zero; as an unsigned number that was slot 4 294 967 295 and a blit crossing the frame end finished at once. */
+static uint32_t arek_bus_slot_of(ArekBus *b, double t) { double s = (double)(uint32_t)t - 2 + (double)b->slotoff; return s < 0 ? 0 : (uint32_t)s; }
 double arek_bus_blit(ArekBus *b, double t, uint16_t con0, uint16_t con1, uint16_t size) {
     uint32_t h = size >> 6, w = size & 0x3f; if (!h) h = 1024; if (!w) w = 64;
     if (con1 & 1) return t + (double)h * 8;   /* rezim car: zatim jen odhad casu procesoru, bez slotu */
-    arek_bus_blt_start(b, (uint32_t)t - 2 + b->slotoff, con0, h * w);
+    arek_bus_blt_start(b, arek_bus_slot_of(b, t), con0, h * w);
     return t;
 }
 
-int arek_bus_bbusy(ArekBus *b, double t) { arek_bus_blt_advance(b, (uint32_t)t - 2 + b->slotoff); return b->bl.busy; }
+int arek_bus_bbusy(ArekBus *b, double t) { arek_bus_blt_advance(b, arek_bus_slot_of(b, t)); return b->bl.busy; }

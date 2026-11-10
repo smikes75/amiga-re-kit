@@ -87,6 +87,8 @@ def _decode_b(br, size):
 
     def literals(n):
         nonlocal p
+        if p - n < 0:                           # 1.0.43: a negative index wrote over the END of the output without a word
+            raise ValueError("a literal run passes the start of the output - damaged data or a wrong offset")
         for _ in range(n):
             p -= 1
             out[p] = br.bits(8)
@@ -94,6 +96,8 @@ def _decode_b(br, size):
     def match(length, offset):
         nonlocal p
         s = p + offset
+        if p - length < 0 or s > size:
+            raise ValueError("a match passes the output - damaged data or a wrong offset")
         for _ in range(length):
             s -= 1
             p -= 1
@@ -146,6 +150,30 @@ def unpack_bk(data, off=0):
     br = BitReader(data, off + 12 + packed, chk, start=off + 12)
     out = _decode_b(br, size)
     return bytes(out), br.checksum == 0
+
+
+def unpack_tail(data, off=0, end=None):
+    """Format TAIL (1.0.43, Xenon 2 KIT-GAP 17): a crunched block whose parameters are at its END - the decruncher of
+    a packed executable points a0 behind the block and takes ``move.l -(a0),a2`` (the unpacked length) and
+    ``move.l -(a0),d0`` (the first bit word); the classic Bytekiller code follows downwards to the block's start
+    ``off``. ``end``: the offset behind the block (default: the end of the data). There is no checksum in this
+    layout: the second value says whether the bit stream was used up exactly at ``off`` - the only evidence the
+    format offers. Returns (data, consumed_exactly)."""
+    end = len(data) if end is None else end
+    if end - off < 12 or end > len(data) or (end - off) % 4:
+        raise ValueError("a TAIL block is whole longs between its start and its end (%d bytes)" % (end - off))
+    size = int.from_bytes(data[end - 4:end], "big")
+    if size == 0 or size > 8 << 20:
+        raise ValueError("implausible unpacked length: %d (the last long of the block)" % size)
+    br = BitReader(data, end - 4, start=off)
+    out = _decode_b(br, size)
+    return bytes(out), br.pos == off
+
+
+def pack_tail_literal(data):
+    """A TAIL block of literal runs only (for tests): the backwards longword stream, then the unpacked length."""
+    b = pack_b_literal(data)
+    return b[8 + 4:] + struct.pack('>I', len(data))
 
 
 def detect(data, off=0):

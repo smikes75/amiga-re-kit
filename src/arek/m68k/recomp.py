@@ -1326,8 +1326,9 @@ class Gen:
                     return L + self.inline_call(i, i.ea.absval, start, end, ins)
                 L.append(self.callseq(i.ea.absval, i.end))
             else:
-                L.append('push32(m, 0x%xu);' % i.end)
-                L.append('unknown_call(ADDR24(%s));' % i.ea.addr)
+                # 1.0.43: as every call - a hook that returns leaves the return address, CALL_END takes it off
+                L.append('{ uint32_t sp0 = m->a[7]; push32(m, 0x%xu); unknown_call(ADDR24(%s)); CALL_END(sp0, 0x%xu); }'
+                         % (i.end, i.ea.addr, i.end))
         elif k == 'jmp':
             nm = self.stub_name(i.ea)
             if nm:
@@ -1339,7 +1340,7 @@ class Gen:
                 return L
             if i.addr in self.flow.jtabs:
                 return L + self.jump_table(i, lambda t: '%s(m); return;' % self.flow.fname(t),
-                                           'm->a[7] += 4; return;')
+                                           'm->a[7] += 4; return;', tail='return;')
             if i.addr in self.flow.indirect:
                 if mode in FLOW_MODES:                     # the program rewrites the operand: read the instruction's own
                     t = ('((rd16_raw(0x%xu) << 16) | rd16_raw(0x%xu))' % (i.addr + 2, i.addr + 4)) if i.end - i.addr == 6 else \
@@ -1349,7 +1350,7 @@ class Gen:
                 L.append('{ uint32_t t = ADDR24(%s); switch (t) {' % t)
                 for t in self.flow.indirect[i.addr]:
                     L.append('  case 0x%xu: %s' % (t, self.br(t, start, end, ins)))
-                L.append('  default: unknown_call(t); } }')
+                L.append('  default: unknown_call(t); return; } }')       # 1.0.43: a jmp does not go on behind itself
                 return L
             if mode in FLOW_MODES:
                 L.append(self.br(i.ea.absval, start, end, ins))
@@ -1432,7 +1433,7 @@ class Gen:
             return 'TICK(0x%xu, %d);' % (pc, cycles(i, count=int(i.src.rstrip('u'), 16)))
         return 'TICK(0x%xu, %d);' % (pc, cycles(i))
 
-    def jump_table(self, i, case, empty):
+    def jump_table(self, i, case, empty, tail=''):
         """jsr/jmp (d8,An,Dn) or (d8,PC,Dn) into a JumpTable: a switch on the slot index."""
         if getattr(i.ea, 'mode', None) not in (6, 73):
             raise Unsupported('jump table at $%x: unexpected operand %s' % (i.addr, i.ea.text))
@@ -1445,11 +1446,13 @@ class Gen:
             base = '((int32_t)((m->a[%d] - 0x%xu) << 8) >> 8)' % (i.ea.areg, jt.table)   # 1.0.27: 24 address lines
         else:
             base = '(%d)' % (jt.origin - jt.table)
-        L = ['{ int32_t off = %s + (%d) + %s; if (off < 0 || off %% %d) unknown_call((uint32_t)off); '
-             'switch (off / %d) {' % (ix, i.ea.disp, base, jt.stride, jt.stride)]
+        # 1.0.43: an offset outside the table reaches unknown_call and nothing else - with a hook that returns (the
+        # browser build) the switch ran on with off / stride, and a jmp went on into the next instruction (``tail``)
+        L = ['{ int32_t off = %s + (%d) + %s; if (off < 0 || off %% %d) { unknown_call((uint32_t)off); %s } '
+             'else switch (off / %d) {' % (ix, i.ea.disp, base, jt.stride, tail, jt.stride)]
         for k, t in enumerate(jt.targets):
             L.append('  case %d: %s' % (k, empty if t is None else case(t)))
-        L.append('  default: unknown_call((uint32_t)off); } }')
+        L.append('  default: unknown_call((uint32_t)off); %s } }' % tail)
         return L
 
     def callseq(self, target, ret):

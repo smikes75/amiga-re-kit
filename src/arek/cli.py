@@ -4,7 +4,7 @@
     arek adf ls|cat|extract  IMAGE [-p PATH] [-o OUT] [--lenient]   (AmigaDOS OFS/FFS)
     arek scan        FILE [--deep]
     arek pp20        FILE -o OUT
-    arek bytekiller  FILE -o OUT [--format b|a] [--offset N]
+    arek bytekiller  FILE -o OUT [--format b|bk|a|tail] [--offset N] [--end N]
     arek t2          FILE -o OUT
     arek atn         FILE -o OUT [--offset N]
     arek hunk        info|load|split  FILE ... [--chip FILE2]
@@ -161,7 +161,11 @@ def cmd_bytekiller(a):
     fmt = a.format
     if fmt == 'auto':                             # 1.0.4: B (8-byte header) or BK (the classic 12-byte header)
         fmt = bytekiller.detect(data, a.offset) or 'b'
-    if fmt == 'a':
+    if fmt == 'tail':                             # 1.0.43 (Xenon 2 KIT-GAP 17): the parameters at the END of the block
+        out, ok = bytekiller.unpack_tail(data, a.offset, a.end)
+        if not ok:
+            print('warning: the bit stream was not used up exactly at the block\'s start (wrong --offset / --end, or another variant)', file=sys.stderr)
+    elif fmt == 'a':
         out, ok = bytekiller.unpack_a(data, a.offset)
     else:
         out, ok = (bytekiller.unpack_bk if fmt == 'bk' else bytekiller.unpack_b)(data, a.offset)
@@ -955,8 +959,11 @@ def build_parser():
     s = sp.add_parser('bytekiller', help='unpack a Bytekiller block (B: 8-byte header, BK: the classic 12-byte header, A: SWIV; auto = B or BK by checksum)')
     s.add_argument('file')
     s.add_argument('-o', '--out', required=True)
-    s.add_argument('--format', choices=['auto', 'b', 'bk', 'a'], default='auto')
+    s.add_argument('--format', choices=['auto', 'b', 'bk', 'a', 'tail'], default='auto',
+                   help='tail: the unpacked length and the first bit word are the LAST two longs of the block (a crunched executable: '
+                        'give --offset and --end of the block; there is no checksum, the result says whether the stream was used up exactly)')
     s.add_argument('--offset', type=A, default=0)
+    s.add_argument('--end', type=A, help='tail: the offset behind the block (default: the end of the file)')
     s.set_defaults(fn=cmd_bytekiller)
 
     s = sp.add_parser('t2', help='unpack a Turrican II three-stage file')
