@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.41 on PyPI, 2681 tests. Extracted from five game
+- **The kit:** version 1.0.42 on PyPI, 2681 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive

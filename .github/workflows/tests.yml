@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: python -m pip install -e '.[dev]' cryptography build
+      - run: python -m pip install -e '.[dev]' cryptography build setuptools
       - run: python -m pytest -q -m "not browser"
         env:
           AREK_REQUIRE_TOOLS: '1'

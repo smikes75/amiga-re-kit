@@ -48,7 +48,7 @@ def compile_replay(out=None, cc=None):
         raise RuntimeError('no C compiler (cc, gcc or clang) for the bus model')
     out = out or os.path.join(tempfile.mkdtemp(prefix='arek-bus'), 'arek_bus_replay')
     subprocess.run([cc, '-O2', '-I', HERE, '-o', out, os.path.join(HERE, 'arek_bus_replay.c'),
-                    os.path.join(HERE, 'arek_bus.c'), os.path.join(HERE, 'arek_bus_vamiga.c')], check=True)
+                    os.path.join(HERE, 'arek_bus.c'), os.path.join(HERE, 'arek_bus_vamiga.c'), '-lm'], check=True)   # 1.0.42: floor() needs libm on Linux (found by the first CI run)
     return out
 
 
@@ -59,7 +59,7 @@ def compile_check(out=None, cc=None):
         raise RuntimeError('no C compiler (cc, gcc or clang) for the bus model')
     out = out or os.path.join(tempfile.mkdtemp(prefix='arek-bus'), 'arek_bus_check')
     subprocess.run([cc, '-O2', '-I', HERE, '-o', out, os.path.join(HERE, 'arek_bus_check.c'),
-                    os.path.join(HERE, 'arek_bus.c'), os.path.join(HERE, 'arek_bus_vamiga.c')], check=True)
+                    os.path.join(HERE, 'arek_bus.c'), os.path.join(HERE, 'arek_bus_vamiga.c'), '-lm'], check=True)   # 1.0.42: floor() needs libm on Linux (found by the first CI run)
     return out
 
 
@@ -116,7 +116,7 @@ def compile_paula_check(out=None, cc=None):
         raise RuntimeError('no C compiler (cc, gcc or clang) for the bus model')
     out = out or os.path.join(tempfile.mkdtemp(prefix='arek-bus'), 'arek_bus_paula_check')
     subprocess.run([cc, '-O2', '-I', HERE, '-o', out, os.path.join(HERE, 'arek_bus_paula_check.c'),
-                    os.path.join(HERE, 'arek_bus.c'), os.path.join(HERE, 'arek_bus_vamiga.c')], check=True)
+                    os.path.join(HERE, 'arek_bus.c'), os.path.join(HERE, 'arek_bus_vamiga.c'), '-lm'], check=True)   # 1.0.42: floor() needs libm on Linux (found by the first CI run)
     return out
 
 

@@ -72,7 +72,7 @@ def test_capture_builds_script_and_reads_back(tmp_path, monkeypatch):
     adf, rom = tmp_path / 'g.adf', tmp_path / 'k.rom'
     adf.write_bytes(bytes(901120))
     rom.write_bytes(b'x')
-    conf = {'ROM': str(rom), 'ADF1': str(adf), 'VAHL': '/bin/true', 'MACHINE': 'A500_OCS_1MB'}
+    conf = {'ROM': str(rom), 'ADF1': str(adf), 'VAHL': '/nonexistent/VAHeadless', 'MACHINE': 'A500_OCS_1MB'}
     out = str(tmp_path / 'run.vtr')
     seen = {}
 
@@ -193,7 +193,7 @@ def test_capture_passes_inputs_and_logs(tmp_path, monkeypatch):
     adf.write_bytes(bytes(901120))
     rom.write_bytes(b'x')
     inp.write_text('R\nF\n')
-    conf = {'ROM': str(rom), 'ADF1': str(adf), 'VAHL': '/bin/true'}
+    conf = {'ROM': str(rom), 'ADF1': str(adf), 'VAHL': '/nonexistent/VAHeadless'}
     trace.capture(conf, str(tmp_path / 'r.vtr'), [], 1, 2, breaks=[0x100], inputs=str(inp),
                   reglog=str(tmp_path / 'regs.bin'), from_frame=3)
     assert seen['env']['VAHL_INPUTS'] == str(inp) and seen['env']['VAHL_TRACE_FROM_FRAME'] == '3'

@@ -3,6 +3,12 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.42 (2026-11-10)
+
+- the first CI run on Linux: the Paula check program links libm (`arek selftest audio` did not build there), two trace
+  tests no longer take /bin/true for an emulator, setuptools in the CI environment; CHANGELOG.md in the sdist.
+  1.0.41 was tagged but never uploaded: 1.0.42 is that release.
+
 ## 1.0.41 (2026-11-10)
 
 - wb-obraz 1.9: a lost WebGL context is asked back and everything rebuilt (`onLost` / `onRestore`, `.lost`); the 2D path
