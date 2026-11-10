@@ -99,7 +99,8 @@ def test_sprite_position_colours_and_dma_reload():
     # sprite 0: two appearances, the second from the control words DMA reads at the first VSTOP
     first = [0x4000 | 0x40, 0x4400] + [w for r in rows for w in r]
     second = [0x6000 | 0x50, 0x6200, 0x8000, 0x0000, 0x8000, 0x0000, 0, 0]
-    ram = ram_with(_sprite_copper([s0] + [0x30000] * 7) + [0x1a6, 0xf00, 0x1a2, 0x0f0, 0x104, 0x24] + END,
+    # one (empty) bitplane: Denise shows sprites from the line's first bitplane word on - none without a fetch (1.0.40)
+    ram = ram_with(setup() + _sprite_copper([s0] + [0x30000] * 7) + [0x1a6, 0xf00, 0x1a2, 0x0f0, 0x104, 0x24] + END,
                    [(s0, first + second)])
     f = display.render(ram, COP)
     hs = 0x40 << 1
@@ -111,7 +112,7 @@ def test_sprite_position_colours_and_dma_reload():
 def test_attached_sprites_use_sixteen_colours():
     a, b = _sprite(0x20000, 0x40, 0x42, 0x100, [(0x8000, 0)] * 2), \
         _sprite(0x20100, 0x40, 0x42, 0x100, [(0x8000, 0)] * 2, attach=True)
-    ram = ram_with(_sprite_copper([0x20000, 0x20100] + [0x30000] * 6) + [0x1a2 + 2 * 4, 0x0ff] + END, [a, b])
+    ram = ram_with(setup() + _sprite_copper([0x20000, 0x20100] + [0x30000] * 6) + [0x1a2 + 2 * 4, 0x0ff] + END, [a, b])
     assert display.render(ram, COP).pixels[0x40][0x101] == 0x0ff               # index 1 | 4 = 5 -> COLOR21
 
 

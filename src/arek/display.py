@@ -325,7 +325,10 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES):
                 v0, sv = diwstrt >> 8, diwstop >> 8
                 v1 = sv | (0 if sv & 0x80 else 0x100)
                 hr = bool(con0 & 0x8000)
-                if n and v0 <= v < v1:
+                dmacon = r[0x096 >> 1]
+                # 1.0.40: no bitplane DMA (DMACON known, BPLEN or DMAEN off) - nothing is fetched, the pointers stay,
+                # the line shows the background and the sprites (measured: selftest display, lines $74-$79)
+                if n and v0 <= v < v1 and ((dmacon & 0x300) == 0x300 if dmacon else True):
                     nw = min(((ddfstop - ddfstrt) // 8 + 1) * (2 if hr else 1), 64)
                     n = min(n, 4 if hr else 6)
                     words = [[rd(bpl[k] + 2 * i) for i in range(nw)] for k in range(n)]
@@ -360,7 +363,9 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES):
                     hline[2 * h], hline[2 * h + 1] = a, b
                     line[h] = _avg12(a, b)
                 else:
-                    line[h] = _pixel(r, h, words if fetch == 1 else None, base, nplanes, sline, ham, None, vwin)
+                    # 1.0.40: Denise shows sprites from the line's first bitplane word on (BPL1DAT) - a line without
+                    # a fetch (no planes, bitplane DMA off) and the part left of DDFSTRT show none (measured)
+                    line[h] = _pixel(r, h, words if fetch == 1 else None, base, nplanes, sline if fetch == 1 else (), ham, None, vwin)
                     if hline is not None:
                         hline[2 * h] = hline[2 * h + 1] = line[h]
         pixels.append(line)

@@ -91,6 +91,22 @@ static void h_cia_run(int i, int k) {
     int64_t per = (int64_t)t->latch + 1, m = (n - t->cnt - 1) % per;
     t->cnt = (uint16_t)(t->latch - m);
 }
+/* 1.0.40: a running timer whose ICR mask bit is set underflows at a known time - H_CIA_DUE, the absolute CCK of the
+ * earliest one (0: not yet worked out, -1: none). host_events runs the timers then, so the interrupt (PORTS / EXTER)
+ * comes when the timer runs out and not when the game next touches the CIA: a timer that is only waited for by its
+ * interrupt (a music routine on CIA-B) never fired before. Timers the game polls (no mask bit) stay lazy. */
+static double H_CIA_DUE = 0;
+static void h_cia_due(void) {
+    int64_t best = -1;
+    for (int i = 0; i < 2; i++) for (int k = 0; k < 2; k++) { HCiaTimer *t = &H_CIA[i].t[k];
+        if ((t->cr & 1) && (H_CIA[i].mask & (1 << k))) { int64_t d = t->e0 + t->cnt + 1; if (best < 0 || d < best) best = d; } }
+    H_CIA_DUE = best < 0 ? -1 : (double)best * 5.0;
+}
+static void h_cia_poll(void) {
+    if (H_CIA_DUE < 0 || h_abs() < H_CIA_DUE) return;
+    for (int i = 0; i < 2; i++) for (int k = 0; k < 2; k++) h_cia_run(i, k);
+    h_cia_due();
+}
 static int h_cia_reg(uint32_t a, int *i) {           /* the CIA and register of an address, or -1 */
     if ((a & 0xbfe001) == 0xbfe001 && (a & 0xfff0ff) == 0xbfe001) { *i = 0; return (int)((a >> 8) & 15); }
     if ((a & 0xfff0ff) == 0xbfd000) { *i = 1; return (int)((a >> 8) & 15); }
@@ -120,6 +136,7 @@ static void host_init(double t0) {
     arek_paula_frame(&H_PAULA, (double)H_FRAME0 * H_LINES * HOST_HPOS);
     ara_reset();
 }
+#define ARD_DMACON_KNOWN 1               /* 1.0.40: the host's DMACON is the machine's - 0 is all DMA off, not "unknown" */
 #include "arek_display.h"
 /* after CREG holds the capture's registers: the picture starts from them, drawn from the current line on */
 static void host_display_init(void) {
@@ -130,9 +147,12 @@ static void host_display_init(void) {
 
 /* the runtime's hooks: custom registers it does not model, every register write, the CIAs */
 int hw_read_hook(uint32_t off, uint32_t *v) {
-    double t = h_now(); long tt = (long)t; int vp = (int)(tt / HOST_HPOS), hp = (int)(tt % HOST_HPOS);
+    double t = h_now(); long tt = (long)t; int vp = (int)(tt / HOST_HPOS), hp = (int)(tt % HOST_HPOS), lof = H_LOF;
+    /* 1.0.40: the frame rolls at an instruction boundary; a read made past the frame's end inside the instruction is
+     * already in the next field - line 0 on, not a line 313 (whose low byte $39 a wait for line $39 took for its line) */
+    if (vp >= H_LINES) { vp -= H_LINES; if (ARD_R[0x100 >> 1] & 0x0004) lof ^= 1; else if (!H_LINES_FORCED) lof = 1; }
     switch (off) {
-    case 0x004: *v = (H_LOF << 15) | ((vp >> 8) & 1); return 1;                 /* VPOSR (OCS PAL Agnus id 0) */
+    case 0x004: *v = (lof << 15) | ((vp >> 8) & 1); return 1;                   /* VPOSR (OCS PAL Agnus id 0) */
     case 0x006: *v = ((vp & 0xff) << 8) | (hp & 0xff); return 1;                 /* VHPOSR */
     case 0x01e: *v = H_INTREQ; return 1;                                         /* INTREQR */
     case 0x00a: *v = H_JOY0; return 1;
@@ -165,9 +185,9 @@ uint8_t cia_read_hook(uint32_t a) {
     { uint8_t hv; if (HOST_CIA_READ(a, &hv)) return hv; }
 #endif
     int i, reg = h_cia_reg(a, &i);
-    if (reg >= 4 && reg <= 7) { h_cia_run(i, (reg - 4) >> 1); HCiaTimer *t = &H_CIA[i].t[(reg - 4) >> 1]; return (uint8_t)((reg & 1) ? t->cnt >> 8 : t->cnt); }
-    if (reg == 13) { h_cia_run(i, 0); h_cia_run(i, 1); uint8_t *icr = h_cia_icr(i), r = (uint8_t)(*icr | ((*icr & H_CIA[i].mask) ? 0x80 : 0)); *icr = 0; return r; }
-    if (reg == 14 || reg == 15) { int k = reg - 14; h_cia_run(i, k); return H_CIA[i].t[k].cr; }
+    if (reg >= 4 && reg <= 7) { h_cia_run(i, (reg - 4) >> 1); h_cia_due(); HCiaTimer *t = &H_CIA[i].t[(reg - 4) >> 1]; return (uint8_t)((reg & 1) ? t->cnt >> 8 : t->cnt); }
+    if (reg == 13) { h_cia_run(i, 0); h_cia_run(i, 1); h_cia_due(); uint8_t *icr = h_cia_icr(i), r = (uint8_t)(*icr | ((*icr & H_CIA[i].mask) ? 0x80 : 0)); *icr = 0; return r; }
+    if (reg == 14 || reg == 15) { int k = reg - 14; h_cia_run(i, k); h_cia_due(); return H_CIA[i].t[k].cr; }
     switch (a) {
     case 0xbfe001: return H_CIAA_PRA;
     case 0xbfec01: return H_CIAA_SDR;
@@ -190,6 +210,7 @@ void cia_write_hook(uint32_t a, uint8_t v) {
         if ((v & 1) && !(t->cr & 1)) t->e0 = h_eticks();
         t->cr = (uint8_t)(v & 0xef);
     }
+    if (reg >= 4 && reg <= 15) h_cia_due();           /* a latch, the mask or a control register changed what is due */
     if (a == 0xbfe201) H_CIAA_DDRA = v;
     if (a == 0xbfe001 && (H_CIAA_DDRA & 2)) { H_LED_OFF = (v >> 1) & 1; H_CIAA_PRA = (uint8_t)((H_CIAA_PRA & ~2) | (v & 2)); }
     if (a == 0xbfec01) H_CIAA_SDR = v;                 /* SDR is loaded by a write: the keyboard handshake writes $FF and reads it back (G53 - a held key repeated) */
@@ -229,6 +250,7 @@ static void host_events(void) {
         if (h_frame_cb) h_frame_cb();
     }
     if (H_VERTB_PEND && h_now() >= H_VBL_LAT) { H_INTREQ |= 0x0020; H_VERTB_PEND = 0; }
+    h_cia_poll();
     ArekBus *b = arek_glue_bus();
     if (!H_COP_DONE && b->cop_int >= 0 && h_now() >= b->cop_int) { H_INTREQ |= 0x0010; H_COP_DONE = 1; }
     while (H_COP_IDX < b->cop_irq_n && h_now() >= b->cop_irq[H_COP_IDX].t) { H_INTREQ |= b->cop_irq[H_COP_IDX].bits; H_COP_IDX++; }   /* 1.0.6: the Copper's other INTREQ bits (e.g. RBF: level 5) at their times*/

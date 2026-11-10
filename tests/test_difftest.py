@@ -90,3 +90,20 @@ def test_a_target_compared_on_32_bits_is_found(tmp_path, monkeypatch):
     groups = [[p for p in g if p['kind'] in ('jsr', 'jmp') and p['m']['dyn']] for g in difftest.load_corpus(CORPUS)]
     res = difftest._compare_groups([g for g in groups if g], None, None, str(tmp_path))
     assert any(m['fields'][0].startswith('unknown target') for m in res['mismatches'])
+
+
+def test_the_corpus_holds_the_directed_encodings():
+    """1.0.40: the random draw of extension words left whole classes untested (the audit of 2026-11-10: no movem with its
+    base register in the list, no address register as index, hardly a displacement with the sign bit)."""
+    import gzip
+    import os
+    from arek.m68k import difftest
+    path = os.path.join(os.path.dirname(__file__), 'data', 'moira68000_semantics.txt.gz')
+    codes = {line.split()[2] for line in gzip.open(path, 'rt') if line.startswith('P ')}
+    assert any(c.startswith('4cd8') and int(c[4:8], 16) & 0x0100 for c in codes)          # movem.l (a0)+ with a0 in the list
+    assert any(c.startswith('48e0') and int(c[4:8], 16) & 0x0080 for c in codes)          # movem.l list,-(a0) with a0
+    assert any(c[:3] == '303' and c[3] in '05' and int(c[4:8], 16) & 0x8800 == 0x8800 for c in codes)   # index = An.l
+    assert any(c.startswith('3028') and int(c[4:8], 16) & 0x8000 for c in codes)          # a negative d16
+    assert any(c.startswith('0800') and int(c[4:8], 16) >= 32 for c in codes)             # btst #n,d0 with n >= 32
+    want = {(c + difftest.be16(difftest.NOP)).hex() for c in difftest.directed_codes()}
+    assert len(want & codes) > 800                                                        # nearly all of them are recorded

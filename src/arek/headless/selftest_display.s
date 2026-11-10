@@ -42,6 +42,8 @@ coplist:
         .word   0x6407,0xfffe, 0x0096,0x0020            | sprite DMA off while sprite 0 (reloaded, v $60..$70) is on
         .word   0x6a07,0xfffe, 0x0096,0x8020            | and on again
         .word   0x6c07,0xfffe, 0x0104,0x0009
+        .word   0x7407,0xfffe, 0x0096,0x0100            | bitplane DMA off for six lines (sprite 4 goes on over the background)
+        .word   0x7a07,0xfffe, 0x0096,0x8100            | and on again: the planes go on where their pointers stopped
         .word   0x8c07,0xfffe, 0x0104,0x0052
         .word   0xa007,0xfffe, 0x0100,0x6200, 0x0102,0x0000, 0x0104,0x0012
         .word   0xb053,0xfffe, 0x0180,0x0abc            | 6 planes: a MOVE after a WAIT at $52 (the Copper's free slots)
@@ -69,8 +71,8 @@ spr3:   .word   0x50a0,0x6880                      | attached to sprite 2
         .word   0x0f0f,0xff00
         .endr
         .word   0,0
-spr4:   .word   0x70b8,0x9400                      | pair 2: behind PF1 where its pixel is set (v $70..$94)
-        .rept 36
+spr4:   .word   0x70b8,0x9200                      | pair 2: behind PF1 where its pixel is set (v $70..$92)
+        .rept 34
         .word   0xffff,0xffff
         .endr
 nul:    .word   0,0

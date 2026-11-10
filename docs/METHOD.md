@@ -79,15 +79,20 @@ really drive Agnus, Denise and Paula.
 
 `arek recomp` turns 68k routines into C that operates on a `MEM[]` array and
 a register struct, logging every write. The decoder raises on anything it
-does not model (`divs`, `chk`, …): the output never contains a silently
-wrong instruction. Jump tables and library calls become named stubs
+does not model (`chk`, `movep`, `tas`, …) instead of skipping it. What the translation does NOT notice
+by itself: a write over bytes that were translated (self-modifying code: name the place in the flow
+options), a word access at an odd address, and whatever `arek difftest` has not covered - every opcode
+is compared with Moira, since 1.0.40 also with directed encodings (movem with its base register in the
+list, every form of the index word, displacements with the sign bit, bit numbers past the operand). Jump tables and library calls become named stubs
 (`--stub a6:-198:OpenLibrary`) you implement.
 
 A `bsr`/`jsr` is a C call that pushes the return address; `rts` is a C return. The 68000's `rts` jumps to the
 long at (a7), so the translation checks the stack against the routine's entry (1.0.24): a routine that pushed a
 target (`pea X` / `move.l X,-(a7)`, then `rts`) or replaced its return address runs that target through
 `call_addr`, and the chain goes on until the routine's own return address is popped; a routine that popped more
-(`addq.l #4,a7; rts`, a return to the caller's caller) makes its caller return too. A call whose target is unknown and whose
+(`addq.l #4,a7; rts`, a return to the caller's caller) makes its caller return too. Since 1.0.40 the caller
+goes by the address the callee's `rts` popped: its own return address means "go on here" wherever the callee left
+the stack (a callee that removes its own arguments), any other address means the caller returns too. A call whose target is unknown and whose
 hook returns (`UNKNOWN_HOOK`, `OVERLAY_HOOK`) leaves no return address behind: the run goes on as if the target
 were an empty routine. The source of every two-operand
 instruction is read before the destination's `(An)+` / `-(An)` moves the register (1.0.23). A static target of such a

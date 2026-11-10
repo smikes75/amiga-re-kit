@@ -225,7 +225,14 @@ static uint16_t ard_pixel(int h, uint16_t words[6][64], int nw, const int base[2
 }
 static const int ARD_PLANE_AT[8] = { 99, 4, 6, 2, 99, 3, 5, 1 };
 static const int ARD_PLANE_AT_HR[4] = { 4, 2, 3, 1 };    /* hires: a block of 4 CCK */
-static int ard_sdma(void) { return ARD_DMACON ? (ARD_DMACON & 0x220) == 0x220 : 1; }   /* sprite DMA: SPREN and DMAEN (DMACON unknown = on) */
+/* DMACON 0 means "not known" to the offline renderer (a capture without the register): DMA counts as on. A host knows
+ * its DMACON (ARD_DMACON_KNOWN 1, set by arek_host.h): 0 is what move.w #$7fff,$dff096 leaves, and nothing is fetched. */
+#ifndef ARD_DMACON_KNOWN
+#define ARD_DMACON_KNOWN 0
+#endif
+static int ard_dma(uint16_t bits) { return (ARD_DMACON || ARD_DMACON_KNOWN) ? (ARD_DMACON & bits) == bits : 1; }
+static int ard_sdma(void) { return ard_dma(0x220); }   /* sprite DMA: SPREN and DMAEN */
+static int ard_bdma(void) { return ard_dma(0x300); }   /* 1.0.40: bitplane DMA: BPLEN and DMAEN - off: no fetch, the pointers stay, the line shows the background (measured: selftest display, lines $74-$79) */
 static inline uint16_t ard_sprite_word(ArdSprite *s) { uint16_t w = ard_rd(s->pt); s->pt = (s->pt + 2) & 0x1ffffe; return w; }
 /* Agnus sets the sprite's DMA state for line v before the line: line 25 forces VSTOP (with sprite DMA on), the last line
  * stops the DMA, otherwise VSTART starts it and VSTOP stops it */
@@ -278,7 +285,7 @@ static void ard_line(int v) {
             int diwstrt = ARD_R[0x08e >> 1] ? ARD_R[0x08e >> 1] : 0x2c81, diwstop = ARD_R[0x090 >> 1] ? ARD_R[0x090 >> 1] : 0x2cc1;
             int v0 = diwstrt >> 8, sv = diwstop >> 8, v1 = sv | ((sv & 0x80) ? 0 : 0x100);
             hr = !!(con0 & 0x8000);
-            if (n && v0 <= v && v < v1) {
+            if (n && v0 <= v && v < v1 && ard_bdma()) {
                 nw = (ddfstop - ddfstrt) / 8 + 1; if (hr) nw *= 2; if (nw > 64) nw = 64;
                 if (n > (hr ? 4 : 6)) n = hr ? 4 : 6;
                 for (int k = 0; k < n; k++) for (int i = 0; i < nw; i++) words[k][i] = ard_rd(ARD_BPL[k] + 2 * i);
@@ -303,7 +310,8 @@ static void ard_line(int v) {
                 uint16_t a = ard_pixel(h, words, nw, base, nplanes, sl, ns, 0, &ham, vwin), b = ard_pixel(h, words, nw, base, nplanes, sl, ns, 1, &ham, vwin);
                 ARD_PIXH[v][2 * h] = a; ARD_PIXH[v][2 * h + 1] = b; ARD_PIX[v][h] = ard_avg12(a, b);
             } else {
-                ARD_PIX[v][h] = ard_pixel(h, words, fetch == 1 ? nw : 0, base, nplanes, sl, ns, -1, &ham, vwin);
+                /* 1.0.40: sprites show from the line's first bitplane word on (BPL1DAT): none on a line without a fetch */
+                ARD_PIX[v][h] = ard_pixel(h, words, fetch == 1 ? nw : 0, base, nplanes, sl, fetch == 1 ? ns : 0, -1, &ham, vwin);
                 if (ARD_HR[v]) ARD_PIXH[v][2 * h] = ARD_PIXH[v][2 * h + 1] = ARD_PIX[v][h];
             }
         }

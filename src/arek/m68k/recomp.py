@@ -624,18 +624,30 @@ static int cond(M68 *m, int c) {
     default: return m->z || (m->n != m->v);
     }
 }
-static void push32(M68 *m, uint32_t v) { m->a[7] -= 4; wr32(m->a[7], v); }
+/* 1.0.40: where the last rts returned to (RET_PC, the long it popped) and where it left the stack (RET_SP). The C
+   caller compares them with its own return address in CALL_END; anything that is not a plain rts (a push, an unknown
+   target, an rts or rte that jumps) clears them, so a stale pair is never taken for this call's return. */
+#define NO_RET 0xffffffffu
+static uint32_t RET_PC = NO_RET, RET_SP = 0;
+static void push32(M68 *m, uint32_t v) { m->a[7] -= 4; wr32(m->a[7], v); RET_PC = NO_RET; }
 #ifdef UNKNOWN_HOOK
 void unknown_hook(uint32_t a);          /* the host's: a run-time target the translation does not know (no exit) */
-static void unknown_call(uint32_t a) { unknown_hook(a); }
+static void unknown_call(uint32_t a) { RET_PC = NO_RET; unknown_hook(a); }
 #else
 static void unknown_call(uint32_t a) { fprintf(stderr, "unknown routine %06x\n", a); exit(4); }
 #endif
 #define RD32_RAW(a) (((uint32_t)rd16_raw(a) << 16) | rd16_raw((a) + 2))
-/* 1.0.24: after a call - a callee that popped more returns this routine too (sp0 check); a callee that returned in C
-   without popping its return address (an unknown target whose hook returned) leaves no stack behind: it is popped
-   here, so the run goes on as if the target were an empty routine (and the caller's rts is not mistaken for a jump) */
-#define CALL_END(sp0, ret) do { if (m->a[7] > (sp0)) return; if (m->a[7] == (sp0) - 4 && RD32_RAW((sp0) - 4) == (ret)) m->a[7] = (sp0); } while (0)
+/* After a call. 1.0.40: the callee's rts says where the 68000 went - to this call's return address: go on here,
+   wherever the callee left the stack (a callee that removes its own arguments: movea.l (a7)+,a0; addq.l #2,a7;
+   move.l a0,-(a7); rts - before, a7 above sp0 was read as "returned to the caller's caller" and this routine ended);
+   to another address: this routine returns too and its caller compares in turn (addq.l #4,a7; rts).
+   Without an rts to go by (1.0.24): a callee that popped more returns this routine too (sp0 check); a callee that
+   returned in C without popping its return address (an external routine, an unknown target whose hook returned)
+   leaves no stack behind: it is popped here, so the run goes on as if the target were an empty routine (and the
+   caller's rts is not mistaken for a jump) */
+#define CALL_END(sp0, ret) do { \
+    if (RET_PC != NO_RET && RET_SP == m->a[7]) { if (RET_PC != (ret)) return; RET_PC = NO_RET; } \
+    else { RET_PC = NO_RET; if (m->a[7] > (sp0)) return; if (m->a[7] == (sp0) - 4 && RD32_RAW((sp0) - 4) == (ret)) m->a[7] = (sp0); } } while (0)
 void call_addr(M68 *m, uint32_t a);
 /* 1.0.24: an rts that does not return to the C caller - the routine pushed a target (pea X / move.l X,-(a7)) or
    replaced its return address, and the 68000 jumps to the long at (a7). The target runs through call_addr; when it
@@ -686,6 +698,7 @@ static void task_jump(M68 *m, uint32_t pc) {
 static void rts_jump(M68 *m, uint32_t e0) {
     uint32_t t = RD32_RAW(m->a[7]); m->a[7] += 4;
     (void)e0;
+    RET_PC = NO_RET;
     task_jump(m, t);
 }
 #else
@@ -695,6 +708,7 @@ static void rts_jump(M68 *m, uint32_t e0) {
 #define rte_jump(m, pc, e0) jump_chain((m), (pc), (e0))
 static void rts_jump(M68 *m, uint32_t e0) {
     uint32_t t = RD32_RAW(m->a[7]); m->a[7] += 4;
+    RET_PC = NO_RET;                    /* a jump, not a return: the target's own rts says where the run ends up */
     jump_chain(m, t, e0);
 }
 #endif
@@ -1040,6 +1054,7 @@ class Gen:
             # move.l X,-(a7); rts) or replaced its return address does not return to its C caller: rts_jump runs the
             # chain through call_addr. a7 above the entry's (addq.l #4,a7; rts) stays the caller's sp0 check.
             L.append('if (m->a[7] < e0 || (m->a[7] == e0 && RD32_RAW(e0) != r0)) { rts_jump(m, e0); return; }')
+            L.append('RET_PC = RD32_RAW(m->a[7]); RET_SP = m->a[7] + 4;')   # 1.0.40: where this rts goes, for the caller's CALL_END
             L.append('m->a[7] += 4;')          # navratova adresa ulozena pri bsr/jsr
             L.append('return;')
         elif k == 'nop':
@@ -1200,7 +1215,6 @@ class Gen:
                 names = [('a', r) for r in range(7, -1, -1)] + [('d', r) for r in range(7, -1, -1)]
             else:
                 names = [('d', r) for r in range(8)] + [('a', r) for r in range(8)]
-            in_list = any((i.mask >> b) & 1 and names[b] == ('a', i.reg) for b in range(16))
             if i.mode in (3, 4):     # (An)+ / -(An): vlastni ukazatel, ne pre z decode_ea
                 L.append('uint32_t ma%06x = m->a[%d];' % (i.addr, i.reg))
                 for bit, (kind, rg) in enumerate(names):
@@ -1217,8 +1231,9 @@ class Gen:
                         else:
                             L.append('%s = rd32(ma%06x);' % (tgt, i.addr))
                         L.append('ma%06x += %d;' % (i.addr, step))
-                if not in_list or i.mode == 4:      # kdyz je bazovy registr v seznamu, plati nactena hodnota; 1.0.26: not when writing
-                    L.append('m->a[%d] = ma%06x;' % (i.reg, i.addr))
+                # 1.0.40: the address register gets the final address also when (An)+ loaded it from memory - the loaded
+                # value is lost (Moira: writeA after the loop; found by the directed cases of arek difftest). 1.0.26: -(An).
+                L.append('m->a[%d] = ma%06x;' % (i.reg, i.addr))
             else:
                 pre(i.ea)
                 L.append('uint32_t ma%06x = %s;' % (i.addr, i.ea.addr))
@@ -1240,7 +1255,7 @@ class Gen:
             L.append('{ uint32_t sp = m->a[7]; uint32_t sr = rd16(sp); uint32_t pc_ = RD32_RAW(sp + 2);')
             L.append('  m->srhi = sr & 0xa700; m->x = (sr >> 4) & 1; m->n = (sr >> 3) & 1;')
             L.append('  m->z = (sr >> 2) & 1; m->v = (sr >> 1) & 1; m->c = sr & 1;')
-            L.append('  m->a[7] = sp + 6;')
+            L.append('  m->a[7] = sp + 6; RET_PC = NO_RET;')
             L.append('  if (!RTE_PLAIN(sp, e0, pc_, p0)) { rte_jump(m, pc_, e0); return; } }')
             L.append('return;')
         elif k == 'trap':

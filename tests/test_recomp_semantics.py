@@ -637,3 +637,36 @@ def test_a_target_with_a_flag_in_its_top_byte(tmp_path, how):
         flow = Flow(indirect={0x1006: [0x100c]}) if how == 'indirect' else Flow(dynamic=[0x1006])
     d, a, _, _ = run(tmp_path, code, {}, auto=(BASE, 0x100c), flow=flow)
     assert d[0] == 1 and a[7] == 0x80000 - 0x100 + 4
+
+
+# --- 1.0.40: the audit of 2026-11-10 -------------------------------------------------------------------------------
+def test_a_callee_that_removes_its_own_argument_returns_to_its_caller(tmp_path):
+    """main: move.w #5,-(a7); bsr f; move.l #1,$4000; rts   f: movea.l (a7)+,a0; addq.l #2,a7; move.l a0,-(a7); rts.
+    Before, a7 above the caller's sp0 after the call was read as "returned to the caller's caller": main ended at the
+    bsr and $4000 stayed 0, without a word."""
+    main = '3f3c0005' '6100000e' '23fc0000000100004000' '4e75'
+    f = '205f' '548f' '2f08'                                   # + the rts run() appends
+    d, a, _, ram = run(tmp_path, main + f, {'a7': 0x7ff00})
+    assert ram[0x4000:0x4004] == be32(1) and a[7] == 0x7ff04
+
+
+def test_a_callee_that_pops_a_long_argument_twice_in_a_row(tmp_path):
+    """main: move.l #7,-(a7); bsr f; move.l #9,-(a7); bsr f; move.l d0,$4000; rts
+    f: movea.l (a7)+,a0; move.l (a7)+,d1; add.l d1,d0; move.l a0,-(a7); rts - the same callee from two sites, the stack
+    after each call exactly at the caller's entry level."""
+    main = '2f3c00000007' '61000014' '2f3c00000009' '6100000a' '23c000004000' '4e75'
+    f = '205f' '221f' 'd081' '2f08'
+    d, a, _, ram = run(tmp_path, main + f, {'a7': 0x7ff00})
+    assert ram[0x4000:0x4004] == be32(16) and d[0] == 16 and a[7] == 0x7ff04
+
+
+def test_movem_postincrement_with_the_base_register_in_the_list(tmp_path):
+    """movem (An)+,list with An in the list: An ends as the address after the last word read, the value loaded for it
+    is lost (Moira: writeA after the loop). The translation kept the loaded value."""
+    ram = {0x4000: be32(0x11111111) + be32(0x22222222)}
+    d, a, _, _ = run(tmp_path, '4cd80101', {'a0': 0x4000}, ram_init=ram)            # movem.l (a0)+,d0/a0
+    assert d[0] == 0x11111111 and a[0] == 0x4008
+    d, a, _, _ = run(tmp_path, '4c980101', {'a0': 0x4000}, ram_init={0x4000: bytes.fromhex('8001 7fff'.replace(' ', ''))})   # movem.w
+    assert d[0] == 0xffff8001 and a[0] == 0x4004
+    d, a, _, _ = run(tmp_path, '4cd80201', {'a0': 0x4000}, ram_init=ram)            # movem.l (a0)+,d0/a1: the base not in the list
+    assert d[0] == 0x11111111 and a[1] == 0x22222222 and a[0] == 0x4008

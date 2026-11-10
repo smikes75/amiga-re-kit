@@ -124,6 +124,78 @@ def opcode_programs(rng, op, tries):
     return out
 
 
+def directed_codes():
+    """Encodings the random draw of extension words almost never makes (1.0.40; the audit of 2026-11-10: of the recorded
+    corpus 809 of 907 first extension words were below $100, no movem had its base register in the list, no index was an
+    address register). movem with the base register in and out of the list, every form of the index word, displacements
+    with the sign bit, bit numbers past the operand's size."""
+    out = []
+
+    def W(*words):
+        out.append(b''.join(be16(w & 0xffff) for w in words))
+    for reg in (0, 1, 6):
+        for op in (0x4c98, 0x4cd8):                          # movem.w / .l (An)+,list: bit n = Dn, 8 + n = An
+            for mask in (0x0001 | 0x0100 << reg, 0x0100 << reg, 0xffff, 0x8001, 0x00ff, 0x7f00 & ~(0x0100 << reg) | 0x0003):
+                W(op | reg, mask)
+        for op in (0x48a0, 0x48e0):                          # movem.w / .l list,-(An): the mask is mirrored (bit 15 = D0, 7 - n = An)
+            for mask in (0x8000 | 0x0080 >> reg, 0x0080 >> reg, 0xffff, 0x8001, 0xff00, 0x00ff & ~(0x0080 >> reg) | 0xc000):
+                W(op | reg, mask)
+        for op in (0x4890, 0x48d0, 0x4c90, 0x4cd0):          # list,(An) and (An),list
+            for mask in (0x0101 << reg, 0xffff, 0x8001):
+                W(op | reg, mask)
+        for op in (0x48a8, 0x48e8, 0x4ca8, 0x4ce8):          # (d16,An)
+            for d16 in (0x0010, 0xfff0, 0x7ffe, 0x8000):
+                W(op | reg, 0x0303, d16)
+        for op in (0x48b0, 0x48f0, 0x4cb0, 0x4cf0):          # (d8,An,Xn)
+            for ext in (0x0004, 0x0804, 0x90fc, 0x98fc, 0x1080):
+                W(op | reg, 0x0303, ext)
+    for mask in (0x0303, 0xffff, 0x8001):
+        W(0x4cba, mask, 0x0010)                              # movem.w (d16,pc),list
+        W(0x4cfb, mask, 0x0810)                              # movem.l (d8,pc,Xn),list
+    index = [(a << 15) | (xr << 12) | (lng << 11) | d8 for a in (0, 1) for xr in (0, 7) for lng in (0, 1) for d8 in (0x02, 0x7e, 0x80, 0xfe)]
+    for reg in (0, 5):
+        for ext in index:
+            W(0x3030 | reg, ext)                             # move.w (d8,An,Xn),d0
+            W(0x2030 | reg, ext)                             # move.l
+            W(0x1030 | reg, ext)                             # move.b
+            W(0x3180 | reg << 9, ext)                        # move.w d0,(d8,An,Xn)
+            W(0x43f0 | reg, ext)                             # lea (d8,An,Xn),a1
+            W(0x5270 | reg, ext)                             # addq.w #1,(d8,An,Xn)
+        for d16 in (0x0002, 0x7ffe, 0x8000, 0xfffe, 0xff00):
+            W(0x3028 | reg, d16)                             # move.w (d16,An),d0
+            W(0x2140 | reg << 9, d16)                        # move.l d0,(d16,An)
+            W(0x41e8 | reg, d16)                             # lea (d16,An),a0
+            W(0x4a68 | reg, d16)                             # tst.w (d16,An)
+    for ext in index:
+        W(0x303b, ext)                                       # move.w (d8,pc,Xn),d0
+        W(0x41fb, ext)                                       # lea (d8,pc,Xn),a0
+    for d16 in (0x0002, 0x7ffe, 0x8000, 0xfffe):
+        W(0x303a, d16)                                       # move.w (d16,pc),d0
+    for op in (0x0800, 0x0840, 0x0880, 0x08c0):              # btst / bchg / bclr / bset #n
+        for n in (0, 7, 8, 15, 16, 31, 32, 33, 63, 255):
+            W(op, n)                                         # ,d0: the number modulo 32
+            W(op | 0x10, n)                                  # ,(a0): modulo 8
+            W(op | 0x28 | 1, n, 0xfffe)                      # ,(d16,a1)
+    for op in (0x0100, 0x0140, 0x0180, 0x01c0):              # the same with the number in d1
+        W(op | 1 << 9)
+        W(op | 1 << 9 | 0x10)
+    return out
+
+
+def directed_programs(rng, nstates=12):
+    """``directed_codes`` as programs; the encodings the decoder refuses are left out."""
+    out = []
+    for code in directed_codes():
+        try:
+            ins = decode(code + bytes(16), 0x8000, 0x8000)
+        except (Unsupported, IndexError, ValueError):
+            continue
+        if ins.kind in CONTROL or ins.end - ins.addr != len(code):
+            continue
+        out.append(plain_program(code, rng, nstates))
+    return out
+
+
 def control_programs(rng):
     """The instructions that leave the straight line, each with a place to go: a stop of its own for both ways."""
     out = []
@@ -456,6 +528,12 @@ def sweep(moira, build_dir, seed=1, per_opcode=3, kinds=None, jobs=None, progres
     for op in {c[0] for c in chosen}:
         no_state.pop(op, None)
     plain = [c[1] for c in chosen]
+    directed = []                                            # 1.0.40: the encodings the draw above does not reach
+    for _, ok, why in _validate(exe, [(('directed', k), p) for k, p in enumerate(directed_programs(rng))], per_opcode + 2, work):
+        if ok:
+            ok[1]['directed'] = True
+            directed.append(ok[1])
+    plain += directed
     ctl = [(None, p) for p in programs]
     control_rows = []
     for _, ok, why in _validate(exe, ctl, 99, work):
@@ -469,6 +547,7 @@ def sweep(moira, build_dir, seed=1, per_opcode=3, kinds=None, jobs=None, progres
         _reference(exe, g, work)
     res = _compare_groups(groups, jobs, progress, work)
     res.update(programs=len(selected), opcodes=len(candidates), no_valid_state=len(no_state), selected=selected, exe=str(exe),
+               directed=len(directed),
                refused=refused_opcodes(exe))
     return res
 
@@ -643,7 +722,7 @@ def record(res, path, limit=4000, seed=7, work=None):
     rest = list(res['selected'])
     rng.shuffle(rest)
     chosen, out = set(), []
-    for s in sample + forms + rest:
+    for s in [x for x in res['selected'] if x.get('directed')] + sample + forms + rest:      # 1.0.40: the directed ones always
         if id(s) not in chosen:
             chosen.add(id(s))
             out.append(s)

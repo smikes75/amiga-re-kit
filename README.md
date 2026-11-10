@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.39 on PyPI, 2661 tests. Extracted from five game
+- **The kit:** version 1.0.40 on PyPI, 2670 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -47,7 +47,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2661 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2670 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -126,6 +126,9 @@ arek web seal build/present/engine.wasm --set disk1.adf --label "disk 1, retail"
 arek web seal build/present/engine.wasm --payload build/payload.bin --payload-label "the game files" --out build/present/sealed  # any disk version with the same game data opens it
 arek web check build/present                           # a bundle: no game data, derived files sealed, manifest right
 arek parity  suite.json                                # scenarios against the original: state, picture, sound per tick
+#    1.0.40: found by the same audit - a callee that removes its own arguments no longer ends its caller (CALL_END goes by
+#    the address the rts popped), movem (An)+ with An in the list, CIA timer interrupts when the timer runs out, no bitplane
+#    DMA = no fetch and no sprites (selftest display), VHPOSR past the frame end; difftest with directed encodings
 #    1.0.39: equal means covered - a rebuild that ends early, a side that is missing, bytes it did not capture or frames
 #    without a picture are differences (PROBLEM lines, exit 1; --fail: any difference is exit 1); docs/HEADLESS.md
 arek web copy web/                                     # also wb-nastaveni.js (the shared Display / Sound menu; never overwrites a file that is not from the kit), wb-zvuk.js (sound contract 1.1), wb-atn.js + wb-content.js (the game's files from the visitor's disks)

@@ -68,6 +68,11 @@ CASES = {
     # sprite DMA off between lines $48 and $50 (the Copper clears and sets DMACON SPREN): sprite 0's VSTOP $4c passes
     # without its slots, so it keeps its last data to the end of the vertical window ($12c); sprite 1 resumes after the
     # band, and its control words at VSTOP $58 come from the lagging data; sprite 2 reaches below the window
+    # 1.0.40: bitplane DMA off between lines $48 and $50 (the Copper clears and sets DMACON BPLEN): no fetch, the pointers
+    # stay, the band shows the background without the sprite (measured on the emulator: selftest display, lines $74-$79)
+    'bitplane dma off band': ram_with(with_colours(setup(2, con2=0x02, ptrs=[p for p, _ in PLANES[:2]])) + sprite_copper([0x20000])
+                                      + [0x4807, 0xfffe, 0x096, 0x0100, 0x5007, 0xfffe, 0x096, 0x8100] + END,
+                                      PLANES[:2] + [sprite(0x20000, 0x40, 0x60, 0x120, [(0xffff, 0)] * 32)]),
     'sprite dma off band': ram_with(with_colours(setup(2, con2=0x02, ptrs=[p for p, _ in PLANES[:2]])) + sprite_copper([0x20000, 0x20100, 0x20200])
                                     + [0x4807, 0xfffe, 0x096, 0x0020, 0x5007, 0xfffe, 0x096, 0x8020] + END,
                                     PLANES[:2] + [sprite(0x20000, 0x40, 0x4c, 0x120, [(0xffff, 0)] * 12),
@@ -94,7 +99,7 @@ def exe(tmp_path_factory):
 @pytest.mark.parametrize('name', sorted(CASES))
 def test_c_renderer_equals_python(exe, name):
     ram = CASES[name]
-    regs = {0x096: 0x8200 if name == 'sprite dma off' else 0x83e0}                # DMAEN (BPLEN COPEN BLTEN SPREN)
+    regs = {0x096: 0x8300 if name == 'sprite dma off' else 0x83e0}                # DMAEN BPLEN (COPEN BLTEN SPREN)
     frame = display.render(ram, COP, regs=regs)
     py = frame.pixels
     c, rgb = host.render(ram, COP, regs=regs, exe=exe)
@@ -152,8 +157,10 @@ def test_ham6_hires_sprite_dma_and_six_planes_in_python():
     hl, ll = hr.hires[0x2c], hr.pixels[0x2c]
     assert all(ll[h] == display._avg12(hl[2 * h], hl[2 * h + 1]) for h in range(129, 400))
     assert any(hl[2 * h] != hl[2 * h + 1] for h in range(129, 400))              # real hires detail, not pairs
-    off = display.render(CASES['sprite dma off'], COP, regs={0x096: 0x8200}).pixels[0x40]
-    on = display.render(CASES['sprite dma off'], COP, regs={0x096: 0x8220}).pixels[0x40]
+    off = display.render(CASES['sprite dma off'], COP, regs={0x096: 0x8300}).pixels[0x40]
+    on = display.render(CASES['sprite dma off'], COP, regs={0x096: 0x8320}).pixels[0x40]
+    nobpl = display.render(CASES['sprite dma off'], COP, regs={0x096: 0x8220}).pixels[0x40]      # 1.0.40: no bitplane DMA - no fetch, and no sprite without one
+    assert not any(nobpl)
     assert not any(off[h] for h in range(0x121, 0x131)) and any(on[h] for h in range(0x121, 0x131))
     six = display.render(CASES['six planes copper mid line'], COP, regs={0x096: 0x83e0}).writes
     five = display.render(ram_with(with_colours(setup(5, ptrs=[p for p, _ in PLANES[:5]])) + [0x4007, 0xfffe, 0x180, 0x0f0, 0x4055, 0xfffe, 0x180, 0x00f] + END, PLANES[:5]), COP, regs={0x096: 0x83e0}).writes
@@ -185,3 +192,16 @@ def test_copper_wait_past_the_line_end_in_python():
     w = [x for x in f.writes if x[2] == 0x180 and x[3] == 0x0f0]
     assert w and w[0][0] == 0x121 and w[0][1] <= 4                                  # the MOVE lands at the start of line 289
     assert f.pixels[0x120][100] == 0 and f.pixels[0x121][100] == 0x0f0 and f.pixels[0xff][100] == 0
+
+
+def test_bitplane_dma_off_band_keeps_the_pointers_and_hides_the_sprite():
+    """1.0.40: the lines without bitplane DMA show COLOR00 only, and the line after the band goes on with the row of
+    plane data the line before it would have been followed by."""
+    regs = {0x096: 0x83e0}
+    band = display.render(CASES['bitplane dma off band'], COP, regs=regs).pixels
+    plain = display.render(CASES['sprite dma off'], COP, regs=regs).pixels          # the same planes without the band
+    bg = band[0x48][0x40]
+    assert all(px == bg for px in band[0x4a]) and band[0x47] != band[0x4a]         # background only: no planes, no sprite
+    assert any(band[0x47][h] != bg for h in range(0x121, 0x131))                    # the sprite is there outside the band
+    strip = lambda row: row[0x81:0x11f]                                             # the playfield left of the sprite
+    assert strip(band[0x50]) == strip(plain[0x48])                                  # 8 lines without a fetch: the data is 8 rows behind

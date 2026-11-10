@@ -60,7 +60,11 @@ model raises); without it the request would be taken again and again.
 
 The CIAs: CIA-A PRA / DDRA / SDR / ICR as before, and both CIAs' timers A and B (the latch, one-shot
 or continuous, START, FORCE LOAD, the ICR status and mask; an E tick = 5 CCK; CIA-A raises PORTS,
-CIA-B EXTER), which a loader waiting on CIA-B timer A needs (G38). Other CIA registers answer $FF
+CIA-B EXTER), which a loader waiting on CIA-B timer A needs (G38). 1.0.40: a running timer whose ICR mask bit
+is set raises its interrupt when it runs out (`H_CIA_DUE`, checked with the other events at every
+instruction) - before, the timers were only counted when the game touched a CIA register, so a timer waited
+for by its interrupt alone (a music routine on CIA-B) never fired; a timer the game polls is still counted
+lazily. The delay between the underflow and the interrupt is not measured against the emulator. Other CIA registers answer $FF
 and count in `H_IO_UNKNOWN` unless the host defines `HOST_CIA_READ(a, &v)` / `HOST_CIA_WRITE(a, v)`
 (return 1 when handled). POTGO's output bits read back in POTGOR (G40), and LACE is taken from the
 renderer's registers, so the Copper's BPLCON0 alternates the fields too (G39). `TICK_PC` is the pc of the game's tick (the main loop's
@@ -245,6 +249,13 @@ test builds both (`tests/test_host_engine.py`, emcc and node when installed).
   sprite the rule explains.
 - Kit self-tests on this host's models: `arek selftest bus` 0 disagreements, `arek selftest audio`
   0 disagreements and every sample exact, `arek selftest display --c` 0 pixels.
+- 1.0.40, measured with `arek selftest display` (lines $74-$79 of its disk): without bitplane DMA (DMACON BPLEN
+  or DMAEN off) a line fetches nothing, the bitplane pointers stay where they are and the line shows the
+  background; sprites show from the line's first bitplane word on, so a line without a fetch (also one with no
+  planes) shows none. In a host DMACON = 0 is the machine's state (`ARD_DMACON_KNOWN`), not "unknown": nothing
+  is fetched, sprites included. The Copper still runs with COPEN off (not measured yet).
+- 1.0.40: VPOSR / VHPOSR read past the frame's end inside an instruction (the frame rolls at the instruction's
+  boundary) give line 0 on of the next field, not line 313.
 - Not modelled: NTSC, the blitter's line mode on the bus, the CIA TOD counters (a game that seeds its
   random numbers from CIA-B TOD gets the value from the capture: `docs/METHOD.md` §5; a build
   from the disks answers it through `HOST_CIA_READ`), disk DMA. Paula's audio interrupts (kit 0.7.1) and
