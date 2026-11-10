@@ -843,6 +843,13 @@ def cmd_trace(a):
             print('frame %d: %d lines; %s; CPU waited %d times, %d slots; %d blits'
                   % (frame, row['lines'], slots, row['cpu_waits'], row['cpu_wait_slots'], row['blits']))
         return
+    if a.what == 'inputs-frame':                  # 1.0.46: where the original took line 0 of --inputs (for host_trace --inputs-first)
+        f = trace.inputs_first_frame(a.file, [int(x) for x in a.inputs_v.split(':')] if a.inputs_v else (0, 99))
+        if f is None:
+            print('no breakpoint hit inside the input window: the original applied no input line', file=sys.stderr)
+            return 1
+        print(f)
+        return
     if a.what == 'pack':
         if not a.other:
             raise ValueError('trace pack IN OUT')
@@ -1161,7 +1168,7 @@ def build_parser():
     s.set_defaults(fn=cmd_diff)
 
     s = sp.add_parser('trace', help='continuous trace of the original (patched VAHeadless)')
-    s.add_argument('what', choices=['run', 'show', 'regs', 'audio', 'compare', 'pack', 'bus', 'targets', 'pcs', 'filter', 'pairdiff'])
+    s.add_argument('what', choices=['run', 'show', 'regs', 'audio', 'compare', 'pack', 'bus', 'targets', 'pcs', 'filter', 'pairdiff', 'inputs-frame'])
     s.add_argument('file', help='trace file (written by run, read by show); regs: a reglog, audio: an audlog')
     s.add_argument('other', nargs='?', help='compare/pairdiff: the rebuild trace; pack/filter: the output file; targets: the code image; pcs: the host\'s --pclog file')
     s.add_argument('--base', type=A, default=0, help='targets/pcs: address of the image')

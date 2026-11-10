@@ -351,6 +351,13 @@ arek trace audio build/l1_audio.bin
 - `--skip N`, `--from-frame F`: no records for the first N hits / before frame F.
 - Line k applies in frame OFF + k, OFF = the frame of the first breakpoint hit (measured in the
   Superfrog Sonnet project); the breakpoint must be hit first in each frame.
+- **The rebuild must take the lines in the same frames** (1.0.46, measured in Turrican II): `host_trace` applies
+  line 0 at once, in the frame of its state. A state captured lower in a frame than the input window (the game's
+  tick on line 236, say) starts one frame before OFF, so every line ran a frame early - state still matched for a
+  while, the picture with inputs was 53/122 and became 83/85 once the lines were moved. `arek trace inputs-frame
+  ORIG.vtr [--inputs-v LO:HI]` prints OFF, `host_trace ... INPUTS.txt --inputs-first OFF` applies line 0 there
+  (the state's own inputs hold before it); `host_trace` prints a note when its state starts below line 99 and
+  `--inputs-first` is missing.
 - `arek trace compare` on game state: counters the VBL handler bumps every frame differ even when
   the game matches - leave them out with `--ignore START:LEN` (hex), e.g. `--ignore c01978:4`.
 - `wait N frames` after `debugger` / `break at` / `commander` prints `std::exception` in

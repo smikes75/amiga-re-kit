@@ -7,7 +7,10 @@
  *              [--reglog FILE] [--reglog-regs SPEC] [--audlog FILE] [--shots PREFIX FIRST:LAST]
  * A record at every pass of TICK_PC outside an interrupt (the game's tick) and, with HOST_L3_PC, at every entry of the
  * level-3 handler; ranges 0:MEMSZ and SLOWBASE:SLOWSZ as FNV-1a 64 hashes (like --range ...h), with --full the bytes.
- * INPUTS: line k = the keys of frame k (R L U D F S, as arek fuzz writes them); line 0 applies from the start.
+ * INPUTS: line k = the keys of frame k (R L U D F S, as arek fuzz writes them); line 0 applies from the start, or with
+ * --inputs-first F in the frame numbered F (1.0.46, Turrican II: the original takes line 0 at its first breakpoint hit in the
+ * input window after the trace is armed - `arek trace inputs-frame ORIG.vtr` prints that frame; a state taken lower in a
+ * frame starts one frame before it, and the lines ran a frame early). Before F the state's own inputs hold.
  * --skip-stack N: the slow RAM hash starts N bytes in (the stack below is not compared). --own: the slot map of every
  * frame (bus_compare). --pclog: the time of every pass of the listed pcs (per-instruction timing against the original's
  * breakpoints). --reglog / --audlog: the host's register writes and samples in the VAHL_REGLOG / VAHL_AUDLOG layouts
@@ -40,7 +43,7 @@ static FILE *OUTF;
 static long MAXFRAMES, HITS = 0;
 static int FULL = 0;
 static uint32_t H_SLOW_SKIP = 0;
-static char **INP = 0; static long NINP = 0;
+static char **INP = 0; static long NINP = 0, INP_FIRST = -1;
 
 static uint64_t fnv(const uint8_t *p, size_t n) {
     uint64_t h = 0xcbf29ce484222325ull;
@@ -114,6 +117,7 @@ static void r_reg(uint32_t off, uint32_t v) {
     fwrite(rec, 4, 4, R_REG);
 }
 static void apply_input(long k) {
+    if (INP_FIRST >= 0) { k = H_FRAME0 + k - INP_FIRST; if (k < 0) return; }      /* the state's own inputs hold until line 0's frame */
     const char *s = (k < NINP) ? INP[k] : "";
     int r = !!strchr(s, 'R'), l = !!strchr(s, 'L'), u = !!strchr(s, 'U'), d = !!strchr(s, 'D'), f = !!strchr(s, 'F');
     H_JOY1 = (uint16_t)((r << 1) | (r ^ d) | (l << 9) | ((l ^ u) << 8));
@@ -128,10 +132,11 @@ static void rdfile(const char *dir, const char *n, void *buf, size_t len) {
     FILE *f = fopen(p, "rb"); if (!f || fread(buf, 1, len, f) != len) { fprintf(stderr, "read %s\n", p); exit(1); } fclose(f);
 }
 int main(int argc, char **argv) {
-    if (argc < 4) { fprintf(stderr, "host_trace STATE_DIR OUT.vtr FRAMES [INPUTS.txt] [--full] [--skip-stack N] [--own F] [--pclog F PCS] [--reglog F] [--reglog-regs SPEC] [--audlog F] [--shots P A:B]\n"); return 1; }
+    if (argc < 4) { fprintf(stderr, "host_trace STATE_DIR OUT.vtr FRAMES [INPUTS.txt] [--inputs-first FRAME] [--full] [--skip-stack N] [--own F] [--pclog F PCS] [--reglog F] [--reglog-regs SPEC] [--audlog F] [--shots P A:B]\n"); return 1; }
     MAXFRAMES = atol(argv[3]);
     for (int i = 4; i < argc; i++) {
         if (!strcmp(argv[i], "--full")) { FULL = 1; continue; }
+        if (!strcmp(argv[i], "--inputs-first") && i + 1 < argc) { INP_FIRST = atol(argv[++i]); continue; }
         if (!strcmp(argv[i], "--skip-stack") && i + 1 < argc) { H_SLOW_SKIP = (uint32_t)strtoul(argv[++i], 0, 0); continue; }
         if (!strcmp(argv[i], "--own") && i + 1 < argc) { H_OWN_DUMP = fopen(argv[++i], "wb"); continue; }
         if (!strcmp(argv[i], "--pclog") && i + 2 < argc) {
@@ -179,6 +184,10 @@ int main(int argc, char **argv) {
     host_init(t0);
     host_display_init();
     h_pc_cb = on_pc; h_frame_cb = on_frame;
+    if (NINP && INP_FIRST < 0 && (long)(t0 / HOST_HPOS) >= 100)
+        fprintf(stderr, "note: the state starts on line %ld of frame %ld and input line 0 applies at once; the original takes line 0 at its "
+                        "first breakpoint hit on lines 0-99 (VAHL_INPUTS_V) - if that is the next frame, pass --inputs-first %ld "
+                        "(arek trace inputs-frame ORIG.vtr prints it)\n", (long)(t0 / HOST_HPOS), (long)H_FRAME0, (long)H_FRAME0 + 1);
     if (NINP) apply_input(0);
     if (!setjmp(DONE)) {
         if (entry != TICK_PC) fprintf(stderr, "note: the state's pc %x is not TICK_PC %x; the run starts in HOST_ENTRY\n", entry, (unsigned)TICK_PC);

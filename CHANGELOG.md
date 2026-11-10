@@ -3,6 +3,12 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.46 (2026-11-11)
+
+- inputs per frame on both sides in the same frames (Turrican II): `host_trace --inputs-first FRAME`, `arek trace
+  inputs-frame ORIG.vtr` (`trace.inputs_first_frame`) - a state captured below the input window ran every line a
+  frame early; host_trace says so when it sees that case
+
 ## 1.0.45 (2026-11-10)
 
 - web: `wb-bytekiller.js` - the Bytekiller TAIL decruncher for a page (both code tables, a port of `unpack_tail` /

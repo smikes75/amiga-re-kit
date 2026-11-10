@@ -70,6 +70,19 @@ class TraceError(ValueError):
     pass
 
 
+def inputs_first_frame(src, window=(0, 99)):
+    """The frame in which the original took line 0 of ``--inputs``: its first record with the beam line inside the input
+    window (``VAHL_INPUTS_V``, default 0:99) - line k then applies in that frame + k. For ``host_trace --inputs-first``
+    (1.0.46): a state captured lower in a frame starts one frame earlier and ran every line a frame early. None when the
+    trace has no such record (then the original applied no line at all). The trace must hold the hits from the arming
+    on (no ``--skip`` / ``--from-frame``)."""
+    lo, hi = window
+    for r in (records(src) if isinstance(src, (str, bytes, bytearray, memoryview)) else src):
+        if r['kind'] != 'VTW2' and lo <= r['v'] <= hi:
+            return r['frame']
+    return None
+
+
 def records(src):
     """Yield one dict per record from a trace file path or bytes:
     ``kind, addr, hit, frame, v, h, sr, d[8], a[8], pc, ranges{start: bytes}``,

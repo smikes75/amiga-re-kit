@@ -666,3 +666,63 @@ def test_host_with_preemptive_tasks(tmp_path):
     assert len(frames) >= 3 and frames[-1] - frames[0] >= 4          # every second frame is this task's
     assert recs[-1]['d'][0] > recs[10]['d'][0] > 0         # its counter goes on
     assert recs[-1]['d'][1] > recs[10]['d'][1]             # and the other task's, on the other frames
+
+
+def test_inputs_first_frame_of_the_original(tmp_path):
+    """1.0.46 (Turrican II, kit step 0): the original takes line 0 of --inputs at its first breakpoint hit on lines 0-99
+    after the arming; a state captured lower in a frame starts a frame before that, and host_trace ran every line a frame
+    early (picture with inputs 53/122 until the lines were moved by hand). `--inputs-first F` puts line 0 into frame F,
+    `trace.inputs_first_frame` reads F from the original's trace."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    prog = {MAIN: PROG[MAIN], COPLIST: PROG[COPLIST],
+            L3: '52784002'                  # addq.w #1,$4002
+                '33f900dff00c00004006'      # move.w $dff00c,$4006      JOY1DAT as this frame's handler sees it
+                '33fc002000dff09c'          # move.w #$20,$dff09c
+                '4e73'}                     # rte
+    img = bytearray(0x2000)
+    for at, hx in prog.items():
+        img[at:at + len(hx) // 2] = bytes.fromhex(hx)
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN, L3], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x100cu',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', '-DHOST_L3_PC=0x1100u',
+                    os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'),
+                    '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', 0x0200)
+    creg[0x82:0x84] = struct.pack('>H', COPLIST)
+    (st / 'creg.bin').write_bytes(creg)
+    t0 = 150 * 227                                                   # the state: line 150 of frame 100, below the input window
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 %d 0 1000\nfe 0 0 0 0 5500\n100\n' % t0)
+    inp = tmp_path / 'in.txt'
+    inp.write_text('R\nL\n\nR\nL\n\n\n\n')
+    out = tmp_path / 'run.vtr'
+
+    def seen(*extra):
+        r = subprocess.run([str(exe), str(st), str(out), '7', str(inp), '--full', *extra], capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        irqs = [x for x in trace.records(str(out)) if x['pc'] == L3]
+        # a record at the handler's entry holds what the PREVIOUS handler stored: record k + 1 shows frame 101 + k
+        return [struct.unpack('>H', x['ranges'][0][0x4006:0x4008])[0] for x in irqs][1:5], [x['frame'] for x in irqs][:2], r.stderr
+
+    RIGHT, LEFT = 3, 0x300
+    vals, frames, err = seen()
+    assert frames == [101, 102] and vals == [LEFT, 0, RIGHT, LEFT]                      # as before: frame 101 already has line 1
+    assert '--inputs-first 101' in err                                                   # and the run says so
+    vals, _, err = seen('--inputs-first', '101')
+    assert vals == [RIGHT, LEFT, 0, RIGHT] and 'inputs-first 101 (' not in err          # line 0 in frame 101, as the original
+    # the original's trace: a hit low in frame 100 (the tick, line 150), then its VBL hits from frame 101 on
+    recs = [{'kind': 'VTR2', 'frame': 100, 'v': 150}, {'kind': 'VTR2', 'frame': 101, 'v': 3}, {'kind': 'VTR2', 'frame': 102, 'v': 3}]
+    assert trace.inputs_first_frame(recs) == 101 and trace.inputs_first_frame(recs, (100, 200)) == 100
+    assert trace.inputs_first_frame(recs[:1]) is None
+    from arek import cli
+    assert cli.main(['trace', 'inputs-frame', str(out)]) == 0                           # the host's own trace: its handler records are on line 0
