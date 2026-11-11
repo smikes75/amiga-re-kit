@@ -155,6 +155,36 @@ def test_writes_only_the_rebuild_makes_cannot_be_shifted_away(tmp_path):
     assert (res['shift'], res['frames'], res['equal']) == (5, 10, 10)
 
 
+def test_the_edges_of_two_logs_are_compared_over_what_both_hold(tmp_path):
+    """1.0.57 (SWIV): a rebuild started from a state in the middle of frame 790 has no writes before that point, and
+    the original's log ends in the middle of its last frame. With beam positions in the logs the other side's writes
+    before a log's first record (in that frame) and after its last record (in that frame) are left out and counted in
+    ``edge``; a whole frame only one side has stays unequal, and logs without positions are compared as before."""
+    o, r = str(tmp_path / 'o.reg'), str(tmp_path / 'r.reg')
+    with open(o, 'wb') as f:                          # frame, v, h, reg, value
+        f.write(trace.encode_reglog([(790, 10, 5, 0x096, 0x7fff), (790, 138, 207, 0x096, 0x8200), (791, 5, 5, 0x0a6, 1),
+                                     (792, 0, 9, 0x09c, 0x10, 0, True)]))      # the last record: the Copper's, at the frame's start
+    with open(r, 'wb') as f:
+        f.write(trace.encode_reglog([(790, 138, 208, 0x096, 0x8200), (791, 5, 6, 0x0a6, 1), (792, 0, 4, 0x0a6, 3), (792, 9, 9, 0x0a6, 2)]))
+    res = parity.compare_audio(o, r)
+    assert (res['frames'], res['equal'], res['edge']) == (3, 2, 2), res      # 790 and 791 equal; 792: the write before the original's end stays, unequal
+    with open(o, 'wb') as f:
+        f.write(trace.encode_reglog([(16, 3, 3, 0x096, 0x7fff), (790, 138, 207, 0x096, 0x8200), (791, 5, 5, 0x0a6, 1)]))
+    res = parity.compare_audio(o, r)
+    assert (res['frames'], res['equal']) == (4, 2), res                       # frame 16 only the original has: unequal
+    reglog(o, [(790, 0x096, 0x7fff), (790, 0x096, 0x8200)])                   # no positions: nothing is left out
+    reglog(r, [(790, 0x096, 0x8200)])
+    res = parity.compare_audio(o, r)
+    assert (res['frames'], res['equal'], res['edge']) == (1, 0, 0), res
+
+
+def test_from_frame_holds_for_the_register_log(tmp_path):
+    """1.0.57: ``arek trace run --from-frame F`` drops the log's records before F (the build logs from power-on)."""
+    p = str(tmp_path / 'o.reg')
+    reglog(p, [(16, 0x096, 0x7fff), (789, 0x0a6, 1), (790, 0x0a6, 2), (2000, 0x0a6, 3)])
+    assert trace.reglog_from(p, 790) == 2 and [r['frame'] for r in trace.read_reglog(p)] == [790, 2000]
+
+
 # ------------------------------------------------------------------ suite
 def test_the_suite_names_what_it_could_not_compare(tmp_path, capsys):
     write_trace(tmp_path / 'o.vtr', same(20))

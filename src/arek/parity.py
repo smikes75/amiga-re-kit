@@ -209,11 +209,25 @@ AUDIO_REGS = {0x096} | {0x0a0 + 16 * c + o for c in range(4) for o in (0, 2, 4, 
 
 def _audio_frames(path, regs=AUDIO_REGS):
     """Per frame the writes to the audio registers (and DMACON) as a tuple of (reg, value)."""
-    out = {}
+    return {f: tuple((reg, value) for _, reg, value in v) for f, v in _audio_rows(path, regs)[0].items()}
+
+
+def _audio_rows(path, regs=AUDIO_REGS):
+    """({frame: [(t, reg, value)]} of the CPU's writes to ``regs``, the log's first and last record as (frame, t) or
+    None, whether the log has beam positions). t = line x 227 + slot; first / last over every record of the log."""
+    out, first, last, pos = {}, None, None, False
     for r in trace.read_reglog(path):
+        t = r['v'] * 227 + r['h']
+        pos = pos or t > 0
+        k = (r['frame'], t)
+        first = k if first is None or k < first else first
+        last = k if last is None or k > last else last
         if r['reg'] in regs and not r['agnus']:
-            out.setdefault(r['frame'], []).append((r['reg'], r['value']))
-    return {f: tuple(v) for f, v in out.items()}
+            out.setdefault(r['frame'], []).append((t, r['reg'], r['value']))
+    return out, first, last, pos
+
+
+EDGE_SLACK = 16      # colour clocks: a host without the timing model stamps a write a few clocks off
 
 
 def compare_audio(orig, rebuild, shifts=range(-60, 61)):
@@ -225,22 +239,48 @@ def compare_audio(orig, rebuild, shifts=range(-60, 61)):
     writes on each side. ``short`` (1.0.44, Alien Breed II G61): frames in which the original wrote to Paula after the
     last write of ANY logged register on the rebuild's side - the rebuild's log ended there, those frames were never
     produced (they count as unequal, and the suite names them as a problem like a short trace). The rebuild's side
-    comes from ``trace.encode_reglog``."""
-    a, b = _audio_frames(orig), _audio_frames(rebuild)
+    comes from ``trace.encode_reglog``.
+
+    ``edge`` (1.0.57, SWIV): a rebuild that starts from a state in the middle of a frame has no writes before that
+    point, and a log ends in the middle of its last frame. In the frame of a log's first record the other side's
+    writes before that record are left out, in the frame of its last record those after it - when the log has beam
+    positions. ``edge`` counts the writes left out; whole frames only one side has stay unequal."""
+    (a, a0, a1, apos), (b, b0, b1, bpos) = _audio_rows(orig), _audio_rows(rebuild)
     if not a and not b:
-        return {'frames': 0, 'equal': 0, 'shift': 0, 'first': None, 'original': 0, 'rebuild': 0, 'short': 0}
-    b_end = max((r['frame'] for r in trace.read_reglog(rebuild)), default=None)
+        return {'frames': 0, 'equal': 0, 'shift': 0, 'first': None, 'original': 0, 'rebuild': 0, 'short': 0, 'edge': 0}
+    b_end = b1[0] if b1 else None
+
+    def trimmed(s):
+        """The two sides for shift s, by the original's frame numbers, the edges' frames cut to what both logs hold."""
+        A = {f: list(v) for f, v in a.items()}
+        B = {f - s: list(v) for f, v in b.items()}
+        n = 0
+        for rows, lo, hi, has in ((A, b0 and (b0[0] - s, b0[1]), b1 and (b1[0] - s, b1[1]), bpos), (B, a0, a1, apos)):
+            if not has:
+                continue
+            for edge, keep in ((lo, lambda t, e: t >= e - EDGE_SLACK), (hi, lambda t, e: t <= e + EDGE_SLACK)):
+                if edge and edge[0] in rows:
+                    kept = [x for x in rows[edge[0]] if keep(x[0], edge[1])]
+                    n += len(rows[edge[0]]) - len(kept)
+                    if kept:
+                        rows[edge[0]] = kept
+                    else:
+                        del rows[edge[0]]
+        strip = lambda rows: {f: tuple((reg, value) for _, reg, value in v) for f, v in rows.items()}
+        return strip(A), strip(B), n
+
     best = None
     for s in shifts:
-        frames = set(a) | {g - s for g in b}
-        eq = sum(1 for f in frames if a.get(f, ()) == b.get(f + s, ()))
+        A, B, n = trimmed(s)
+        frames = set(A) | set(B)
+        eq = sum(1 for f in frames if A.get(f, ()) == B.get(f, ()))
         score = (eq, -len(frames), -abs(s))
         if best is None or score > best[0]:
-            best = (score, s, eq, frames)
-    _, s, eq, frames = best
-    first = next((f for f in sorted(frames) if a.get(f, ()) != b.get(f + s, ())), None)
+            best = (score, s, eq, frames, A, B, n)
+    _, s, eq, frames, A, B, n = best
+    first = next((f for f in sorted(frames) if A.get(f, ()) != B.get(f, ())), None)
     short = 0 if b_end is None else sum(1 for f in a if f + s > b_end)
-    return {'frames': len(frames), 'equal': eq, 'shift': s, 'first': first, 'original': len(a), 'rebuild': len(b), 'short': short}
+    return {'frames': len(frames), 'equal': eq, 'shift': s, 'first': first, 'original': len(a), 'rebuild': len(b), 'short': short, 'edge': n}
 
 
 def align_shot(a, b, width=716, max_shift=8, sample=4, step=1):

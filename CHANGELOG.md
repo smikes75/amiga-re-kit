@@ -3,6 +3,21 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.57 (2026-11-12)
+
+- blitter (the translation's runtime; **regenerate the translation**): the barrel shifters keep the previous word
+  across rows - the bits shifted out of a row's last word come in at the next row's first word; only a blit's start
+  clears them. The model cleared them at every row. Found by SWIV in the game (frame 4236: A = $FFFF shifted by 8 with
+  ALWM $FFFF wrote $00FF at the start of every row, the original only in the first; times and registers of all blits
+  equal, the state different one frame later)
+- `arek parity`, sound: a rebuild started from a state in the middle of a frame, and a log that ends in the middle of
+  its last frame - in the frame of a log's first record the other side's writes before that record are left out, in
+  the frame of its last record those after it (when the log has beam positions; the result's `edge` counts them).
+  Whole frames only one side has stay unequal
+- `arek trace run --from-frame F` holds for the register log too (the build logs from power-on: the Kickstart's
+  writes were frames only the original has). SWIV's boot: sound 832 / 845 was these edges and 11 Kickstart frames,
+  no write differs - 833 / 833 with both
+
 ## 1.0.56 (2026-11-11)
 
 - with the timing model, host_trace `--reglog` stamps a CPU register write with the write's own slot, as the

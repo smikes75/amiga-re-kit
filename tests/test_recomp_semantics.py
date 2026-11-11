@@ -415,6 +415,21 @@ def test_blitter_modulo_ignores_bit_0(tmp_path):
     assert mem[0x6100:0x6106].hex() == 'aaaa0000bbbb'                  # row 1 at +4 (2 + 2), not at an odd +5
 
 
+def test_blitter_shifters_carry_into_the_next_row(tmp_path):
+    """1.0.57 (SWIV in the game, frame 4236): the bits a barrel shifter moves out of a row's last word come in at the
+    next row's first word - the shifters are cleared at a blit's start, not at a row's. A = $FFFF shifted by 8: $00FF
+    only in the very first word (the model had it at the start of every row and the game's state left the original's
+    one frame later). The same for B."""
+    fill = ''.join('33fcffff0000%04x' % a for a in (0x6000, 0x6002, 0x6004, 0x6006))
+    prog = (fill + mw(0x040, 0x89f0) + mw(0x042, 0) + mw(0x044, 0xffff) + mw(0x046, 0xffff)      # ASH 8, A -> D
+            + ml(0x050, 0x6000) + ml(0x054, 0x6100) + mw(0x064, 0) + mw(0x066, 0) + mw(0x058, (2 << 6) | 2)
+            + mw(0x040, 0x05cc) + mw(0x042, 0x4000)                                                # BSH 4, B -> D
+            + ml(0x04c, 0x6000) + ml(0x054, 0x6200) + mw(0x062, 0) + mw(0x066, 0) + mw(0x058, (2 << 6) | 2))
+    *_, mem = run(tmp_path, prog, {})
+    assert mem[0x6100:0x6108].hex() == '00ffffff' 'ffffffff'
+    assert mem[0x6200:0x6208].hex() == '0fffffff' 'ffffffff'
+
+
 def test_blitter_descending_subtracts_the_modulo(tmp_path):
     """1.0.9: in descending mode the pointers run down a row and the modulo is subtracted at its end (HRM)."""
     prog = ('33fccccc00005ffe' + '33fcaaaa00006000' + '33fcbbbb00006002'

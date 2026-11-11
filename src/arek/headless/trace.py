@@ -428,6 +428,17 @@ def read_reglog(src):
     return out
 
 
+def reglog_from(path, frame):
+    """Drop a register log's records before ``frame`` (in place). Returns how many are left."""
+    with open(path, 'rb') as f:
+        data = f.read()
+    data = data[:len(data) - len(data) % 16]
+    keep = [data[k:k + 16] for k in range(0, len(data), 16) if struct.unpack_from('<I', data, k)[0] >= frame]
+    with open(path, 'wb') as f:
+        f.write(b''.join(keep))
+    return len(keep)
+
+
 def encode_reglog(rows):
     """The ``VAHL_REGLOG`` layout for a rebuild's own register writes, so ``arek parity`` compares
     sound both ways: rows as ``read_reglog`` returns them (``frame, v, h, reg, value, pc, agnus``;
@@ -561,6 +572,10 @@ def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None,
                               capture_at=capture_at, trace=os.path.basename(out), inputs=os.path.basename(inputs) if inputs else None)
         with open(os.path.join(capture_dir, 'capture.log'), 'w') as f:
             f.write(log)
+    if reglog and from_frame is not None and os.path.exists(reglog):
+        # 1.0.57 (SWIV): --from-frame holds for the register log too - the build logs from power-on, and a comparison with
+        # a rebuild that starts at that frame counted the Kickstart's writes as frames only the original has
+        reglog_from(reglog, from_frame)
     if not os.path.exists(out):
         if not (buslog or reglog or audlog or shots or pokes):
             raise TraceError('no trace written - is VAHL a build with a trace patch? (see %s.log)' % out)

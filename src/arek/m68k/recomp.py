@@ -419,8 +419,12 @@ static void run_blit(void) {
     int step = desc ? -2 : 2;
     BZERO = 1;
     BLITS++;
+    /* 1.0.57 (SWIV): the barrel shifters keep the previous word across rows - the bits shifted out of a row's last word
+     * come in at the next row's first (only a blit's start clears them; vAmiga FastBlitter). A = $FFFF everywhere shifted
+     * by 8 gave $00FF at the start of every row, the hardware only in the first. B's shifter runs only with channel B. */
+    uint32_t aold = 0, bold_keep = 0;
     for (int y = 0; y < h; y++) {
-        uint32_t aold = 0, bold = 0; int fc = (con1 >> 2) & 1;
+        uint32_t bold = useb ? bold_keep : 0; int fc = (con1 >> 2) & 1;
         for (int x = 0; x < w; x++) {
             uint32_t adat = usea ? rd16_raw(apt) : CREG[0x074 >> 1];
             uint32_t bdat = useb ? rd16_raw(bpt) : CREG[0x072 >> 1];
@@ -449,6 +453,7 @@ static void run_blit(void) {
             if (usec) cpt += step;
             if (used) dpt += step;
         }
+        bold_keep = bold;
         if (usea) apt = desc ? apt - amod : apt + amod;   /* 1.0.9: descending mode subtracts the modulo (HRM blitter: "added or, in descending mode, subtracted") */
         if (useb) bpt = desc ? bpt - bmod : bpt + bmod;
         if (usec) cpt = desc ? cpt - cmod : cpt + cmod;
