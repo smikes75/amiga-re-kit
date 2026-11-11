@@ -28,11 +28,11 @@ double arek_bus_access(ArekBus *b, double tt) {
     uint32_t cap = (uint32_t)(b->maxlines * b->hpos);
     { uint32_t lim = (uint32_t)(b->lines * b->hpos) + (uint32_t)b->hpos; if (lim < cap) cap = lim; }
     uint32_t t = (uint32_t)tt; if ((double)t < tt) t++; t += b->slotoff;
-    arek_bus_blt_advance(b, t);
+    arek_bus_blt_advance(b, t); b->last_wait = 0;
     if (t < cap && b->own[t]) {
         int delay = 0;
         do { t++; arek_bus_blt_advance(b, t); if (++delay == 2) b->bls = 1; } while (t < cap && b->own[t]);
-        b->bls = 0; b->wait_n += delay;
+        b->bls = 0; b->wait_n += delay; b->last_wait = delay;
     }
     if (t < cap) b->own[t] = AREK_BUS_CPU;
     b->cpu_n++; return t + 2 - b->slotoff;

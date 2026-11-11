@@ -3,6 +3,19 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.50 (2026-11-11)
+
+- captures (SWIV KIT-GAPS 5): a CIA nobody touches sleeps in vAmiga and `r ciab` prints its counters as they were when
+  it fell asleep. `arek bpstate` now also asks `? ciaa` / `? ciab` (sleeping, since which master cycle) and
+  `bpstate.cia_regs(chip, clock)` / `arek host state` take the slept E clocks off a running timer. SWIV: printed $D7F,
+  at the stop $646 - level-6 interrupts 9270 colour clocks late. Old captures have no sleep data: capture again
+- host, OPT-IN `-DHOST_IPL_MODEL=1` (SWIV KIT-GAPS 7): which instruction an interrupt is taken after - the 68000
+  samples its IPL pins in the last bus cycle of an instruction and Paula's level reaches them 2 colour clocks after
+  the request (VERTB then at colour clock 2 of the frame instead of the fitted 10). Measured on SWIV's boot against
+  vAmiga: the instruction after an INTENA write runs before the pending interrupt (was: taken at once), the next
+  frame's VBL entry is on the original's slot. Not measured: other sources, instructions that sample earlier. Off by
+  default: nothing changes for a host built without the define
+
 ## 1.0.49 (2026-11-11)
 
 - a captured state keeps its CIAs (SWIV): `arek host state` writes the timers (latch, counter, control register), the

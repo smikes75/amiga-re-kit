@@ -91,6 +91,7 @@ def state(conf, events, addr, npass, t_end, t_set=0, ram_len=524288, keep=None,
     onstop = os.path.join(tmp, 'onstop_%x_%d.retrosh' % (addr, npass))
     lines = ['try debugger', 'r cpu', '? agnus', '? agnus beam']
     lines += ['try r %s' % chip for chip in CHIPS]
+    lines += ['try ? ciaa', 'try ? ciab']                # 1.0.50: asleep or not, and since when (cia_regs)
     lines += ['commander', 'mem save bin %s 0 %d' % (dump, ram_len)]
     regions = []
     for base, length in ram_regions:
@@ -113,6 +114,8 @@ def state(conf, events, addr, npass, t_end, t_set=0, ram_len=524288, keep=None,
     st = parse_regs(out)
     st['beam'] = parse_beam(out)
     st['chips'] = parse_chips(out)
+    for name, sl in parse_cia_sleep(out).items():
+        st['chips'].setdefault(name, {}).update(sl)
     st['ram'] = Path(dump).read_bytes()
     st['regions'] = regions
     return st, out
@@ -148,11 +151,17 @@ def parse_regs(out):
 _VALUE = re.compile(r'(\w+)\s*:\s*((?:0x[0-9A-Fa-f]+\s*)+|yes|no|-?\d+)(?=\s|$)')
 
 
-def cia_regs(chip):
+def cia_regs(chip, clock=None):
     """A CIA of cpu.json ``chips`` (``ciaa`` / ``ciab``) by register: TA TB (counters), LA LB (latches), PRA PRB, DDRA
     DDRB, PA PB (the port pins), CRA CRB, ICR, IMR (the interrupt mask), SDR. vAmiga's ``r ciaa`` prints two values a
     line under one label ("Counter A : .. B : ..") and parse_chips keeps them as A, B, A#2, B#2 ... in the order of
-    the lines, the two interrupt registers as reg, reg#2 - this names them. None when the build printed no CIA."""
+    the lines, the two interrupt registers as reg, reg#2 - this names them. None when the build printed no CIA.
+
+    1.0.50 (SWIV KIT-GAPS 5): a CIA nobody touches SLEEPS in vAmiga and ``r ciab`` prints its counters as they were when
+    it fell asleep (a read by the CPU works them out: CIA::spypeek, counter - idleSince()). With ``clock`` (the stop's
+    master clock, cpu.json beam.clock) and the capture's ``sleeping`` / ``sleep_cycle`` (``? ciab``) a running timer
+    that counts E clocks gets the cycles it slept taken off (40 master cycles each). SWIV: printed $D7F, at the stop
+    $646 - the level-6 interrupts came 9270 colour clocks late."""
     if not chip or not all(isinstance(chip.get(k), int) for k in ('A', 'B', 'A#6', 'B#6', 'reg', 'reg#2')):
         return None
     out = {}
@@ -162,7 +171,38 @@ def cia_regs(chip):
     out['ICR'], out['IMR'] = chip['reg'], chip['reg#2']
     if isinstance(chip.get('SDR'), int):
         out['SDR'] = chip['SDR']
+    if chip.get('sleeping') and clock is not None and isinstance(chip.get('sleep_cycle'), int) and clock >= chip['sleep_cycle']:
+        idle = (clock - chip['sleep_cycle']) // 40
+        if out['CRA'] & 1 and not out['CRA'] & 0x20:
+            out['TA'] = (out['TA'] - idle) & 0xffff
+        if out['CRB'] & 1 and not out['CRB'] & 0x60:
+            out['TB'] = (out['TB'] - idle) & 0xffff
     return out
+
+
+def parse_cia_sleep(out):
+    """``? ciaa`` / ``? ciab`` of the stop script: {"ciab": {"sleeping": True, "sleep_cycle": master cycle}}."""
+    res, cur = {}, None
+    for line in out.splitlines():
+        s = line.strip()
+        m = re.fullmatch(r'(?:try )?\? (cia[ab])', s)
+        if m:
+            cur = m.group(1)
+            res[cur] = {}
+            continue
+        if cur is None:
+            continue
+        if re.match(r'(try |r |\? |commander|mem |screenshot|shutdown)', s):
+            cur = None
+            continue
+        m = re.match(r'Sleeping\s*:\s*(\w+)', s)
+        if m:
+            res[cur]['sleeping'] = m.group(1).lower() in ('yes', 'true', '1')
+        m = re.match(r'Sleep cycle\s*:\s*(-?\d+)', s)
+        if m:
+            res[cur]['sleep_cycle'] = int(m.group(1))
+    return {k: v for k, v in res.items() if v}
+
 
 
 def parse_chips(out):

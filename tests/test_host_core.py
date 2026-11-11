@@ -139,6 +139,15 @@ def test_state_from_a_capture(tmp_path):
     host.state(str(cap), str(tmp_path / 'st3'))
     lines = (tmp_path / 'st3' / 'state.txt').read_text().splitlines()
     assert lines[4] == '1234' and lines[5] == 'e00 456 11 ffff ffff 80 1 14 e00 123 11 ffff ffff 80 1 14'
+    # 1.0.50: a sleeping CIA prints its counters as they were when it fell asleep; the cycles since come off
+    sl = bpstate.parse_cia_sleep('try ? ciab\n\n   Clock : 5000\n   Sleeping : yes\n   Tiredness : 9\n   Sleep cycle : 1000\n   Wakeup cycle : 9\ncommander\n')
+    assert sl == {'ciab': {'sleeping': True, 'sleep_cycle': 1000}}
+    meta['chips']['ciab'].update(sl['ciab'])
+    assert bpstate.cia_regs(meta['chips']['ciab'], clock=1000 + 40 * 0x23)['TA'] == 0x100 and bpstate.cia_regs(meta['chips']['ciab'])['TA'] == 0x123
+    meta['beam']['clock'] = 1000 + 40 * 0x23
+    (cap / 'cpu.json').write_text(json.dumps(meta))
+    host.state(str(cap), str(tmp_path / 'st4'))
+    assert (tmp_path / 'st4' / 'state.txt').read_text().splitlines()[5] == 'e00 456 11 ffff ffff 80 1 14 e00 100 11 ffff ffff 80 1 14'
 
 
 # POTGO's output bits read back in POTGOR (G40) and CIA-B timer A counts E ticks (G38): the game writes POTGO three

@@ -54,6 +54,7 @@ typedef struct ArekBus {
     uint32_t cpu_n, wait_n;    /* cte volajici: pristupy procesoru a takty cekani v tomto snimku */
     /* vnitrni: registry, ktere copper psal minuly snimek (plati na zacatku dalsiho), blitter, rozpracovana instrukce */
     uint16_t copr[0x100]; uint8_t copw[0x100];
+    int last_wait;                       /* 1.0.50: colour clocks the last CPU access waited for a free slot (the host's IPL sample point) */
     struct { int on, busy, phase, pc, lockD; uint32_t left, bt; const uint8_t *prog; } bl;
     int bls;
     uint32_t in_n, in_l, in_da, in_pre, in_tail;   /* in_tail (1.0.47): accesses the instruction makes at its END, after its remaining internal clocks */

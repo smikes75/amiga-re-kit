@@ -46,6 +46,24 @@ static int    H_COP_DONE = 0;            /* the copper's interrupt of this frame
 static int    H_COP_IDX = 0;             /* 1.0.6: how many of the bus model's cop_irq[] of this frame were raised (any INTREQ bits the Copper sets, Turrican II KIT-GAPS 7) */
 static int    H_BLIT_PEND = 0;           /* 1.0.5: a blit the CPU started is running; INTREQ BLIT when it ends (Turrican II KIT-GAPS 3) */
 static int    H_IRQ_DEPTH = 0;
+/* 1.0.50 (SWIV KIT-GAPS 7), OPT-IN with -DHOST_IPL_MODEL=1 (or HOST_IRQ_POLL=1 in the environment): which instruction an
+ * interrupt is taken after. The 68000 samples its IPL pins in the last bus cycle of an instruction (Moira: POLL_IPL
+ * before the access, 2 clocks into the cycle) and Paula's level reaches the pins some colour clocks after INTREQ /
+ * INTENA change (vAmiga: iplPipe). Without the model the host takes an interrupt at the first instruction boundary at
+ * which the request is there (VERTB: H_VBL_LAT colour clocks into the frame, 10, fitted). With it: at the boundary of
+ * the first instruction whose sample point (its end - H_IRQ_POLL - the wait of its last access) is at or after the
+ * request's time + H_IPL_PIPE. Request times: VERTB at H_VBL_LAT (2 with the model), a CPU write to INTENA / INTREQ
+ * at the write, anything else at the boundary that found it. Measured on SWIV's boot (frame 790, vAmiga): after
+ * `move.w #$8020,INTENA` the original runs one more instruction before the pending VERTB is taken - the model does
+ * too; the first VBL entry of the next frame falls on the original's slot. NOT measured: other request sources,
+ * instructions that sample earlier than their last bus cycle (shifts, mulu, dbf...). Hence opt-in. */
+#ifdef HOST_IPL_MODEL
+static double H_IRQ_POLL = 1, H_IPL_PIPE = 2;
+#else
+static double H_IRQ_POLL = -1, H_IPL_PIPE = 2;
+#endif
+static double H_POLL_T = 0, H_EVT_T = -1e30, H_PEND_T[7]; static uint8_t H_PEND_ON[7], H_PEND_INIT = 0;
+static void h_irq_mark(void);
 static int    H_JDEPTH = 0; static uint8_t H_JLEV[8];   /* 1.0.48: handlers entered by a jump (HOST_VECTOR_JUMP), by level */
 static uint8_t H_CIAA_PRA = 0xfe;        /* $BFE001: bits 6/7 = fire port 0/1 (0 = pressed), bit 1 = LED output */
 static uint8_t H_CIAA_SDR = 0, H_CIAA_ICR = 0, H_CIAA_DDRA = 0x03, H_CIAB_ICR = 0;
@@ -130,6 +148,9 @@ static void host_reset(void);
 /* the host starts: t0 = beam time of the first instruction (line * 227 + slot); the environment can recalibrate */
 static void host_init(double t0) {
     host_reset();
+    if (getenv("HOST_IRQ_POLL")) H_IRQ_POLL = atof(getenv("HOST_IRQ_POLL"));
+    if (getenv("HOST_IPL_PIPE")) H_IPL_PIPE = atof(getenv("HOST_IPL_PIPE"));
+    H_VBL_LAT = H_IRQ_POLL >= 0 ? 2 : 10;
     if (getenv("HOST_VBL_LAT")) H_VBL_LAT = atof(getenv("HOST_VBL_LAT"));
     if (getenv("HOST_IRQ_PRE")) H_IRQ_PRE = (uint32_t)atoi(getenv("HOST_IRQ_PRE"));
     if (getenv("HOST_IRQ_CYC")) H_IRQ_CYC = (uint32_t)atoi(getenv("HOST_IRQ_CYC"));
@@ -182,6 +203,7 @@ void hw_write_hook(uint32_t off, uint32_t v) {
     if (off == 0x02e) { ard_until((int)(h_now() / HOST_HPOS)); ARD_CDANG = (int)((v >> 1) & 1); arek_glue_bus()->cdang = ARD_CDANG; }   /* 1.0.47: COPCON */
     if (off == 0x096) ard_until((int)(h_now() / HOST_HPOS));   /* the lines before a DMACON write see the old value (the runtime applies it) */
     if (h_wr_cb) h_wr_cb(off, v);
+    if (off == 0x09a || off == 0x09c) { h_irq_mark(); H_EVT_T = h_abs(); }
     if (off == 0x09c) {
         if (v & 0x0780) arek_paula_run(&H_PAULA, h_abs());      /* 1.0.43: Paula up to the write first - a request it raises inside this instruction is older than the write that clears it (it survived the acknowledge) */
         if (v & 0x8000) H_INTREQ |= v & 0x7fff; else H_INTREQ &= ~(v & 0x7fff); }
@@ -266,7 +288,7 @@ static void host_events(void) {
         if (H_VBL_LAT <= 0) H_INTREQ |= 0x0020; else H_VERTB_PEND = 1;
         if (h_frame_cb) h_frame_cb();
     }
-    if (H_VERTB_PEND && h_now() >= H_VBL_LAT) { H_INTREQ |= 0x0020; H_VERTB_PEND = 0; }
+    if (H_VERTB_PEND && h_now() >= H_VBL_LAT) { h_irq_mark(); H_INTREQ |= 0x0020; H_VERTB_PEND = 0; H_EVT_T = H_PAULA.frame_base + H_VBL_LAT; h_irq_mark(); }
     h_cia_poll();
     ArekBus *b = arek_glue_bus();
     if (!H_COP_DONE && b->cop_int >= 0 && h_now() >= b->cop_int) { H_INTREQ |= 0x0010; H_COP_DONE = 1; }
@@ -287,6 +309,7 @@ static void host_reset(void) {
     H_IO_UNKNOWN = 0; H_IO_LAST = 0; H_IRQS = 0; H_PC = 0;
     RET_PC = NO_RET;
     H_JDEPTH = 0;
+    H_PEND_INIT = 0; H_EVT_T = -1e30; for (int i = 0; i < 7; i++) { H_PEND_ON[i] = 0; H_PEND_T[i] = -1e30; }
 }
 
 /* an interrupt at an instruction boundary: the highest enabled level above the mask; SR and PC to the stack, the
@@ -346,7 +369,16 @@ HOST_VECTOR_JUMP(host_jmp_l4, 0x70)
 HOST_VECTOR_JUMP(host_jmp_l5, 0x74)
 HOST_VECTOR_JUMP(host_jmp_l6, 0x78)
 #endif
+static void h_irq_mark(void) {
+    double t = H_EVT_T > -1e29 ? H_EVT_T : h_abs(); H_EVT_T = -1e30;
+    if (!H_PEND_INIT) { H_PEND_INIT = 1; t = -1e30; }              /* what the state brings is on the pins already */
+    uint16_t intena = CREG[0x09a >> 1], pend = (intena & 0x4000) ? (uint16_t)(intena & H_INTREQ & 0x3fff) : 0;
+    for (int level = 1; level <= 6; level++) { int on = (pend & H_LEVEL_MASK[level]) != 0;
+        if (on && !H_PEND_ON[level]) H_PEND_T[level] = t;
+        H_PEND_ON[level] = (uint8_t)on; }
+}
 static void host_irq(M68 *m, uint32_t pc) {
+    h_irq_mark();
     uint16_t intena = CREG[0x09a >> 1];
     if (!(intena & 0x4000)) return;
     uint16_t pend = intena & H_INTREQ & 0x3fff;
@@ -354,6 +386,7 @@ static void host_irq(M68 *m, uint32_t pc) {
     int ipl = (m->srhi >> 8) & 7;
     for (int level = 6; level > ipl; level--) {
         if (!(pend & H_LEVEL_MASK[level])) continue;
+        if (H_IRQ_POLL >= 0 && H_POLL_T < H_PEND_T[level] + H_IPL_PIPE) continue;   /* not yet on the IPL pins when this instruction sampled them */
         switch (level) {
 #ifdef HOST_L6
         case 6: H_ENTER(m, pc, 6, HOST_L6); return;
@@ -379,7 +412,8 @@ static void host_irq(M68 *m, uint32_t pc) {
 void tick_hook(M68 *m, uint32_t pc, uint32_t clocks) {
     /* an instruction boundary: finish the previous instruction's internal cycles first (arek_bus_insn_end is idempotent),
        so interrupts, time events and records see the time of its end (measured: VBL only after the bmi of a wait loop) */
-    { ArekBus *bb = arek_glue_bus(); arek_glue_set_time(arek_bus_insn_end(bb, arek_glue_time())); }
+    { ArekBus *bb = arek_glue_bus(); arek_glue_set_time(arek_bus_insn_end(bb, arek_glue_time()));
+      H_POLL_T = h_abs() - H_IRQ_POLL - bb->last_wait; }   /* 1.0.50: where the instruction that just ended sampled the IPL pins */
     host_events();
     arek_paula_run(&H_PAULA, h_abs());
     { int ln = (int)(h_now() / HOST_HPOS); if (ln > ARD_NEXT) ard_until(ln); }

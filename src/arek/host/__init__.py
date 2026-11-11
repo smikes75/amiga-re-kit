@@ -141,7 +141,7 @@ def state(capture, out, trace=None):
                                          cia.get('ICR', 0) if isinstance(cia.get('ICR', 0), int) else 0,
                                          0, 0, 0x5500))
         f.write('%d\n' % meta['beam']['frame'])
-        cias = [bpstate.cia_regs(chips.get(n)) for n in ('ciaa', 'ciab')]
+        cias = [bpstate.cia_regs(chips.get(n), clock=meta['beam'].get('clock')) for n in ('ciaa', 'ciab')]
         if all(cias):                                    # 1.0.49: the timers, masks and pending bits of both CIAs
             f.write(' '.join('%x %x %x %x %x %x %x %x' % (c['LA'], c['TA'], c['CRA'], c['LB'], c['TB'], c['CRB'], c['IMR'], c['ICR'])
                              for c in cias) + '\n')

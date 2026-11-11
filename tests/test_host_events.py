@@ -12,7 +12,7 @@ from arek.m68k import recomp
 MAIN, L3, L6 = 0x1000, 0x1100, 0x1200
 
 
-def run(tmp_path, prog, frames, auto, defines=(), args=(), cia=''):
+def run(tmp_path, prog, frames, auto, defines=(), args=(), cia='', intreq=0):
     if not bus.compiler():
         pytest.skip('no C compiler')
     img = bytearray(0x2000)
@@ -28,7 +28,7 @@ def run(tmp_path, prog, frames, auto, defines=(), args=(), cia=''):
     creg = bytearray(512)
     creg[0x96:0x98] = struct.pack('>H', 0x0200)
     (st / 'creg.bin').write_bytes(creg)
-    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n' + cia)
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 %x 1000\nfe 0 0 0 0 5500\n100\n' % intreq + cia)
     host.pack(str(st), str(tmp_path / 'state.bin'))
     host.engine_build(str(tmp_path / 'n'), str(tmp_path / 'game.c'), 'f_%06x' % L3, 'f_%06x' % MAIN, native=True, defines=list(defines))
     r = subprocess.run([str(tmp_path / 'n' / 'arek_host_engine'), str(tmp_path / 'state.bin'), str(frames), '--dump', str(tmp_path / 'out.bin')] + list(args),
@@ -82,6 +82,26 @@ def test_a_captured_state_keeps_its_running_cia_timer(tmp_path, cia):
     frames = w(0x4002)
     want = frames * 313 * 227 / 505.0 if cia else 0
     assert frames >= 9 and abs(w(0x4006) - want) < 0.03 * want + (150 if cia else 1), (frames, w(0x4006), want)
+
+
+@pytest.mark.parametrize('model', [0, 1])
+def test_the_instruction_an_interrupt_is_taken_after(tmp_path, model):
+    """1.0.50 (SWIV KIT-GAPS 7), opt-in -DHOST_IPL_MODEL=1: VERTB is pending and the game enables it with a write to
+    INTENA. The original (vAmiga, SWIV's boot) runs ONE more instruction before the interrupt - the level is on the
+    68000's pins only after the write's instruction has sampled them. Without the model the host takes it right after
+    the write (the stacked PC is the lea), with it after the lea (the moveq)."""
+    prog = {MAIN: '4df900dff000'          # 1000: lea $dff000,a6
+                  '33fcc02000dff09a'      # 1006: move.w #$c020,$dff09a   INTENA: master + VERTB
+                  '41fa0100'              # 100e: lea $100(pc),a0
+                  '7064'                  # 1012: moveq #100,d0
+                  + WAIT_VBL,             # 1014: the frame loop
+            L3: '4a78400c' '6610'         # tst.w $400c; bne.s skip       the first interrupt only
+                '31ef00024008'            # move.w 2(a7),$4008            the stacked PC, high word
+                '31ef0004400a'            # move.w 4(a7),$400a            low word
+                '5278400c'                # addq.w #1,$400c
+                + L3_H}                   # skip: addq.w #1,$4002; move.w #$20,$dff09c; rte
+    w = run(tmp_path, prog, 2, [MAIN, L3], defines=['HOST_IPL_MODEL=1'] if model else [], intreq=0x20)
+    assert w(0x4008) == 0 and w(0x400a) == (0x1012 if model else 0x100e), hex(w(0x400a))
 
 
 def test_a_polled_cia_timer_raises_no_interrupt(tmp_path):
