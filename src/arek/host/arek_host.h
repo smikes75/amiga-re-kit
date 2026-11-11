@@ -355,20 +355,26 @@ static void h_premap_next(void) {
     for (int k = 0; k < 2 * HOST_HPOS; k++) { uint32_t j = (uint32_t)H_LINES * HOST_HPOS + k; if (j < (uint32_t)HOST_MAXLINES * HOST_HPOS && !b->own[j]) b->own[j] = OWN_NEXT[k]; }
 }
 /* the events of time: the end of the frame (VERTB), the copper's INTREQ write (COPER) */
+/* 1.0.56: called by the bus model at a CPU access and while it waits (for a blit that holds the bus, for lines): the
+ * disk's slots up to 160 colour clocks past the slot the wait has reached, before the blitter gets there. The disk's
+ * slots were only marked 160 colour clocks ahead of the instruction's start and a longer blit took them: it ended two
+ * slots early for every line it crossed (SWIV in the game, loading while it draws).
+ * 1.0.58: and the next frame's first lines behind the map's end, when the instruction that reaches the last two lines
+ * began before them (a lea waiting for a blit from line 310 on: no Copper, no refresh behind the frame's end) */
+static void h_bus_ahead(ArekBus *b, uint32_t slot) {
+    if (!H_NEXTMAP && (double)slot >= (double)H_LINES * HOST_HPOS - 2 * HOST_HPOS) { h_premap_next(); H_NEXTMAP = 1; }
 #ifdef HOST_FLOPPY
-/* 1.0.56: called by the bus model while a CPU access waits (for a blit that holds the bus, for lines): the disk's slots up
- * to 160 colour clocks past the slot the wait has reached, before the blitter gets there. The disk's slots were only
- * marked 160 colour clocks ahead of the instruction's start and a longer blit took them: it ended two slots early for
- * every line it crossed (SWIV in the game, loading while it draws) */
-static void h_bus_ahead(ArekBus *b, uint32_t slot) { hfl_ahead(H_PAULA.frame_base + (double)slot, 160.0); b->ahead_to = slot + 96; }
+    hfl_ahead(H_PAULA.frame_base + (double)slot, 160.0);
 #endif
+    b->ahead_to = slot + 96;
+}
 static void host_events(void) {
     double len = (double)H_LINES * HOST_HPOS;
     if (!H_NEXTMAP && h_now() >= len - 2 * HOST_HPOS) { h_premap_next(); H_NEXTMAP = 1; }
 #ifdef HOST_FLOPPY
-    { double fe = H_PAULA.frame_base + len, ta = h_abs(); hfl_run(ta < fe ? ta : fe); if (ta < fe) hfl_ahead(ta, 160.0);   /* the disk up to now (to the frame's end before it rolls) and its slots ahead */
-      ArekBus *bb = arek_glue_bus(); bb->ahead = h_bus_ahead; bb->ahead_to = (uint32_t)h_now() + 96; }   /* 1.0.56: and further ahead while an access waits for a blit */
+    { double fe = H_PAULA.frame_base + len, ta = h_abs(); hfl_run(ta < fe ? ta : fe); if (ta < fe) hfl_ahead(ta, 160.0); }   /* the disk up to now (to the frame's end before it rolls) and its slots ahead */
 #endif
+    { ArekBus *bb = arek_glue_bus(); bb->ahead = h_bus_ahead; bb->ahead_to = (uint32_t)h_now() + 96; }   /* 1.0.56: and further ahead inside a long instruction */
     if (h_now() >= len) {
         if (H_OWN_DUMP) { fwrite(&H_FRAME, sizeof H_FRAME, 1, H_OWN_DUMP); fwrite(OWN, 1, (size_t)H_LINES * HOST_HPOS, H_OWN_DUMP); }
         arek_paula_run(&H_PAULA, H_PAULA.frame_base + len - 1e-9);
@@ -392,8 +398,8 @@ static void host_events(void) {
     if (H_VERTB_PEND && h_now() >= H_VBL_LAT) { h_irq_mark(); H_INTREQ |= 0x0020; H_VERTB_PEND = 0; H_EVT_T = H_PAULA.frame_base + H_VBL_LAT; h_irq_mark(); }
 #ifdef HOST_FLOPPY
     hfl_run(h_abs()); hfl_ahead(h_abs(), 160.0);                                 /* after a frame roll: in the new frame's map */
-    arek_glue_bus()->ahead_to = (uint32_t)h_now() + 96;
 #endif
+    arek_glue_bus()->ahead_to = (uint32_t)h_now() + 96;
     h_cia_poll();
     ArekBus *b = arek_glue_bus();
     if (!H_COP_DONE && b->cop_int >= 0 && h_now() >= b->cop_int) { H_INTREQ |= 0x0010; H_COP_DONE = 1; }

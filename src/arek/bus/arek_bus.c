@@ -33,20 +33,21 @@ double arek_bus_access(ArekBus *b, double tt) {
     /* 1.0.56: the host's other DMA (the disk's slots, marked a little ahead of the CPU's time) must be in the map before
      * the blitter passes - a CPU access can wait for a blit for lines, and the blit then took the disk's slots */
 #define AREK_BUS_AHEAD(s) if (b->ahead && (s) >= b->ahead_to) b->ahead(b, (s))
+    /* 1.0.58: the blitter is not moved to the cap or past it - from there on it and the instruction's remaining accesses
+     * compete in the new frame's map (arek_bus_frame_carry), slot by slot as anywhere else. 1.0.56 / 1.0.57 let the blit
+     * run on behind the map's premapped rows and guessed where the first carried access may stand: right for a lea (two
+     * accesses), 10 colour clocks late for a movem that waited with 15 registers to go (SWIV, frame 5179) */
     AREK_BUS_AHEAD(t);
-    arek_bus_blt_advance(b, t); b->last_wait = 0;
+    if (t < cap) arek_bus_blt_advance(b, t);
+    b->last_wait = 0;
 #define AREK_BUS_TAKEN(o) ((o) && !(b->cpu_fast && (o) == AREK_BUS_CPU))
     if (t < cap && AREK_BUS_TAKEN(b->own[t])) {
         int delay = 0;
-        do { t++; AREK_BUS_AHEAD(t); arek_bus_blt_advance(b, t); if (++delay == 2) b->bls = 1; } while (t < cap && AREK_BUS_TAKEN(b->own[t]));
+        do { t++; delay++; if (t >= cap) break; AREK_BUS_AHEAD(t); arek_bus_blt_advance(b, t); if (delay == 2) b->bls = 1; } while (AREK_BUS_TAKEN(b->own[t]));
         b->bls = 0; b->wait_n += delay; b->last_wait = delay;
     }
     if (t < cap) { b->own[t] = AREK_BUS_CPU; b->last_slot = (long)t; b->cpu_n++; }
-    else {                                                   /* 1.0.56: no slot before the cap - arek_bus_frame_carry serves it in the next frame */
-        long rel = (long)t - (long)b->lines * b->hpos +       /* where it stood, as a slot of the next frame; behind the slot the blitter just took */
-            ((t < (uint32_t)(b->maxlines * b->hpos) && AREK_BUS_TAKEN(b->own[t])) ? 1 : 0);
-        if (!b->unserved || rel > b->carry_rel) b->carry_rel = rel;   /* the last of them: the blitter went on while the instruction's later accesses asked */
-        b->unserved++; }
+    else b->unserved++;                                      /* 1.0.56: no slot before the cap - arek_bus_frame_carry serves it in the next frame */
     return t + 2 - b->slotoff;
 }
 
@@ -58,8 +59,7 @@ double arek_bus_frame_carry(ArekBus *b, double t) {
     int n = b->unserved; b->unserved = 0;
     if (n <= 0) return t;
     double t0 = t - 2.0 * n;                                 /* where the first of them stood: each had taken 2 colour clocks */
-    if (t0 < (double)b->carry_rel - b->slotoff) t0 = (double)b->carry_rel - b->slotoff;
-    if (b->bl.on && t0 + b->slotoff < (double)b->bl.bt) t0 = (double)b->bl.bt - b->slotoff;   /* the slots the blit took past the old frame's end are not in the new map */
+    if (t0 < (double)b->hpos - b->slotoff) t0 = (double)b->hpos - b->slotoff;   /* not before the cap: line 1, slot 0 */
     for (int k = 0; k < n; k++) t0 = arek_bus_access(b, t0);
     return t0 > t ? t0 : t;
 }

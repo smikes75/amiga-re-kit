@@ -3,6 +3,21 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.58 (2026-11-12)
+
+- bus model, an instruction beside a blit across the frame's end, again (1.0.56 had it for a lea): the blitter is
+  not moved to the cap behind the frame's end or past it, and from there on it and ALL the instruction's remaining
+  accesses compete in the new frame's map, slot by slot as anywhere else. 1.0.56 let the blit run on behind the
+  premapped rows and guessed where the first carried access may stand - a movem that waited with 15 registers to go
+  was 10 colour clocks late (SWIV, frame 5179)
+- host: the next frame's first lines are premapped from the bus model's hook too - an instruction that began before
+  the last two lines and waited through them (a lea beside a blit from line 310 on) found no Copper and no refresh
+  behind the frame's end (frame 5300, 8 colour clocks early). The hook is installed for every host, not only with
+  the floppy model
+- measured on SWIV against vAmiga: from the boot's capture at frame 790 through the title into random play, the VBL
+  routine's time equal in 5 865 frames of 5 865 (to frame 6652; 1.0.57: 4 390 in a row); in the game 260 762
+  instruction times of 260 762 at 17 addresses over frames 5176-6308
+
 ## 1.0.57 (2026-11-12)
 
 - blitter (the translation's runtime; **regenerate the translation**): the barrel shifters keep the previous word

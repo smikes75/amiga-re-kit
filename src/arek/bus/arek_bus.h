@@ -62,7 +62,7 @@ typedef struct ArekBus {
     /* 1.0.55: the instruction's bus pattern (arek.m68k.buspat: Moira's order of idle clocks and bus cycles, and where the
      * interrupt level is sampled) - arek_bus_pat_begin; the accesses of the translation take its data cycles in order */
     void (*ahead)(struct ArekBus *b, uint32_t slot); uint32_t ahead_to;   /* 1.0.56: the host marks its DMA slots up to past `slot` and sets ahead_to (the slot from which it wants to be asked again) */
-    int unserved; long carry_rel;                        /* 1.0.56: accesses that found no slot before the cap past the frame's end (arek_bus_frame_carry) */
+    int unserved;                        /* 1.0.56: accesses that found no slot before the cap past the frame's end (arek_bus_frame_carry) */
     int pat_off;                         /* the host's switch: 1 = do not use the patterns (HOST_BUS_PAT=0) */
     const uint8_t *pat; int pat_on, pat_n, pat_i, pat_pj, pat_pd, pat_acc, pat_v, poll_valid; double pat_poll;
     int order2;                          /* 1.0.53: honour the bus table's fourth byte (the host's timing model) */
