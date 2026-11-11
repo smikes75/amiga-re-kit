@@ -676,7 +676,7 @@ def test_host_with_preemptive_tasks(tmp_path):
     (st / 'creg.bin').write_bytes(creg)
     (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 3000 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
     out = tmp_path / 'run.vtr'
-    r = subprocess.run([str(exe), str(st), str(out), '9', '--full'], capture_output=True, text=True, timeout=60)
+    r = subprocess.run([str(exe), str(st), str(out), '9'], capture_output=True, text=True, timeout=60)   # no --full: a record per pass of a 4-instruction loop, with the RAM in each it was 5 to 10 GB (the CI's disk)
     assert r.returncode == 0, r.stderr
     recs = [x for x in trace.records(str(out)) if x['pc'] == 0x100c]
     assert len(recs) > 100                                 # records need the interrupt depth back at 0 after the switch
@@ -776,8 +776,7 @@ def test_host_tasks_switched_by_an_rts_inside_the_handler(tmp_path, vec='host_jm
     itself and by the interrupt handler of the other. Entered by a jump (host_jmp_l3) both tasks run on and the records
     know when the handler is over. Entered as a C call (host_vec_l3) the scheduler's rts onto the higher stack reads as
     a plain return, the handler's C frame returns and the interrupted routine goes on with the other task's stack
-    (measured here on macOS: the run fails). That variant is not run: a host on a foreign stack does anything - on the
-    Linux CI it took the runner down (1.0.48's run was lost after 47 minutes)."""
+    (measured on macOS: the run fails). That variant is not run: a host on a foreign stack does anything."""
     cc = bus.compiler()
     if not cc:
         pytest.skip('no C compiler')
@@ -805,7 +804,7 @@ def test_host_tasks_switched_by_an_rts_inside_the_handler(tmp_path, vec='host_jm
     (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 3000 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
     out = tmp_path / 'run.vtr'
     try:
-        r = subprocess.run([str(exe), str(st), str(out), '9', '--full'], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([str(exe), str(st), str(out), '9'], capture_output=True, text=True, timeout=60)   # no --full: a record per pass of a 4-instruction loop, with the RAM in each it was 5 to 10 GB (the CI's disk)
         code, err = r.returncode, r.stderr
     except subprocess.TimeoutExpired:
         code, err = -1, 'timeout'
