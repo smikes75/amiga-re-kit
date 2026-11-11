@@ -86,6 +86,15 @@ int main(int argc, char **argv) {
         memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
         long n = 0; for (long k = 0; k < 312L * 227; k++) n += own[k] == 24;
         printf("copper %ld\n", n);
+    } else if (!strcmp(mode, "hold")) {                       /* 1.0.49: a register the Copper wrote holds its value in later frames */
+        long n[4]; regs[0x100 >> 1] = 0x0200;                                                            /* the CPU's own last value: no planes */
+        for (int f = 0; f < 4; f++) {
+            if (f == 1) { at = 0x1000; cop(&at, 0xffff, 0xfffe); }                                       /* the list no longer writes BPLCON0 */
+            if (f == 3) { regs[0x100 >> 1] = 0x0200; arek_bus_cpu_write(&B, 0x100); }                    /* the CPU's write is the later one */
+            memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
+            n[f] = 0; for (long k = 0; k < 312L * 227; k++) n[f] += own[k] >= AREK_BUS_BITPLANE && own[k] < AREK_BUS_BITPLANE + 6;
+        }
+        printf("bitplane %ld %ld %ld %ld\n", n[0], n[1], n[2], n[3]);
     } else if (!strcmp(mode, "tail")) {                       /* 1.0.47: reads at the instruction's end, after its internal clocks */
         regs[0x096 >> 1] = 0; memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
         double t = 1000, t0 = t; int tail = atoi(argv[3]);
@@ -507,6 +516,15 @@ def test_an_illegal_move_stops_the_copper(harness):
     assert n(-1, '000') == n(0, '03e') == n(1, '000') <= 6                       # two MOVEs and the vertical-blank slot
     assert n(0, '066') <= 6 and n(1, '066') == n(-1, '066') <= 12                # BLTDMOD: stops without CDANG; else the zeros after it stop it
     assert n(0, '180') <= 12                                                      # a legal MOVE, then the zeros
+
+
+def test_a_register_the_copper_wrote_holds_in_later_frames(harness):
+    """1.0.49 (SWIV KIT-GAPS 6): the list wrote BPLCON0 (5 planes) and was then replaced by one that writes nothing; the
+    CPU's own last value is 0 planes. The hardware keeps the Copper's write: bitplane DMA goes on frame after frame. The
+    model kept it for one frame and then fell back to the CPU's value (SWIV: 5120 bitplane slots a frame in the
+    original, 0 in the host, the CPU 4 % faster). A later write by the CPU still wins."""
+    n = [int(x) for x in harness('8380', 'hold').split()[1:]]
+    assert n[0] > 1000 and n[1] >= n[0] and n[2] == n[1] and n[3] == 0, n
 
 
 def test_reads_at_the_end_of_an_instruction(harness):

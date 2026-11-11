@@ -200,11 +200,14 @@ API int engine_init(const uint8_t *p, int n) {
     if (sscanf(st + k, "%x %x %x %x %x %x%n", &pra, &sdr, &icr, &j0, &j1, &pot, &used) == 6) {
         k += used; H_CIAA_PRA = (uint8_t)pra; H_CIAA_SDR = (uint8_t)sdr; H_CIAA_ICR = (uint8_t)icr;
         H_JOY0 = (uint16_t)j0; H_JOY1 = (uint16_t)j1; H_POTGOR = (uint16_t)pot;
-        if (sscanf(st + k, "%ld", &fr0) == 1) H_FRAME0 = fr0;
+        if (sscanf(st + k, "%ld%n", &fr0, &used) == 1) { H_FRAME0 = fr0; k += used; }
     }
+    unsigned cia[16]; int ncia = 0;
+    while (ncia < 16 && sscanf(st + k, "%x%n", &cia[ncia], &used) == 1) { ncia++; k += used; }
     sr_set(&E_M, sr, 1); H_INTREQ = (uint16_t)intreq; H_LED_OFF = (pra >> 1) & 1;
     E_ENTRY = entry;
     host_init(t0);
+    if (ncia == 16) host_cia_state(cia);
     host_display_init();
     h_frame_cb = e_frame_start; h_frame_done_cb = e_frame_done;
     G_DONE = 0; G_END = 0; G_WAIT = 0; G_ERR = 0; G_AW = 0;

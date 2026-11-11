@@ -18,8 +18,10 @@ void arek_bus_frame_map(ArekBus *b) {
     const uint32_t H = (uint32_t)b->hpos, NL = (uint32_t)(b->lines < b->maxlines ? b->lines : b->maxlines);
     memset(b->own, 0, (size_t)b->maxlines * H); b->cop_int = -1; b->cop_irq_n = 0;   /* cela mapa: radky za koncem snimku drzi pristupy, ktere pretekly (jinak by zustaly obsazene) */
     uint16_t R[0x100]; memcpy(R, b->regs, sizeof R);
-    for (int i = 0; i < 0x100; i++) if (b->copw[i]) R[i] = b->copr[i];   /* registry, ktere copper psal minuly snimek: hodnota copperu (DIW, BPLCON, DDF, sprity) */
-    memset(b->copw, 0, sizeof b->copw);
+    /* registry, ktere copper zapsal: plati jeho hodnota, dokud registr neprepise procesor (arek_bus_cpu_write) - i ve snimcich, kdy
+     * copper uz nepise (1.0.49, SWIV KIT-GAPS 6: seznam s BPLCON0 nahradil prazdny, model se po jednom snimku vratil k hodnote
+     * procesoru a bitplany zmizely z mapy: 5120 slotu na snimek v originalu, 0 v modelu) */
+    for (int i = 0; i < 0x100; i++) if (b->copw[i]) R[i] = b->copr[i];
     uint32_t cp = ((uint32_t)R[0x080 >> 1] << 16 | R[0x082 >> 1]) & b->chipmask; if (!cp) cp = b->cop_default;   /* COP1LC jeste nezapsany (start ze stavu) */
     int cst = 1, cnext = 0; uint16_t c1 = 0, c2 = 0; uint32_t cwait = 0, cmask = 0;   /* copper: 1 FETCH, 2 MOVE, 3 WAIT_OR_SKIP, 4 WAIT1, 5 WAIT2, 6 cekani, 7 SKIP1, 8 SKIP2, 0 stop */
     int vflop = 0; BSpr S[8]; for (int n = 0; n < 8; n++) { S[n].ptr = ((uint32_t)R[(0x120 >> 1) + 2 * n] << 16 | R[(0x122 >> 1) + 2 * n]) & b->chipmask; S[n].st = 0; S[n].vs = S[n].ve = -1; }

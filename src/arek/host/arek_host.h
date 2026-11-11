@@ -103,6 +103,16 @@ static void h_cia_due(void) {
         if ((t->cr & 1) && (H_CIA[i].mask & (1 << k))) { int64_t d = t->e0 + t->cnt + 1; if (best < 0 || d < best) best = d; } }
     H_CIA_DUE = best < 0 ? -1 : (double)best * 5.0;
 }
+/* 1.0.49 (SWIV): the CIAs of a captured state - state.txt's last line, 8 values for CIA-A then CIA-B: latch, counter
+ * and control register of timer A, of timer B, the interrupt mask, the ICR. After host_init (which resets them). The
+ * counters go on from the state's time; the emulator's own start delay of a few E ticks is not modelled. */
+static void host_cia_state(const unsigned v[16]) {
+    for (int i = 0; i < 2; i++) { const unsigned *c = v + 8 * i;
+        for (int k = 0; k < 2; k++) { HCiaTimer *t = &H_CIA[i].t[k];
+            t->latch = (uint16_t)c[3 * k]; t->cnt = (uint16_t)c[3 * k + 1]; t->cr = (uint8_t)c[3 * k + 2]; t->e0 = h_eticks(); }
+        H_CIA[i].mask = (uint8_t)(c[6] & 0x7f); *h_cia_icr(i) = (uint8_t)(c[7] & 0x7f); }
+    H_CIA_DUE = 0; h_cia_due();
+}
 static void h_cia_poll(void) {
     if (H_CIA_DUE < 0 || h_abs() < H_CIA_DUE) return;
     for (int i = 0; i < 2; i++) for (int k = 0; k < 2; k++) h_cia_run(i, k);

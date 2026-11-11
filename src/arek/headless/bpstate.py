@@ -148,6 +148,23 @@ def parse_regs(out):
 _VALUE = re.compile(r'(\w+)\s*:\s*((?:0x[0-9A-Fa-f]+\s*)+|yes|no|-?\d+)(?=\s|$)')
 
 
+def cia_regs(chip):
+    """A CIA of cpu.json ``chips`` (``ciaa`` / ``ciab``) by register: TA TB (counters), LA LB (latches), PRA PRB, DDRA
+    DDRB, PA PB (the port pins), CRA CRB, ICR, IMR (the interrupt mask), SDR. vAmiga's ``r ciaa`` prints two values a
+    line under one label ("Counter A : .. B : ..") and parse_chips keeps them as A, B, A#2, B#2 ... in the order of
+    the lines, the two interrupt registers as reg, reg#2 - this names them. None when the build printed no CIA."""
+    if not chip or not all(isinstance(chip.get(k), int) for k in ('A', 'B', 'A#6', 'B#6', 'reg', 'reg#2')):
+        return None
+    out = {}
+    for n, (ka, kb) in enumerate((('TA', 'TB'), ('LA', 'LB'), ('PRA', 'PRB'), ('DDRA', 'DDRB'), ('PA', 'PB'), ('CRA', 'CRB'))):
+        sfx = '' if n == 0 else '#%d' % (n + 1)
+        out[ka], out[kb] = chip['A' + sfx], chip['B' + sfx]
+    out['ICR'], out['IMR'] = chip['reg'], chip['reg#2']
+    if isinstance(chip.get('SDR'), int):
+        out['SDR'] = chip['SDR']
+    return out
+
+
 def parse_chips(out):
     """Custom chip registers from ``r agnus|copper|denise|paula|blitter`` (vAmiga 5.0b2)::
 

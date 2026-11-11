@@ -12,7 +12,7 @@ from arek.m68k import recomp
 MAIN, L3, L6 = 0x1000, 0x1100, 0x1200
 
 
-def run(tmp_path, prog, frames, auto, defines=(), args=()):
+def run(tmp_path, prog, frames, auto, defines=(), args=(), cia=''):
     if not bus.compiler():
         pytest.skip('no C compiler')
     img = bytearray(0x2000)
@@ -28,7 +28,7 @@ def run(tmp_path, prog, frames, auto, defines=(), args=()):
     creg = bytearray(512)
     creg[0x96:0x98] = struct.pack('>H', 0x0200)
     (st / 'creg.bin').write_bytes(creg)
-    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n' + cia)
     host.pack(str(st), str(tmp_path / 'state.bin'))
     host.engine_build(str(tmp_path / 'n'), str(tmp_path / 'game.c'), 'f_%06x' % L3, 'f_%06x' % MAIN, native=True, defines=list(defines))
     r = subprocess.run([str(tmp_path / 'n' / 'arek_host_engine'), str(tmp_path / 'state.bin'), str(frames), '--dump', str(tmp_path / 'out.bin')] + list(args),
@@ -68,6 +68,20 @@ def test_a_cia_timer_interrupt_comes_when_the_timer_runs_out(tmp_path):
     frames = w(0x4002)
     want = frames * 313 * 227 / 505.0
     assert frames >= 9 and abs(w(0x4006) - want) < 0.03 * want + 150, (frames, w(0x4006), want)   # ~141 a frame, the first and last frame partly
+
+
+@pytest.mark.parametrize('cia', ['', 'ffff ffff 0 ffff ffff 0 0 0  64 30 1 ffff ffff 0 1 0\n'])
+def test_a_captured_state_keeps_its_running_cia_timer(tmp_path, cia):
+    """1.0.49 (SWIV): a state taken in the middle of a game - the game set CIA-B timer A up long before and never
+    touches it again. state.txt's CIA line (latch 100, counter 48, running, mask bit set) keeps the level-6 interrupts
+    coming, ~141 a frame; without the line the host's CIAs are at reset and there are none."""
+    prog = {MAIN: '4df900dff000' '3d7ce020009a' + WAIT_VBL,       # INTENA: master, EXTER, VERTB
+            L3: L3_H,
+            L6: '52784006' '4a3900bfdd00' '33fc200000dff09c' '4e73'}
+    w = run(tmp_path, prog, 10, [MAIN, L3, L6], defines=['HOST_L6=f_%06x' % L6], cia=cia)
+    frames = w(0x4002)
+    want = frames * 313 * 227 / 505.0 if cia else 0
+    assert frames >= 9 and abs(w(0x4006) - want) < 0.03 * want + (150 if cia else 1), (frames, w(0x4006), want)
 
 
 def test_a_polled_cia_timer_raises_no_interrupt(tmp_path):

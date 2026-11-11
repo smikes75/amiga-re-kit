@@ -177,11 +177,14 @@ int main(int argc, char **argv) {
         H_CIAA_PRA = (uint8_t)pra; H_CIAA_SDR = (uint8_t)sdr; H_CIAA_ICR = (uint8_t)icr; H_JOY0 = (uint16_t)j0; H_JOY1 = (uint16_t)j1; H_POTGOR = (uint16_t)pot;
     }
     { long fr0 = 0; if (fscanf(f, "%ld", &fr0) == 1) H_FRAME0 = fr0; }
+    unsigned cia[16]; int ncia = 0;
+    while (ncia < 16 && fscanf(f, "%x", &cia[ncia]) == 1) ncia++;
     fclose(f);
     sr_set(&m, sr, 1); H_INTREQ = (uint16_t)intreq;
     H_LED_OFF = (pra >> 1) & 1;
     OUTF = fopen(argv[2], "wb"); if (!OUTF) { perror(argv[2]); return 1; }
     host_init(t0);
+    if (ncia == 16) host_cia_state(cia);
     host_display_init();
     h_pc_cb = on_pc; h_frame_cb = on_frame;
     if (NINP && INP_FIRST < 0 && (long)(t0 / HOST_HPOS) >= 100)

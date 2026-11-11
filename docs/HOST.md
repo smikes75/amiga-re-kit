@@ -52,7 +52,8 @@ that moves a7 from channel to channel (S.W.I.V.). Called from C (`host_vec_lN`),
 return, the handler's C frame returns and the interrupted routine goes on with a foreign stack (`unknown routine`,
 accesses outside RAM some frames later). Not for a host whose own C routine takes interrupts and must go on afterwards
 (`host_spend` in an extern): its frame is dropped as well and the interrupted instruction runs again - the routine has to
-remember where it was. The trace's tick records skip such a handler by its level (`H_IN_IRQ`). Overlays: inside a module (`--lib --prefix NAME:LO:HI --overlay-module`), a direct bsr / jsr to its own range is an
+remember where it was. The trace's tick records skip such a handler by its level (`H_IN_IRQ`). A game whose tick IS the handler's entry (one record per VBL) passes it as
+`-DHOST_L3_PC=0x...` - as `TICK_PC` alone it is inside the interrupt and only the first record is written. Overlays: inside a module (`--lib --prefix NAME:LO:HI --overlay-module`), a direct bsr / jsr to its own range is an
 ordinary call - walked and translated (1.0.11); only targets outside it in an overlay area go through `overlay_call`.
 The module fingerprint (`overlay_fp`, 256 bytes of RAM) is a raw read of the host, not a CPU access - until
 1.0.6 it was bus-counted and every `overlay_call` cost emulated time (Turrican II: 7 modules = 9 lines of the frame,
@@ -82,7 +83,7 @@ The state the driver starts from comes from a capture of the original:
 
 ```
 arek bpstate --address 0xc01c72 --set-at 293 --end 300 --ram-len 0x80000 --region 0xc00000:0x80000 ... --out cap/s0
-arek host state cap/s0 state0            # chip.bin, slow.bin, creg.bin, state.txt (SR, beam time, INTREQ, CIA, frame)
+arek host state cap/s0 state0            # chip.bin, slow.bin, creg.bin, state.txt (SR, beam time, INTREQ, CIA-A port, frame; 1.0.49: the timers, masks and ICRs of both CIAs when the capture has them)
 ./host_trace state0 run.vtr 1490 inputs.txt --skip-stack 0xfa0
 arek trace compare orig.vtr run.vtr      # or arek parity suite.json
 ```

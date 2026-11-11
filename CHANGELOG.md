@@ -3,6 +3,19 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.49 (2026-11-11)
+
+- a captured state keeps its CIAs (SWIV): `arek host state` writes the timers (latch, counter, control register), the
+  interrupt masks and the ICRs of both CIAs as a last line of state.txt when the capture has them (`r ciaa` / `r ciab`
+  of the emulator; `bpstate.cia_regs` names what `parse_chips` stores as A, B, A#2 ...), `host_trace` and the engine
+  load it (`host_cia_state`). Before, a state from the middle of a game started with the CIAs at reset: no level-6
+  interrupts until the game set the timer up again. The emulator's start delay of a few E ticks is not modelled
+- bus model (SWIV KIT-GAPS 6): a register the Copper wrote keeps its value until the CPU writes it - also in frames
+  whose list no longer writes it. The model kept it for one frame and fell back to the CPU's value: after a list with
+  BPLCON0 was replaced by an empty one the bitplane slots left the map (SWIV: 5120 a frame in the original, 0 in the
+  host, the CPU ~4 % faster)
+- docs: with `host_jmp_lN` a tick at the handler's entry needs `-DHOST_L3_PC` (TICK_PC inside an interrupt is skipped)
+
 ## 1.0.48 (2026-11-11)
 
 - wasm (SWIV KIT-GAPS 3): a `switch` whose values span more than a WebAssembly br_table holds (65 520 targets) comes

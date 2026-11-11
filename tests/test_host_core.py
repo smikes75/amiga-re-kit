@@ -121,6 +121,24 @@ def test_state_from_a_capture(tmp_path):
     assert r['sr'] == 0x2014 and r['frame'] == 1234
     from arek import cli
     assert cli.main(['host', 'state', str(cap), str(tmp_path / 'st2')]) == 0 and (tmp_path / 'st2' / 'state.txt').exists()
+    assert len(lines) == 5                                  # no CIA dump in the capture: no CIA line
+    # 1.0.49 (SWIV): the CIAs as vAmiga prints them and parse_chips stores them (two values a line under one label)
+    from arek.headless import bpstate
+    out = ('try r ciab\n\nRegisters:\n\n               Counter A : 0x0123    B : 0xffff\n                 Latch A : 0x0e00    B : 0xffff\n'
+           '         Data register A : 0xff      B : 0x75\n   Data port direction A : 0xc0      B : 0xff\n'
+           '             Data port A : 0xff      B : 0x75\n      Control register A : 0x11      B : 0x80\n\n'
+           '   Interrupt control reg : 0x14\n      Interrupt mask reg : 0x01\n\n                     SDR : 0x00\n'
+           '                     SSR : 0x01\n              serCounter : 7\n\ncommander\n')
+    ciab = bpstate.parse_chips(out)['ciab']
+    assert bpstate.cia_regs(ciab) == {'TA': 0x123, 'TB': 0xffff, 'LA': 0xe00, 'LB': 0xffff, 'PRA': 0xff, 'PRB': 0x75, 'DDRA': 0xc0,
+                                      'DDRB': 0xff, 'PA': 0xff, 'PB': 0x75, 'CRA': 0x11, 'CRB': 0x80, 'ICR': 0x14, 'IMR': 1, 'SDR': 0}
+    assert bpstate.cia_regs({'PRA': 0x7e}) is None and bpstate.cia_regs(None) is None
+    meta['chips']['ciab'] = ciab
+    meta['chips']['ciaa'] = bpstate.parse_chips(out.replace('ciab', 'ciaa').replace('0x0123', '0x0456'))['ciaa']
+    (cap / 'cpu.json').write_text(json.dumps(meta))
+    host.state(str(cap), str(tmp_path / 'st3'))
+    lines = (tmp_path / 'st3' / 'state.txt').read_text().splitlines()
+    assert lines[4] == '1234' and lines[5] == 'e00 456 11 ffff ffff 80 1 14 e00 123 11 ffff ffff 80 1 14'
 
 
 # POTGO's output bits read back in POTGOR (G40) and CIA-B timer A counts E ticks (G38): the game writes POTGO three
@@ -753,13 +771,13 @@ SCHED = {
 }
 
 
-@pytest.mark.parametrize('vec', ['host_jmp_l3', 'host_vec_l3'])
-def test_host_tasks_switched_by_an_rts_inside_the_handler(tmp_path, vec):
+def test_host_tasks_switched_by_an_rts_inside_the_handler(tmp_path, vec='host_jmp_l3'):
     """1.0.48 (SWIV KIT-GAPS 4), --resume: a scheduler that ends in rts on the other task's stack, called by one task
     itself and by the interrupt handler of the other. Entered by a jump (host_jmp_l3) both tasks run on and the records
     know when the handler is over. Entered as a C call (host_vec_l3) the scheduler's rts onto the higher stack reads as
-    a plain return, the handler's C frame returns and the interrupted routine goes on with the other task's stack -
-    kept here as the measured reason for host_jmp."""
+    a plain return, the handler's C frame returns and the interrupted routine goes on with the other task's stack
+    (measured here on macOS: the run fails). That variant is not run: a host on a foreign stack does anything - on the
+    Linux CI it took the runner down (1.0.48's run was lost after 47 minutes)."""
     cc = bus.compiler()
     if not cc:
         pytest.skip('no C compiler')

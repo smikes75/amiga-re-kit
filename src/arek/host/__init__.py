@@ -97,7 +97,9 @@ def state(capture, out, trace=None):
     """The state folder a host driver starts from (``arek_host_trace.c``), from an ``arek bpstate`` capture folder:
     ``chip.bin`` (chip RAM from 0), ``slow.bin`` (the first extra region, zeros without one), ``creg.bin`` (the custom
     registers, ``bpstate.chip_regs``), ``state.txt`` (D0-D7, A0-A7; SR, beam time in CCK, INTREQ, PC; CIA-A PRA SDR ICR,
-    JOY0DAT JOY1DAT POTGOR; frame). SR comes from cpu.json ``sr`` or from record 0 of ``trace`` (a trace armed at the
+    JOY0DAT JOY1DAT POTGOR; frame; 1.0.49, when the capture has the CIAs: for CIA-A then CIA-B the latch, counter and
+    control register of timer A and of timer B, the interrupt mask and the ICR - a state taken in the middle of a game
+    keeps its running timers and their interrupts). SR comes from cpu.json ``sr`` or from record 0 of ``trace`` (a trace armed at the
     same stop); the CIA and joystick values from cpu.json ``chips`` (``ciaa``) when the build prints them, else
     defaults (PRA $FE, POTGOR $5500). Returns the metadata dict."""
     from ..headless import bpstate
@@ -139,6 +141,10 @@ def state(capture, out, trace=None):
                                          cia.get('ICR', 0) if isinstance(cia.get('ICR', 0), int) else 0,
                                          0, 0, 0x5500))
         f.write('%d\n' % meta['beam']['frame'])
+        cias = [bpstate.cia_regs(chips.get(n)) for n in ('ciaa', 'ciab')]
+        if all(cias):                                    # 1.0.49: the timers, masks and pending bits of both CIAs
+            f.write(' '.join('%x %x %x %x %x %x %x %x' % (c['LA'], c['TA'], c['CRA'], c['LB'], c['TB'], c['CRB'], c['IMR'], c['ICR'])
+                             for c in cias) + '\n')
     return {'sr': sr, 'frame': meta['beam']['frame'], 'time': v * 227 + h, 'pc': meta['pc'], 'dir': os.path.abspath(out)}
 
 
