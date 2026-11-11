@@ -84,6 +84,12 @@ CASES = {
     # 1.0.47 (SWIV KIT-GAP 1): a MOVE below $40 stops the Copper for the frame - the green of line $60 never comes
     'copper stops at an illegal move': ram_with(with_colours(setup(1, ptrs=[PLANES[0][0]])) + [0x4007, 0xfffe, 0x180, 0x00f, 0x5007, 0xfffe, 0x000, 0x0000,
                                                                                          0x6007, 0xfffe, 0x180, 0x0f0] + END, PLANES[:1]),
+    # 1.0.59 (SWIV's score line): BPLCON2 PF2P above 4 - planes 1-4 are ignored wherever plane 5 is set (colour 16;
+    # half-bright 16 with plane 6), not in HAM; a sprite is in front of such a playfield
+    'five planes illegal priority': ram_with(with_colours(setup(5, con2=0x3f, ptrs=[p for p, _ in PLANES[:5]])) + sprite_copper([0x20000]) + END,
+                                             PLANES[:5] + [sprite(0x20000, 0x40, 0x50, 0x100, [(0xffff, 0)] * 16)]),
+    'ehb illegal priority': ram_with(with_colours(setup(6, con2=0x3f, ptrs=[p for p, _ in PLANES])) + END, PLANES),
+    'ham6 illegal priority': ram_with(with_colours(setup(6, con0=0x6a00, con2=0x3f, ptrs=[p for p, _ in PLANES])) + END, PLANES),
     'ddfstrt 24 with sprites 3 and 4': ram_with(with_colours(setup(3, con1=0x88, ddfstrt=0x24, ptrs=[p for p, _ in PLANES[:3]]))
                                                 + sprite_copper([0x20200, 0x20200, 0x20200, 0x20000, 0x20100]) + END,
                                                 PLANES[:3] + [sprite(0x20000, 0x40, 0x50, 0x180, [(0xf0f0, 0x0ff0)] * 16),

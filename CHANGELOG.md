@@ -3,6 +3,14 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.59 (2026-11-12)
+
+- display (arek.display and arek_display.h): with BPLCON2's PF2P above 4 - not a priority - OCS Denise ignores planes
+  1-4 wherever plane 5 is set: the pixel is colour 16 (16 half-bright with plane 6), except in HAM (vAmiga
+  translateSPF). SWIV's score line (BPLCON2 $003F, five planes for seven lines, the text in plane 5): 880-920 pixels
+  a frame in lines 26-32 had the colours of what lies under the text; 21 pictures of 21 equal to the original's now
+- the first release uploaded by the tag itself (`.github/workflows/release.yml`, PyPI Trusted Publishing)
+
 ## 1.0.58 (2026-11-12)
 
 - bus model, an instruction beside a blit across the frame's end, again (1.0.56 had it for a lea): the blitter is

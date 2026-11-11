@@ -219,6 +219,9 @@ static uint16_t ard_pixel(int h, uint16_t words[6][64], int nw, const int base[2
         return spc >= 0 ? ARD_R[(0x180 >> 1) + spc] & 0xfff : ARD_R[0x180 >> 1] & 0xfff;
     }
     int pri = (con2 >> 3) & 7;
+    /* 1.0.59 (SWIV's score line): PF2P above 4 is not a priority - OCS Denise then ignores planes 1-4 wherever plane 5 is
+     * set (colour 16; 16 half-bright with plane 6), except in HAM (vAmiga translateSPF, vAmigaTS invprio0-3) */
+    if (pri > 4 && (idx & 16) && !(n == 6 && (con0 & 0x0800))) idx &= 0x30;
     if (n == 6 && (con0 & 0x0800) && ham) {            /* HAM6 */
         int c = idx & 15, ctl = (idx >> 4) & 3; uint16_t prev = *ham;
         uint16_t col = ctl == 0 ? (ARD_R[(0x180 >> 1) + c] & 0xfff) : ctl == 1 ? (uint16_t)((prev & 0xff0) | c)

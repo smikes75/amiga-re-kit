@@ -80,6 +80,17 @@ def test_ehb_marks_half_bright():
     assert display.render(ram_with(c, words), COP).pixels[0x2c][200] == 0xeee | HALF
 
 
+@pytest.mark.parametrize('con2, planes, want', [(0x24, 5, 0x0f0), (0x3f, 5, 0xaae), (0x2f, 5, 0xaae), (0x3f, 4, 0x00f)])
+def test_an_illegal_playfield_priority_shows_colour_16_where_plane_5_is_set(con2, planes, want):
+    """1.0.59 (SWIV's score line: BPLCON2 $003F, five planes in seven lines): with PF2P above 4 OCS Denise ignores planes
+    1-4 wherever plane 5 is set - the text in plane 5 is COLOR16 whatever lies under it. With a legal priority the
+    index is the usual one (here 16 + 15), and without plane 5 nothing changes."""
+    ptrs = tuple(0x10000 + 0x1000 * k for k in range(planes))
+    words = [(p, [0xffff] * 23) for p in ptrs]                               # every plane set: index 31 (15 with four)
+    c = setup(planes=planes, con2=con2, ptrs=ptrs) + [0x1a0, 0xaae, 0x1be, 0x0f0, 0x19e, 0x00f] + END
+    assert display.render(ram_with(c, words), COP).pixels[0x2c][200] == want
+
+
 def _sprite(addr, vstart, vstop, hstart, rows, attach=False):
     pos = (vstart & 0xff) << 8 | (hstart >> 1) & 0xff
     ctl = (vstop & 0xff) << 8 | (0x80 if attach else 0) | (vstart >> 8 & 1) << 2 | (vstop >> 8 & 1) << 1 | hstart & 1

@@ -434,6 +434,11 @@ def _pixel(r, h, words, base, n, sline, ham=None, sub=None, vwin=True):
                 return r[(0x180 >> 1) + col] & 0xfff
         return r[(0x180 >> 1) + spc] & 0xfff if spc is not None else r[0x180 >> 1] & 0xfff
     pri = (con2 >> 3) & 7                               # single playfield: PF2P
+    # 1.0.59 (SWIV's score line): PF2P above 4 is not a priority - OCS Denise then ignores planes 1-4 wherever plane 5
+    # is set (colour 16; 16 half-bright with plane 6), except in HAM (vAmiga translateSPF, vAmigaTS invprio0-3). Sprites
+    # are in front of such a playfield anyway (every pair is below 5).
+    if pri > 4 and idx & 16 and not (n == 6 and con0 & 0x0800):
+        idx &= 0x30
     if n == 6 and con0 & 0x0800 and ham is not None:    # HAM6: bits 4-5 = palette / blue / red / green
         c, ctl = idx & 15, (idx >> 4) & 3
         prev = ham[0]
