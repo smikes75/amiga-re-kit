@@ -58,9 +58,13 @@ static inline void arek_glue_interrupt(void) {
  * AREK_GLUE_NO_TICK before including this file and calls arek_glue_insn() from it. */
 static inline void arek_glue_insn(uint32_t pc, uint32_t clocks) {
     if (!AREK_GLUE.ready) return;
-    uint32_t words = 1, extra = 0, flags = 0, pre = 0;
+    uint32_t words = 1, extra = 0, flags = 0, pre = 0, ord = 0;
 #if defined(BUS_SPARSE)
-    { const uint8_t *row = bus_tab_row(pc); if (row && row[0]) { words = row[0]; extra = row[1]; flags = row[2]; } }
+    { const uint8_t *row = bus_tab_row(pc); if (row && row[0]) { words = row[0]; extra = row[1]; flags = row[2];
+#ifdef BUS_ROW4
+        if (AREK_GLUE.bus.order2) { ord = row[3] & 3; AREK_GLUE.bus.poll_back = (row[3] >> 2) & 3; }
+#endif
+    } }
 #elif defined(BUS_N)
     uint32_t i = (pc - BUS_LO) >> 1;           /* the dense table of kit 0.5.15 - 0.6.4 */
     if (i < BUS_N && BUS_TAB[i][0]) { words = BUS_TAB[i][0]; extra = BUS_TAB[i][1]; flags = BUS_TAB[i][2]; }
@@ -74,6 +78,7 @@ static inline void arek_glue_insn(uint32_t pc, uint32_t clocks) {
     else if (flags & 8) pre = 2;
     uint32_t tail = (flags >> 5) & 3, head = words + extra;      /* 1.0.47: bits 5-6 = the accesses made at the instruction's end */
     if (tail > head) tail = head;
+    if (ord && !tail && head) { AREK_GLUE.t = arek_bus_insn(&AREK_GLUE.bus, AREK_GLUE.t, clocks, head - 1, pre); AREK_GLUE.bus.in_defer = ord; return; }   /* 1.0.53: the last prefetch where the 68000 makes it */
     AREK_GLUE.t = arek_bus_insn(&AREK_GLUE.bus, AREK_GLUE.t, clocks, head - tail, pre);
     AREK_GLUE.bus.in_tail = tail;
 }

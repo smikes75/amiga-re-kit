@@ -361,7 +361,7 @@ def test_bus_table_is_sparse():
     img[far:far + 4] = prog
     src, _, _ = recomp.generate(bytes(img), 0, auto=[0, far], bus_table=True)
     assert 'BUS_SEGS_N 2' in src and 'BUS_SEG_LO[BUS_SEGS_N] = {0x0u, 0x100000u}' in src and 'BUS_SEG_HI[BUS_SEGS_N] = {0x4u, 0x100004u}' in src
-    assert src.count('{1,0,0},{1,3,0}') == 2 and len(src) < 200000                 # nop, rts in both; no 12 MB of zeros
+    assert src.count('{1,0,0,0},{1,3,0,0}') == 2 and len(src) < 200000                 # nop, rts in both; no 12 MB of zeros
 
 
 PAULA_HARNESS = r"""
@@ -574,3 +574,26 @@ def test_reads_at_the_end_of_an_instruction(harness):
     assert ent('40e7') == (1, 1, timing.TAB_PRE_2)                                                                  # move sr,-(a7): unchanged
     i = decode(bytes.fromhex('46c0') + bytes(8), 0, 0)
     assert timing.cycles(i) == 12 and timing.bus(i) == (2, 0)                                                       # "nn np np"
+
+
+def test_the_last_prefetch_and_the_interrupt_sample_point_of_an_instruction():
+    """1.0.53 (SWIV, the timing model): the bus table's fourth byte. timing.bus_order - where the last prefetch falls
+    among the data accesses (Moira's order); timing.bus_poll - how many bus cycles before its last the instruction
+    samples the interrupt level. With both, SWIV's boot has 102 VBL entries in a row on the original's slot and
+    instruction (25 before): `move.l a7,14(a5)` across the frame's end samples between its two write words."""
+    from arek.m68k import decode, timing as T
+    ent = lambda hx: (lambda i: (T.bus_order(i), T.bus_poll(i)))(decode(bytes.fromhex(hx) + bytes(8), 0, 0))
+    assert ent('2b4f000e') == (T.ORD_END, 1)        # move.l a7,14(a5): ext, write, [sample] write, prefetch
+    assert ent('3b40000e') == (T.ORD_END, 0)        # move.w d0,14(a5): the prefetch samples
+    assert ent('2a55') == (T.ORD_END, 0)            # movea.l (a5),a5: read, read, prefetch
+    assert ent('2b55000e') == (T.ORD_END, 0)        # move.l (a5),14(a5): from memory - the prefetch samples
+    assert ent('2f08') == (T.ORD_NONE, 0)           # move.l a0,-(a7): prefetch, then the writes
+    assert ent('2f10') == (T.ORD_MID2, 0)           # move.l (a0),-(a7): reads, prefetch, writes
+    assert ent('5268 0004'.replace(' ', '')) == (T.ORD_MID1, 1)       # addq.w #1,4(a0): read, prefetch [sample], write
+    assert ent('52a8 0004'.replace(' ', '')) == (T.ORD_MID2, 2)       # addq.l
+    assert ent('08a800060e01') == (T.ORD_MID1, 1)                     # bclr #6,$e01(a0)
+    assert ent('066800010004') == (T.ORD_MID1, 0)                     # addi.w #1,4(a0): samples at its write
+    assert ent('026800010004') == (T.ORD_MID1, 1)                     # andi.w #1,4(a0): at the prefetch
+    assert ent('4a13') == (T.ORD_END, 0) and ent('08130006') == (T.ORD_END, 0)      # tst.b (a3); btst #6,(a3)
+    assert ent('4e75') == (T.ORD_NONE, 0) and ent('4268 0004'.replace(' ', '')) == (T.ORD_NONE, 0)   # rts; clr.w 4(a0)
+    assert ent('46fc2300') == (T.ORD_NONE, 0)                         # move #,sr: its own end reads (1.0.47)

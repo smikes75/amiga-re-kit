@@ -202,6 +202,10 @@ static void host_display_init(void) {
 }
 
 /* the runtime's hooks: custom registers it does not model, every register write, the CIAs */
+#ifdef HOST_FLOPPY                       /* 1.0.53: drive DF0 and the disk controller, for a game that reads the disk with its own loader */
+#include "arek_host_disk.h"
+#include "arek_host_floppy.h"
+#endif
 int hw_read_hook(uint32_t off, uint32_t *v) {
     double t = h_now(); long tt = (long)t; int vp = (int)(tt / HOST_HPOS), hp = (int)(tt % HOST_HPOS), lof = H_LOF;
     /* 1.0.40: the frame rolls at an instruction boundary; a read made past the frame's end inside the instruction is
@@ -210,7 +214,12 @@ int hw_read_hook(uint32_t off, uint32_t *v) {
     switch (off) {
     case 0x004: *v = (lof << 15) | ((vp >> 8) & 1); return 1;                   /* VPOSR (OCS PAL Agnus id 0) */
     case 0x006: *v = ((vp & 0xff) << 8) | (hp & 0xff); return 1;                 /* VHPOSR */
+#ifdef HOST_FLOPPY
+    case 0x01e: hfl_run(h_abs()); *v = H_INTREQ; return 1;                      /* INTREQR: a loader polls DSKBLK here */
+    case 0x01a: *v = hfl_dskbytr(); return 1;                                    /* DSKBYTR */
+#else
     case 0x01e: *v = H_INTREQ; return 1;                                         /* INTREQR */
+#endif
     case 0x00a: *v = H_JOY0; return 1;
     case 0x00c: *v = H_JOY1; return 1;
     case 0x016: *v = H_POTGOR; return 1;
@@ -218,6 +227,9 @@ int hw_read_hook(uint32_t off, uint32_t *v) {
     return 0;
 }
 void hw_write_hook(uint32_t off, uint32_t v) {
+#ifdef HOST_FLOPPY
+    hfl_reg_write(off, (uint16_t)v);
+#endif
     arek_bus_cpu_write(arek_glue_bus(), off);                     /* the CPU's write is the later one (G50) */
     { ArekBus *bb = arek_glue_bus(); bb->journal_on = H_CIA_SYNC; arek_bus_cpu_reg(bb, off, (uint16_t)v, (uint32_t)h_now()); }   /* 1.0.52: DMA registers written in the middle of a frame (with the timing model) */
     if ((off >= 0x080 && off <= 0x086) || (off >= 0x08e && off <= 0x094) || (off >= 0x0e0 && off <= 0x10a) ||
@@ -247,7 +259,7 @@ static void h_cia_wait2(int write) {
     if (H_CIA_SYNC) {
         int rmw = write && H_CIA_RD_N == H_TICKS;                              /* this instruction read a CIA before: its write comes last */
         if (!write) H_CIA_RD_N = H_TICKS;
-        ArekBus *bb = arek_glue_bus(); int redo = !rmw && H_CIA_UNDO_N != H_TICKS;
+        ArekBus *bb = arek_glue_bus(); int redo = !rmw && H_CIA_UNDO_N != H_TICKS && !bb->in_defer;   /* 1.0.53: with the table's order the last prefetch has not been made yet */
         arek_glue_set_time(arek_bus_undo_last(bb)); if (bb->in_da) bb->in_da--;   /* the runtime counted this access as one on the chip bus (bus_access_hook): it is not */
         if (redo) { H_CIA_UNDO_N = H_TICKS; arek_glue_set_time(arek_bus_undo_last(bb)); }   /* the last prefetch comes after this access */
         long clk = (long)floor(2.0 * h_now()) + 2;                             /* the sync is worked out 2 clocks into the bus cycle */
@@ -273,7 +285,12 @@ uint8_t cia_read_hook(uint32_t a) {
     if (reg == 13) { h_cia_run(i, 0); h_cia_run(i, 1); h_cia_due(); uint8_t *icr = h_cia_icr(i), r = (uint8_t)(*icr | ((*icr & H_CIA[i].mask) ? 0x80 : 0)); *icr = 0; return r; }
     if (reg == 14 || reg == 15) { int k = reg - 14; h_cia_run(i, k); h_cia_due(); return H_CIA[i].t[k].cr; }
     switch (a) {
+#ifdef HOST_FLOPPY
+    case 0xbfe001: hfl_run(h_abs()); return (uint8_t)((H_CIAA_PRA & 0xc3) | (hfl_pra() & 0x3c));   /* /CHNG /WPRO /TK0 /RDY from the drive */
+    case 0xbfd100: return HFL.prb;
+#else
     case 0xbfe001: return H_CIAA_PRA;
+#endif
     case 0xbfec01: return H_CIAA_SDR;
     }
     H_IO_UNKNOWN++; H_IO_LAST = a; return 0xff;
@@ -283,6 +300,9 @@ void cia_write_hook(uint32_t a, uint8_t v) {
     if (HOST_CIA_WRITE(a, v)) { h_cia_wait2(1); return; }
 #endif
     if (H_CIA_SYNC) h_cia_wait2(1);                     /* 1.0.52: the write lands after its wait for the E clock - a timer it starts, starts then */
+#ifdef HOST_FLOPPY
+    if (a == 0xbfd100) { hfl_run(h_abs()); hfl_prb(HFL.prb, v); }                /* CIA-B PRB: motor, select, side, direction, step */
+#endif
     int i, reg = h_cia_reg(a, &i);
     if (reg >= 4 && reg <= 7) {                         /* the latch; the high byte loads a stopped timer (and starts a one-shot) */
         int k = (reg - 4) >> 1; HCiaTimer *t = &H_CIA[i].t[k]; h_cia_run(i, k);
@@ -315,6 +335,9 @@ static void h_premap_next(void) {
 static void host_events(void) {
     double len = (double)H_LINES * HOST_HPOS;
     if (!H_NEXTMAP && h_now() >= len - 2 * HOST_HPOS) { h_premap_next(); H_NEXTMAP = 1; }
+#ifdef HOST_FLOPPY
+    { double fe = H_PAULA.frame_base + len, ta = h_abs(); hfl_run(ta < fe ? ta : fe); if (ta < fe) hfl_ahead(ta, 160.0); }   /* the disk up to now (to the frame's end before it rolls) and its slots ahead */
+#endif
     if (h_now() >= len) {
         if (H_OWN_DUMP) { fwrite(&H_FRAME, sizeof H_FRAME, 1, H_OWN_DUMP); fwrite(OWN, 1, (size_t)H_LINES * HOST_HPOS, H_OWN_DUMP); }
         arek_paula_run(&H_PAULA, H_PAULA.frame_base + len - 1e-9);
@@ -335,6 +358,9 @@ static void host_events(void) {
         if (h_frame_cb) h_frame_cb();
     }
     if (H_VERTB_PEND && h_now() >= H_VBL_LAT) { h_irq_mark(); H_INTREQ |= 0x0020; H_VERTB_PEND = 0; H_EVT_T = H_PAULA.frame_base + H_VBL_LAT; h_irq_mark(); }
+#ifdef HOST_FLOPPY
+    hfl_run(h_abs()); hfl_ahead(h_abs(), 160.0);                                 /* after a frame roll: in the new frame's map */
+#endif
     h_cia_poll();
     ArekBus *b = arek_glue_bus();
     if (!H_COP_DONE && b->cop_int >= 0 && h_now() >= b->cop_int) { H_INTREQ |= 0x0010; H_COP_DONE = 1; }
@@ -356,6 +382,11 @@ static void host_reset(void) {
     RET_PC = NO_RET;
     H_JDEPTH = 0;
     H_CPU_NUM = 16; H_CPU_PREV = -1; H_CPU_CREDIT = 0;
+#ifdef HOST_FLOPPY
+    hfl_reset(); if (getenv("HOST_ADF0") && !AHD_IMG[0]) ahd_set_file(0, getenv("HOST_ADF0"));   /* natively: the disk of DF0 from a file */
+    HFL.dmacon = CREG[0x096 >> 1]; HFL.adkcon = CREG[0x09e >> 1]; if (CREG[0x07e >> 1]) HFL.dsksync = CREG[0x07e >> 1];
+    HFL.dskpt = ((uint32_t)(CREG[0x020 >> 1] & 0x1f) << 16) | (CREG[0x022 >> 1] & 0xfffeu);
+#endif
     H_PEND_INIT = 0; H_EVT_T = -1e30; for (int i = 0; i < 7; i++) { H_PEND_ON[i] = 0; H_PEND_T[i] = -1e30; }
 }
 
@@ -433,6 +464,19 @@ static void h_irq_mark(void) {
         if (on && !H_PEND_ON[level]) H_PEND_T[level] = t;
         H_PEND_ON[level] = (uint8_t)on; }
 }
+/* 1.0.53: state.txt's "@drive CYL BYTE DUE MOTOR PRB" line (arek host state, from the capture's `? df0` and events) - the
+ * drive where the original's stood. After host_init. Without HOST_FLOPPY: ignored. */
+static void host_drive_state(const char *line) {
+#ifdef HOST_FLOPPY
+    int cyl = 0, motor = 0; long off = 0; double due = 55; unsigned prb = 0xff;
+    if (!line || sscanf(line, " @drive %d %ld %lf %d %x", &cyl, &off, &due, &motor, &prb) < 3) return;
+    host_floppy_start(cyl, off, due);
+    HFL.prb = (uint8_t)prb; HFL.side = (prb & 4) ? 0 : 1;
+    if (motor) { HFL.motor = 1; HFL.sw_speed = 100.0; HFL.sw_t = h_abs(); }
+#else
+    (void)line;
+#endif
+}
 static void host_irq(M68 *m, uint32_t pc) {
     h_irq_mark();
     uint16_t intena = CREG[0x09a >> 1];
@@ -474,7 +518,8 @@ void tick_hook(M68 *m, uint32_t pc, uint32_t clocks) {
           if (dt > 0) { H_CPU_CREDIT += dt * (16 - H_CPU_NUM) / 16.0; double w = floor(H_CPU_CREDIT);   /* whole colour clocks only: the accesses stay on the slots' grid */
                         if (w > 0) { H_CPU_CREDIT -= w; arek_glue_set_time(arek_glue_time() - w); } } }
       H_CPU_PREV = h_abs();
-      H_POLL_T = h_abs() - H_IRQ_POLL - bb->last_wait; }   /* 1.0.50: where the instruction that just ended sampled the IPL pins */
+      H_POLL_T = H_PAULA.frame_base + bb->acc_t[bb->poll_back & 3] + H_IRQ_POLL; bb->poll_back = 0;   /* where the instruction that just ended sampled the IPL pins: H_IRQ_POLL colour clocks into its last bus cycle (1.0.53: by that cycle's start, not by the instruction's end - idle clocks may follow it) */
+      bb->order2 = H_CIA_SYNC; }
     host_events();
     arek_paula_run(&H_PAULA, h_abs());
     { int ln = (int)(h_now() / HOST_HPOS); if (ln > ARD_NEXT) ard_until(ln); }
@@ -501,7 +546,7 @@ void tick_hook(M68 *m, uint32_t pc, uint32_t clocks) {
 #endif
 double host_elapsed(void) { return h_abs(); }
 void host_spend(M68 *m, double cck, double access_every) {
-    const double end = h_abs() + cck; double acc = 0;
+    const double end = floor(h_abs() + cck + 0.5); double acc = 0;   /* 1.0.53: on a whole colour clock - the 68000's bus cycles sit on them; a fraction (13.5 frames = x.5 colour clocks) left every later access half a slot late */
     while (h_abs() < end) {
         double left = end - h_abs(), step = left < HOST_SPEND_STEP ? left : HOST_SPEND_STEP;
         { ArekBus *bb = arek_glue_bus(); double t = arek_glue_time() + step;
@@ -510,6 +555,7 @@ void host_spend(M68 *m, double cck, double access_every) {
         host_events();
         arek_paula_run(&H_PAULA, h_abs());
         { int ln = (int)(h_now() / HOST_HPOS); if (ln > ARD_NEXT) ard_until(ln); }
+        H_POLL_T = h_abs();                                  /* 1.0.53: inside an extern there is no instruction to sample the level: now (the stale value of the last instruction held every interrupt back for the whole spend) */
         host_irq(m, H_PC);                                   /* a handler taken here advances the clock: its time counts */
     }
     H_CPU_PREV = h_abs();                                    /* 1.0.51: the original's time, not the CPU's work - not scaled */

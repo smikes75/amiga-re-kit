@@ -145,6 +145,9 @@ def state(capture, out, trace=None):
         if all(cias):                                    # 1.0.49: the timers, masks and pending bits of both CIAs
             f.write(' '.join('%x %x %x %x %x %x %x %x' % (c['LA'], c['TA'], c['CRA'], c['LB'], c['TB'], c['CRB'], c['IMR'], c['ICR'])
                              for c in cias) + '\n')
+        dr = meta.get('drive') or {}
+        if 'cylinder' in dr and 'offset' in dr:          # 1.0.53: the drive for a host with HOST_FLOPPY - cylinder, byte under the head, colour clocks to the next byte, motor, PRB
+            f.write('@drive %d %d %d %d %x\n' % (dr['cylinder'], dr['offset'] // 8, dr.get('dsk_due', 55), 1 if dr.get('motor') else 0, dr.get('prb', 0xff)))
     return {'sr': sr, 'frame': meta['beam']['frame'], 'time': v * 227 + h, 'pc': meta['pc'], 'dir': os.path.abspath(out)}
 
 

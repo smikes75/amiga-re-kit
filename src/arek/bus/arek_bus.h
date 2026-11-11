@@ -58,6 +58,9 @@ typedef struct ArekBus {
     /* 1.0.52 (SWIV KIT-GAPS 9): the CPU's writes to the registers that steer DMA, with their slots, and the registers the
      * frame's map started from - arek_bus_cpu_reg works the rest of the frame out again (journal_on: the host's switch) */
     uint16_t regs0[0x100]; int jn, journal_on, remap; uint32_t jt[32]; uint16_t jreg[32], jval[32];
+    double acc_t[4]; uint32_t poll_back;  /* 1.0.53: when the last four CPU accesses were asked for (0 = the last); the instruction samples its interrupt level poll_back cycles before its last (timing.bus_poll) */
+    int order2;                          /* 1.0.53: honour the bus table's fourth byte (the host's timing model) */
+    uint32_t in_defer;                   /* 1.0.53: the instruction's last prefetch is still to come - 1 at its end, 2 / 3 before the data access after one / two (timing.bus_order) */
     int cpu_fast;                        /* 1.0.51: a faster CPU (the host moves its time back): a slot the CPU itself took is free for it */
     int last_wait;                       /* 1.0.50: colour clocks the last CPU access waited for a free slot (the host's IPL sample point) */
     struct { int on, busy, phase, pc, lockD; uint32_t left, bt; const uint8_t *prog; } bl;

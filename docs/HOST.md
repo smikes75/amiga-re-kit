@@ -300,3 +300,19 @@ records in the wasm memory (shared with the page in the threaded build), exports
 function, and the page reads record `n % engine_nfr()` through `HEAPU8` for every frame it hands to `scene.frame()`.
 What a record holds is the wb-scene contract (docs/WB-RECIPE.md): the clean window, its palette rows, the camera and
 limits, the map cells and atlas, the objects with ids and pass times, the sprites, the HUD.
+
+## The disk as hardware: `-DHOST_FLOPPY=1` (1.0.53)
+
+A game that reads the disk with its own loader (DSKLEN, DSKSYNC, its own MFM decoder) can keep that loader translated:
+`arek_host_floppy.h` models drive DF0 and Paula's disk controller after vAmiga. No `--extern` for the read routine, no
+`host_spend`, no measured read times - the time a read takes follows from where the disk stands.
+
+- the image: `AHD_IMG[0]` (`engine_set_disk(0, ...)` in the page, `HOST_ADF0=disk.adf` for `host_trace` and the native engine);
+- the registers: DSKPT, DSKLEN, DSKSYNC, ADKCON (WORDSYNC), DMACON (DSKEN), DSKBYTR, INTREQ DSKBLK / DSKSYN; CIA-B PRB
+  ($BFD100: /MTR /SEL0 /SIDE DIR /STEP) and CIA-A PRA bits 2-5 ($BFE001: /CHNG /WPRO /TK0 /RDY) - do not serve these two
+  addresses in a project's `HOST_CIA_READ` / `HOST_CIA_WRITE` any more;
+- the start: `arek bpstate` records the drive (`cpu.json` "drive": cylinder, head, bit offset, motor, the next byte's time)
+  and `arek host state` writes it as `@drive ...`; a start without a state calls `host_floppy_start(cylinder, byte, due)`;
+- limits: reading only, DF0 only, AmigaDOS tracks made from an ADF (no raw MFM images), bytes read as 0 for 12 ms after a step.
+
+Use it with `-DHOST_IPL_MODEL=1` (the E clock of the CIA accesses and the interrupt timing belong to the same measurement).

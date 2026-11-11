@@ -3,6 +3,28 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.53 (2026-11-11)
+
+With `-DHOST_IPL_MODEL=1` only; translations must be regenerated (`arek recomp --bus-table`: the table's rows have a fourth byte):
+
+- the bus table's fourth byte (`timing.bus_order`, `timing.bus_poll`): where an instruction's last prefetch falls among
+  its data accesses (after the operand reads; between the reads and the writes of an instruction that does both) and in
+  which bus cycle it samples the interrupt level (a long move from a register to memory: between its two write words;
+  addq / add Dn / bclr / neg / memory shifts / andi: at the prefetch before the write). The model made every prefetch
+  first and sampled in the last access. SWIV's boot against vAmiga: 102 VBL entries in a row on the original's slot
+  and instruction (25 before) - up to its first disk read, which is an extern
+- host: drive DF0 and the disk controller, `-DHOST_FLOPPY=1` (`arek_host_floppy.h`, after vAmiga's DiskController /
+  FloppyDrive / AmigaEncoder) for a game that reads the disk with its OWN loader - the read routine is translated, no
+  extern and no table of read times: the MFM track from the ADF (11 AmigaDOS sectors + gap, 12 668 bytes) passes the
+  head at the disk's speed, DSKSYNC / WORDSYNC, DSKLEN (two writes), a word per disk slot ($07 $09 $0B) to (DSKPT)+
+  with the slot taken from the CPU, DSKBLK and DSKSYN, DSKBYTR; motor (380 ms to /RDY), select, side, step, /TK0,
+  /CHNG on CIA-B PRB / CIA-A PRA. Reading only, DF0 only; the image is `AHD_IMG[0]` (`HOST_ADF0` natively). A capture
+  now carries the drive (`? df0`, `? paula dc`, `? agnus events` -> cpu.json "drive"; `arek host state` writes
+  `@drive CYL BYTE DUE MOTOR PRB`): the head starts where the original's stood. Synthetic test: a loader of forty
+  instructions reads a track of a random disk. NOT yet measured against the original's read times
+- host: interrupts are taken inside `host_spend` again with the model (the sample point of the last instruction was
+  used for the whole spend: none was taken); `host_spend` ends on a whole colour clock
+
 ## 1.0.52 (2026-11-11)
 
 With `-DHOST_IPL_MODEL=1` only (the timing model measured on SWIV against vAmiga; without the define a host behaves as 1.0.49):

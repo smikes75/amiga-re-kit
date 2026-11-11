@@ -29,6 +29,7 @@ double arek_bus_access(ArekBus *b, double tt) {
     { uint32_t lim = (uint32_t)(b->lines * b->hpos) + (uint32_t)b->hpos; if (lim < cap) cap = lim; }
     uint32_t t = (uint32_t)tt; if ((double)t < tt) t++; t += b->slotoff;
     b->prev_t0 = b->last_t0; b->prev_slot = b->last_slot; b->last_t0 = tt; b->last_slot = -1;
+    b->acc_t[3] = b->acc_t[2]; b->acc_t[2] = b->acc_t[1]; b->acc_t[1] = b->acc_t[0]; b->acc_t[0] = tt;
     arek_bus_blt_advance(b, t); b->last_wait = 0;
 #define AREK_BUS_TAKEN(o) ((o) && !(b->cpu_fast && (o) == AREK_BUS_CPU))
     if (t < cap && AREK_BUS_TAKEN(b->own[t])) {
@@ -42,10 +43,12 @@ double arek_bus_access(ArekBus *b, double tt) {
 
 double arek_bus_undo_last(ArekBus *b) {
     if (b->last_slot >= 0 && b->own[b->last_slot] == AREK_BUS_CPU) { b->own[b->last_slot] = AREK_BUS_FREE; b->cpu_n--; }
-    double t = b->last_t0; b->last_t0 = b->prev_t0; b->last_slot = b->prev_slot; b->prev_slot = -1; return t;
+    double t = b->last_t0; b->last_t0 = b->prev_t0; b->last_slot = b->prev_slot; b->prev_slot = -1;
+    b->acc_t[0] = b->acc_t[1]; b->acc_t[1] = b->acc_t[2]; b->acc_t[2] = b->acc_t[3]; return t;
 }
 
 double arek_bus_insn_end(ArekBus *b, double t) {
+    if (b->in_defer) { b->in_defer = 0; b->in_l++; t = arek_bus_access(b, t); }   /* 1.0.53: the last prefetch, after the operand's accesses and before the idle clocks */
     int rem = (int)b->in_n - (int)b->in_pre - 4 * (int)(b->in_l + b->in_da + b->in_tail); if (rem > 0) t += rem * 0.5;
     /* 1.0.47 (SWIV KIT-GAP 2): the reads an instruction makes after its internal clocks - move to SR / CCR reads two
      * words after 4 clocks, andi/ori/eori to SR / CCR after 8, lea d8(An,Xn) its last word after 2. They were made at the
@@ -62,8 +65,15 @@ double arek_bus_insn(ArekBus *b, double t, uint32_t cycles, uint32_t accesses, u
     return t;
 }
 
-double arek_bus_data(ArekBus *b, double t) { b->in_da++; return arek_bus_access(b, t); }
-double arek_bus_slow(ArekBus *b, double t, double cck) { b->in_da++; return t + cck; }
+double arek_bus_data(ArekBus *b, double t) {
+    if (b->in_defer >= 2 && b->in_da == b->in_defer - 1) { b->in_defer = 0; b->in_l++; t = arek_bus_access(b, t); }   /* read, PREFETCH, write */
+    b->in_da++; return arek_bus_access(b, t);
+}
+double arek_bus_slow(ArekBus *b, double t, double cck) {
+    if (b->in_defer >= 2 && b->in_da == b->in_defer - 1) { b->in_defer = 0; b->in_l++; t = arek_bus_access(b, t); }
+    b->acc_t[3] = b->acc_t[2]; b->acc_t[2] = b->acc_t[1]; b->acc_t[1] = b->acc_t[0]; b->acc_t[0] = t;   /* a CIA access is a bus cycle of the instruction too */
+    b->in_da++; return t + cck;
+}
 
 /* 1.0.43: the slot the blitter has reached at time t. In the first colour clocks of a frame t - 2 + slotoff is below
  * zero; as an unsigned number that was slot 4 294 967 295 and a blit crossing the frame end finished at once. */

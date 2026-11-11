@@ -809,16 +809,16 @@ class Gen:
         the image that hold translated code (BUS_SPARSE: gaps over 256 words are left out, so an image
         with code at $400 and at $C00000 does not get 12 MB of zeros); bus_tab_row(pc) finds the row,
         a host's arek_bus_glue.h calls it in tick_hook."""
-        from .timing import bus_table_entry
+        from .timing import bus_table_entry, bus_order, bus_poll
         n = max(1, len(self.data) // 2)
         rows = {}
         for pc, i in self.tab_insns.items():
             k = (pc - self.base) // 2
             if 0 <= k < n:
                 try:
-                    rows[k] = '%d,%d,%d' % bus_table_entry(i)
+                    rows[k] = '%d,%d,%d' % bus_table_entry(i) + ',%d' % (bus_order(i) | bus_poll(i) << 2)
                 except Unsupported:
-                    rows[k] = '%d,0,0' % ((i.end - i.addr) // 2)
+                    rows[k] = '%d,0,0,0' % ((i.end - i.addr) // 2)
         segs = []
         for k in sorted(rows):
             if segs and k - segs[-1][1] <= 256:
@@ -829,16 +829,17 @@ class Gen:
             segs = [[0, 0]]
         self.emit('/* bus table (recomp --bus-table): words, extra accesses, flags per instruction word, in %d segment(s) of the image */' % len(segs))
         self.emit('#define BUS_SPARSE 1')
+        self.emit('#define BUS_ROW4 1')                    # 1.0.53: a fourth byte, timing.bus_order (the last prefetch's place)
         self.emit('#define BUS_LO 0x%xu' % self.base)
         for j, (a, b) in enumerate(segs):
-            self.emit('static const uint8_t BUS_SEG%d[%d][3] = {' % (j, b - a + 1))
+            self.emit('static const uint8_t BUS_SEG%d[%d][4] = {' % (j, b - a + 1))
             for k in range(a, b + 1, 16):
-                self.emit('  ' + ','.join('{%s}' % rows.get(q, '0,0,0') for q in range(k, min(b + 1, k + 16))) + ',')
+                self.emit('  ' + ','.join('{%s}' % rows.get(q, '0,0,0,0') for q in range(k, min(b + 1, k + 16))) + ',')
             self.emit('};')
         self.emit('#define BUS_SEGS_N %d' % len(segs))
         self.emit('static const uint32_t BUS_SEG_LO[BUS_SEGS_N] = {%s};' % ', '.join('0x%xu' % (self.base + 2 * a) for a, b in segs))
         self.emit('static const uint32_t BUS_SEG_HI[BUS_SEGS_N] = {%s};' % ', '.join('0x%xu' % (self.base + 2 * b + 2) for a, b in segs))
-        self.emit('static const uint8_t (*const BUS_SEGS[BUS_SEGS_N])[3] = {%s};' % ', '.join('BUS_SEG%d' % j for j in range(len(segs))))
+        self.emit('static const uint8_t (*const BUS_SEGS[BUS_SEGS_N])[4] = {%s};' % ', '.join('BUS_SEG%d' % j for j in range(len(segs))))
         self.emit('static inline const uint8_t *bus_tab_row(uint32_t pc) {')
         self.emit('    for (int k = 0; k < BUS_SEGS_N; k++) if (pc >= BUS_SEG_LO[k] && pc < BUS_SEG_HI[k]) return BUS_SEGS[k][(pc - BUS_SEG_LO[k]) >> 1];')
         self.emit('    return 0;')

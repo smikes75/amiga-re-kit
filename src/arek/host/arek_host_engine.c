@@ -209,6 +209,7 @@ API int engine_init(const uint8_t *p, int n) {
     E_ENTRY = entry;
     host_init(t0);
     if (ncia == 16) host_cia_state(cia);
+    { const char *dv = strstr(st, "@drive"); if (dv) host_drive_state(dv); }
     host_display_init();
     h_frame_cb = e_frame_start; h_frame_done_cb = e_frame_done;
     G_DONE = 0; G_END = 0; G_WAIT = 0; G_ERR = 0; G_AW = 0;

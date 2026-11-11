@@ -92,6 +92,7 @@ def state(conf, events, addr, npass, t_end, t_set=0, ram_len=524288, keep=None,
     lines = ['try debugger', 'r cpu', '? agnus', '? agnus beam']
     lines += ['try r %s' % chip for chip in CHIPS]
     lines += ['try ? ciaa', 'try ? ciab']                # 1.0.50: asleep or not, and since when (cia_regs)
+    lines += ['try ? df0', 'try ? paula dc', 'try ? agnus events']   # 1.0.53: the drive's head, the disk controller, the next byte's time (parse_drive)
     lines += ['commander', 'mem save bin %s 0 %d' % (dump, ram_len)]
     regions = []
     for base, length in ram_regions:
@@ -116,6 +117,7 @@ def state(conf, events, addr, npass, t_end, t_set=0, ram_len=524288, keep=None,
     st['chips'] = parse_chips(out)
     for name, sl in parse_cia_sleep(out).items():
         st['chips'].setdefault(name, {}).update(sl)
+    st['drive'] = parse_drive(out)
     st['ram'] = Path(dump).read_bytes()
     st['regions'] = regions
     return st, out
@@ -178,6 +180,49 @@ def cia_regs(chip, clock=None):
         if out['CRB'] & 1 and not out['CRB'] & 0x60:
             out['TB'] = (out['TB'] - idle) & 0xffff
     return out
+
+
+def parse_drive(out):
+    """``? df0``, ``? paula dc`` and ``? agnus events`` of the stop script: what a host with HOST_FLOPPY needs to start
+    its drive where the original's stood - {"cylinder", "head", "offset" (bits from the track's start), "motor",
+    "prb", "dc_state", "dsk_due" (colour clocks from the stop to the next byte under the head), "text": the raw
+    sections}. Empty when the build printed none."""
+    sect, cur = {}, None
+    for line in out.splitlines():
+        s = line.strip()
+        m = re.fullmatch(r'(?:try )?\? (df0|paula dc|agnus events)', s)
+        if m:
+            cur = m.group(1)
+            sect[cur] = []
+            continue
+        if cur is None:
+            continue
+        if re.match(r'(try |r |\? |commander|mem |screenshot|shutdown)', s):
+            cur = None
+            continue
+        sect[cur].append(line.rstrip())
+    res = {}
+    df0 = '\n'.join(sect.get('df0', []))
+    m = re.search(r'Drive head\s*:\s*(\d+):(\d+):(\d+)', df0)
+    if m:
+        res.update(cylinder=int(m.group(1)), head=int(m.group(2)), offset=int(m.group(3)))
+    m = re.search(r'\bprb\s*:\s*0x([0-9a-fA-F]+)', df0)
+    if m:
+        res['prb'] = int(m.group(1), 16)
+    m = re.search(r'getMotor\(\)\s*:\s*(\w+)', df0)
+    if m:
+        res['motor'] = m.group(1).lower() in ('yes', 'true', '1')
+    m = re.search(r'state\s*:\s*(\w+)', '\n'.join(sect.get('paula dc', [])))
+    if m:
+        res['dc_state'] = m.group(1)
+    for line in sect.get('agnus events', []):
+        if re.search(r'\bDSK\b|DSK_ROTATE', line):
+            m = re.search(r'due in (\d+) DMA cycles', line)
+            if m:
+                res['dsk_due'] = int(m.group(1))             # colour clocks from the stop to the next byte under the head
+    if sect:
+        res['text'] = {k: '\n'.join(v) for k, v in sect.items()}
+    return res
 
 
 def parse_cia_sleep(out):

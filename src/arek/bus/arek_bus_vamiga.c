@@ -205,7 +205,7 @@ int arek_bus_cpu_reg(ArekBus *b, uint32_t off, uint16_t v, uint32_t now) {
     for (size_t k = 0; k < n; k++) {
         uint8_t o = old[k];
         if (k <= now) b->own[k] = o;                               /* what has been stays */
-        else if (!b->own[k] && (o == AREK_BUS_CPU || (o >= AREK_BUS_AUDIO && o < AREK_BUS_BITPLANE) || o == AREK_BUS_BLITTER)) b->own[k] = o;
+        else if (!b->own[k] && (o == AREK_BUS_CPU || (o >= AREK_BUS_AUDIO && o < AREK_BUS_BITPLANE) || o == AREK_BUS_BLITTER || o == 3)) b->own[k] = o;   /* 3: a disk word (arek_host_floppy.h) */
     }
     return 1;
 }

@@ -148,6 +148,14 @@ def test_state_from_a_capture(tmp_path):
     (cap / 'cpu.json').write_text(json.dumps(meta))
     host.state(str(cap), str(tmp_path / 'st4'))
     assert (tmp_path / 'st4' / 'state.txt').read_text().splitlines()[5] == 'e00 456 11 ffff ffff 80 1 14 e00 100 11 ffff ffff 80 1 14'
+    # 1.0.53: the drive of a capture (`? df0`, `? agnus events`) for a host with HOST_FLOPPY
+    dr = bpstate.parse_drive('try ? df0\n\nState:\n\n   prb : 0xf7\n   Drive head : 78:0:5928\n   getMotor() : yes\n\ntry ? paula dc\n\n   state : OFF\n'
+                             'try ? agnus events\n\nDSK       DSK_ROTATE    (138,155)         due in 39 DMA cycles\nVBL       none\ncommander\n')
+    assert {k: v for k, v in dr.items() if k != 'text'} == {'prb': 0xf7, 'cylinder': 78, 'head': 0, 'offset': 5928, 'motor': True, 'dc_state': 'OFF', 'dsk_due': 39}
+    meta['drive'] = dr
+    (cap / 'cpu.json').write_text(json.dumps(meta))
+    host.state(str(cap), str(tmp_path / 'st5'))
+    assert (tmp_path / 'st5' / 'state.txt').read_text().splitlines()[6] == '@drive 78 741 39 1 f7'
 
 
 # POTGO's output bits read back in POTGOR (G40) and CIA-B timer A counts E ticks (G38): the game writes POTGO three

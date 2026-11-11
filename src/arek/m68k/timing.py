@@ -425,6 +425,69 @@ def bus_table_entry(i):
     return words, extra, flags
 
 
+ORD_NONE, ORD_END, ORD_MID1, ORD_MID2 = 0, 1, 2, 3
+_ORD_KINDS = ('move', 'alu', 'alui', 'addq', 'bit', 'neg', 'shift', 'tst', 'cmpm')
+
+
+def bus_order(i):
+    """1.0.53 (SWIV, the timing model): where the instruction's LAST prefetch falls among its data accesses - the bus
+    table's fourth byte. The model makes all prefetches first; the 68000 makes the last one after its operand reads
+    (ORD_END: move (a5),a5 = read, read, prefetch; then any idle clocks) and, in an instruction that reads and writes
+    memory, between the reads and the writes (ORD_MID1 / ORD_MID2 after one / two reads: addq.w #1,(a0) = read,
+    prefetch, write; a move to -(An) from memory likewise). ORD_NONE: as before (jumps, movem, pea, clr, scc, a write
+    to -(An), anything the table gives extra accesses or end reads). Beside DMA the accesses then wait in the slots
+    the original's do, and the instruction samples its interrupt level in its true last bus cycle."""
+    k = i.kind
+    if k not in _ORD_KINDS:
+        return ORD_NONE
+    try:
+        words, extra, flags = bus_table_entry(i)
+        r, w = bus(i)
+    except Exception:
+        return ORD_NONE
+    if extra or (flags >> TAB_TAIL_SHIFT) & 3:
+        return ORD_NONE
+    dr = r - words                                       # the data reads
+    if dr < 0 or performed(i) != dr + w or (dr == 0 and w == 0):
+        return ORD_NONE
+    dst = getattr(i, 'dst', None)
+    dcls = ea_class(dst) if dst is not None and not isinstance(dst, str) else None
+    if w == 0:
+        return ORD_END
+    if k == 'move':
+        if dcls == 'pre':
+            return ORD_NONE if dr == 0 else (ORD_MID1 if dr == 1 else ORD_MID2 if dr == 2 else ORD_NONE)
+        if dcls == 'absl' and dr:
+            return ORD_NONE                              # move mem,(xxx).L: its own order, not measured
+        return ORD_END
+    if dr == w and dr in (1, 2):
+        return ORD_MID1 if dr == 1 else ORD_MID2
+    return ORD_NONE
+
+
+def bus_poll(i):
+    """1.0.53: how many bus cycles BEFORE its last one the instruction samples the interrupt level (Moira's POLL
+    flag) - bits 2-3 of the bus table's fourth byte. 0: in the last cycle (most instructions: the last prefetch, or
+    the write that ends them). A long move from a register or an immediate to (An), (An)+, d16(An), d8(An,Xn) samples
+    between its two write words, the prefetch after them does not: 1 (SWIV: `move.l a7,14(a5)` across the frame's end
+    - the original takes the vertical blank one instruction later). An instruction that reads and writes memory
+    samples at the prefetch between them (addq, add/and/or Dn to memory, bchg/bclr/bset, neg/not, memory shifts,
+    andi/ori/eori): as many cycles back as it writes words; addi / subi sample at their write: 0."""
+    k = i.kind
+    o = bus_order(i)
+    if k == 'move':
+        src, dst = getattr(i, 'src', None), getattr(i, 'dst', None)
+        if (getattr(i, 'sz', None) == 2 and src is not None and dst is not None and not isinstance(src, str) and not isinstance(dst, str)
+                and not _mem(src) and ea_class(dst) in ('ind', 'post', 'd16', 'd8x')):
+            return 1
+        return 0
+    if o in (ORD_MID1, ORD_MID2) and k in ('addq', 'alu', 'bit', 'neg', 'shift', 'alui'):
+        if k == 'alui' and getattr(i, 'name', '') in ('addi', 'subi'):
+            return 0
+        return 1 if o == ORD_MID1 else 2
+    return 0
+
+
 def bus_pattern(i, **kw):
     """``{'words', 'reads', 'writes', 'cycles', 'internal'}`` of ``i``: its length in words, its
     bus cycles, its clocks (``cycles(i, **kw)``) and the clocks spent without the bus."""

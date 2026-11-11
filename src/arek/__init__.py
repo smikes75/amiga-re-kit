@@ -23,7 +23,7 @@ cli          ``arek`` command line
 mcp_server   ``arek-mcp`` Model Context Protocol server
 """
 
-__version__ = "1.0.52"
+__version__ = "1.0.53"
 
 
 def identity():
