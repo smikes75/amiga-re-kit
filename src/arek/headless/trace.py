@@ -474,7 +474,8 @@ PATCH_OF = {'VAHL_TRACE': 'vamiga-trace*.patch', 'VAHL_TRACE_RANGES': 'vamiga-tr
             'VAHL_REGLOG_REGS': 'vamiga-shots-regset-899da5d.patch', 'VAHL_SHOTS': 'vamiga-shots-regset-899da5d.patch',
             'VAHL_SHOTS_FRAMES': 'vamiga-shots-regset-899da5d.patch', 'VAHL_POKE': 'vamiga-poke-899da5d.patch',
             'VAHL_MOUSE_OFF': 'vamiga-mouse-899da5d.patch',
-            'VAHL_INPUTS_V': 'vamiga-frames-899da5d.patch', 'VAHL_SHOTS_LIST': 'vamiga-frames-899da5d.patch'}   # 1.0.36   # 1.0.22: the mouse in VAHL_INPUTS and `mouse1 move` (the env switches it off)
+            'VAHL_INPUTS_V': 'vamiga-frames-899da5d.patch', 'VAHL_SHOTS_LIST': 'vamiga-frames-899da5d.patch',
+            'VAHL_STOP_FRAME': 'vamiga-stop-899da5d.patch'}   # 1.0.36   # 1.0.22: the mouse in VAHL_INPUTS and `mouse1 move` (the env switches it off)
 
 
 def require_patch(vahl, variables):
@@ -490,11 +491,17 @@ def require_patch(vahl, variables):
 
 def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None, adf=None,
             timeout=1200, setup=(), inputs=None, reglog=None, audlog=None, skip=None, from_frame=None,
-            buslog=None, bus_frames=None, reglog_regs=None, shots=None, shot_frames=None, pokes=None, inputs_v=None):
+            buslog=None, bus_frames=None, reglog_regs=None, shots=None, shot_frames=None, pokes=None, inputs_v=None,
+            capture_at=None, capture_dir=None, capture_addr=None, capture_regions=(), capture_ram=524288):
     """Run the original with ``events`` (``[(second, retroshell command)]``),
     arm the trace at ``t_arm`` and stop at ``t_end``. Writes ``out`` (the
     trace), ``out + '.retrosh'`` (the script) and ``out + '.log'``; returns
-    the number of records."""
+    the number of records.
+
+    1.0.55 ``capture_at`` = F with ``capture_dir``: the first breakpoint hit in frame F or later (at ``capture_addr``,
+    when given) is recorded and STOPS the run; the machine is dumped into ``capture_dir`` as ``arek bpstate`` does
+    (cpu.json with the CIAs and the drive, creg.bin, the RAM) - a state and a trace of one run, with the run's own
+    inputs file and frame numbers. Needs a build with vamiga-stop-899da5d.patch (VAHL_STOP_FRAME)."""
     from . import shot
     if not breaks and not watches and not (buslog or reglog or audlog or shots or pokes):
         raise TraceError('nothing to trace: give breakpoints and/or watchpoints (or only logs/shots/pokes)')
@@ -508,7 +515,20 @@ def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None,
     e = env(out, ranges, inputs=inputs, reglog=reglog, audlog=audlog, skip=skip, from_frame=from_frame,
             buslog=buslog, bus_frames=bus_frames, reglog_regs=reglog_regs, shots=shots, shot_frames=shot_frames,
             poke=poke, inputs_v=inputs_v)
-    needed = [k for k in e if k != 'VAHL_TRACE_LEN']
+    stop = None
+    if capture_at is not None:
+        from . import bpstate
+        if not capture_dir or not breaks:
+            raise TraceError('--capture-at needs --capture-dir and a breakpoint (the stop is a breakpoint hit)')
+        if os.path.exists(capture_dir):
+            raise TraceError('choose a new folder for the capture: %s' % capture_dir)
+        os.makedirs(capture_dir)
+        stop = bpstate.stop_script(os.path.abspath(capture_dir), 'f%d' % capture_at, capture_ram, capture_regions)
+        e['VAHL_STOP_FRAME'] = str(capture_at)
+        e['VAHL_ONSTOP'] = stop[0]
+        if capture_addr is not None:
+            e['VAHL_STOP_ADDR'] = '%x' % capture_addr
+    needed = [k for k in e if k not in ('VAHL_TRACE_LEN', 'VAHL_ONSTOP', 'VAHL_STOP_ADDR')]
     if any(len(r) > 2 and r[2] for r in ranges or ()):
         needed.append('VAHL_TRACE_SKIP')            # hashed ranges came with the inputs/reglog patch
     if inputs and inputs_use_mouse(inputs):
@@ -530,7 +550,17 @@ def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None,
                                t_end, out + '.png', setup)
     with open(out + '.retrosh', 'w') as f:
         f.write(script)
-    shot.run_script(conf, script, capture=True, timeout=timeout, env=e, log_path=out + '.log')
+    log = shot.run_script(conf, script, capture=True, timeout=timeout, env=e, log_path=out + '.log')
+    if stop:
+        from . import bpstate
+        if not os.path.exists(stop[1]):
+            raise TraceError('the run did not stop for the capture: no breakpoint hit in frame %d or later before the end '
+                             '(see %s.log)' % (capture_at, out))
+        st = bpstate.parse_stop(log, stop[1], stop[2])
+        bpstate.write_capture(capture_dir, st, conf, adf, os.path.basename(stop[1]), events=list(events), breakpoint=st.get('pc'),
+                              capture_at=capture_at, trace=os.path.basename(out), inputs=os.path.basename(inputs) if inputs else None)
+        with open(os.path.join(capture_dir, 'capture.log'), 'w') as f:
+            f.write(log)
     if not os.path.exists(out):
         if not (buslog or reglog or audlog or shots or pokes):
             raise TraceError('no trace written - is VAHL a build with a trace patch? (see %s.log)' % out)

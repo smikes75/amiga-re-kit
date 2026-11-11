@@ -823,7 +823,11 @@ def cmd_trace(a):
                           bus_frames=[int(x) for x in a.bus_frames.split(':')] if a.bus_frames else None,
                           reglog_regs=a.reglog_regs, shots=a.shots,
                           shot_frames=a.shot_frames or None, pokes=a.poke,
-                          inputs_v=[int(x) for x in a.inputs_v.split(':')] if a.inputs_v else None)
+                          inputs_v=[int(x) for x in a.inputs_v.split(':')] if a.inputs_v else None,
+                          capture_at=a.capture_at, capture_dir=a.capture_dir, capture_addr=a.capture_addr,
+                          capture_regions=[(int(b, 0), int(n, 0)) for b, n in (r.split(':') for r in a.capture_region)])
+        if a.capture_at is not None:
+            print('%s: the state at the stop (cpu.json, creg.bin, RAM) - arek host state %s OUT' % (a.capture_dir, a.capture_dir))
         if a.shots:
             print('%d pictures: %s_<frame>.png' % (len(trace.shot_files(a.shots)), a.shots))
         print('%s: %d records' % (a.file, n))
@@ -1070,6 +1074,7 @@ def build_parser():
     s.add_argument('--work', help='a folder to work in (default: a new temporary one)')
     s.add_argument('--record', metavar='FILE', help='write a sample with the results of Moira')
     s.add_argument('--record-limit', type=int, default=4000)
+    s.add_argument('--bus-patterns', metavar='FILE', help="measure every instruction's bus pattern on Moira and write the table (the kit's own: src/arek/m68k/buspat.json)")
     s.add_argument('--json', metavar='FILE')
     s.add_argument('-v', '--verbose', action='store_true')
     s.set_defaults(fn=cmd_difftest)
@@ -1205,6 +1210,12 @@ def build_parser():
     s.add_argument('--shots', metavar='PREFIX', help='run: the picture of every frame in --shot-frames (PREFIX_<frame>.png)')
     s.add_argument('--shot-frames', metavar='FIRST:LAST[,N,...]', help='run: frames --shots covers; 1.0.36: several windows or single '
                    'frames, e.g. 100:104,900,1500:1502 (needs vamiga-frames-899da5d.patch)')
+    s.add_argument('--capture-at', type=int, metavar='FRAME', help='run (1.0.55): stop at the first breakpoint hit in this frame or later and '
+                   'dump the machine into --capture-dir as arek bpstate does - a state and a trace of ONE run (its inputs, its frame numbers); '
+                   'needs a build with vamiga-stop-899da5d.patch')
+    s.add_argument('--capture-dir', metavar='DIR', help='run: the new folder for --capture-at (cpu.json, creg.bin, the RAM)')
+    s.add_argument('--capture-addr', type=lambda x: int(x, 0), metavar='ADDR', help='run: stop only at this breakpoint (default: the first hit of any)')
+    s.add_argument('--capture-region', action='append', default=[], metavar='BASE:LEN', help='run: one more RAM region for the capture (e.g. 0xc00000:0x80000)')
     s.add_argument('--inputs-v', metavar='LO:HI', help='run: the lines whose first breakpoint hit in a frame takes its --inputs line '
                    '(default 0:99, the VBL); a game without a VBL handler gives its own, e.g. 290:312 (1.0.36, vamiga-frames-899da5d.patch)')
     s.add_argument('--poke', nargs='*', metavar='F<frame>|PC:ADDR=HEX|@FILE',

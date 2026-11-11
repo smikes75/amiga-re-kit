@@ -311,8 +311,37 @@ A game that reads the disk with its own loader (DSKLEN, DSKSYNC, its own MFM dec
 - the registers: DSKPT, DSKLEN, DSKSYNC, ADKCON (WORDSYNC), DMACON (DSKEN), DSKBYTR, INTREQ DSKBLK / DSKSYN; CIA-B PRB
   ($BFD100: /MTR /SEL0 /SIDE DIR /STEP) and CIA-A PRA bits 2-5 ($BFE001: /CHNG /WPRO /TK0 /RDY) - do not serve these two
   addresses in a project's `HOST_CIA_READ` / `HOST_CIA_WRITE` any more;
-- the start: `arek bpstate` records the drive (`cpu.json` "drive": cylinder, head, bit offset, motor, the next byte's time)
-  and `arek host state` writes it as `@drive ...`; a start without a state calls `host_floppy_start(cylinder, byte, due)`;
+- the start: `arek bpstate` records the drive (`cpu.json` "drive": cylinder, head, bit offset, motor) and `arek host state`
+  writes it as `@drive ...`; a start without a state calls `host_floppy_start(cylinder, byte, 0)`. The byte clock itself needs
+  no state (1.0.55): a byte is served when the absolute colour clock (frame x 71 051 + line x 227 + slot) is 1 modulo 56, in
+  every run of the emulator - so state.txt's frame number must be the frame of the run you compare with (a capture and a
+  trace are two runs and may reach the same instruction in different frames);
 - limits: reading only, DF0 only, AmigaDOS tracks made from an ADF (no raw MFM images), bytes read as 0 for 12 ms after a step.
 
 Use it with `-DHOST_IPL_MODEL=1` (the E clock of the CIA accesses and the interrupt timing belong to the same measurement).
+
+## Instruction times equal to the original's: `-DHOST_IPL_MODEL=1` (1.0.50 - 1.0.55)
+
+Without the switch a host is exact in frames and close in lines: an interrupt is taken at the first instruction end
+after its event. A game whose behaviour depends on WHERE in a line or in a loop an interrupt lands (a loader's poll
+loop, a raster split made by the CPU, a counter read in a handler) needs more, and the switch turns on what was
+measured against vAmiga instruction by instruction (`arek trace run --break PC...`, host_trace `--pclog`):
+
+- the interrupt level is sampled in one particular bus cycle of every instruction and reaches the processor three
+  colour clocks after INTREQ / INTENA change; the entry takes its 44 clocks in Moira's order of idle clocks and
+  accesses; VERTB is requested at colour clock 0 of the frame, a CPU write to INTREQ / INTENA lands a clock after its slot;
+- a CIA access waits for the E clock (10 CPU clocks, its position at a frame's start = 2 x frame mod 10) and its
+  write lands after the wait; a timer's interrupt is requested in the E cycle its counter reaches 0; a start that also
+  loads the timer (the high byte in one-shot mode, FORCE LOAD) counts one E cycle later;
+- VHPOSR / VPOSR: the position of the access's slot plus five colour clocks, the line number changing at clock 2;
+- a CPU write to DMACON, DIWSTRT / DIWSTOP, DDFSTRT / DDFSTOP, BPLCON0 or COPJMP re-plans the rest of the frame's
+  slots; an idle Copper takes a new COP1LC;
+- every instruction's bus cycles in the processor's own order (the bus patterns of `arek recomp --bus-table`,
+  docs/BUS.md) - the translation must be regenerated with the kit that builds the host.
+
+`HOST_BUS_PAT=0` in the environment (host_trace, the native engine) switches the patterns off, to see what they
+change. The state a comparison starts from must be the original's at that frame, with its frame number
+(`arek trace run --capture-at`, docs/HEADLESS.md), and the inputs of the original's run (`M` / `m` for port 0's
+button). Measured on SWIV's boot with `-DHOST_FLOPPY=1`, from the capture to the title (1 824 frames, 45 disk reads,
+the music's level 6 interrupts): 22 780 instruction times of 22 780 at 14 addresses, 1 687 863 of 1 687 863 at 28
+addresses over the first 600 frames. Not measured: the interrupts of the blitter, the audio channels and the Copper.

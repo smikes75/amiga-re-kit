@@ -50,12 +50,26 @@ static void hfl_reset(void) {
     HFL.sync_t = -1e30; HFL.dma_done = -1e30; HFL.next_m = -1;
 }
 /* the project's start: the head's cylinder, the byte of the track under it, colour clocks from the start to the next byte */
+/* The byte clock. vAmiga starts it at power-on and serves a byte in every 56th colour clock from then on: in absolute
+ * colour clocks (frame * 313 * 227 + line * 227 + slot, the frame as the emulator counts it) a byte is served when
+ * that number is 1 modulo 56 - in every run, whatever the game did (measured: three captures of SWIV's boot at frames
+ * 789, 890, 900; its trace run fits the same rule once the state carries the TRACE's frame number). So the phase needs
+ * no capture: it follows from the host's absolute time, i.e. from state.txt's frame number. A state whose frame
+ * number is not the original's (or a start without a state) has an arbitrary but constant phase; HOST_FLOPPY_PHASE
+ * (colour clocks, environment) moves it. */
+#define HFL_GRID 1
+static long long hfl_next_on_grid(double t) {              /* the first colour clock after t that serves a byte, in master cycles */
+    double ph = getenv("HOST_FLOPPY_PHASE") ? atof(getenv("HOST_FLOPPY_PHASE")) : 0;
+    long long c = (long long)floor(t - ph) + 1, r = ((c - HFL_GRID) % 56 + 56) % 56;
+    if (r) c += 56 - r;
+    return (c + (long long)ph) * 8;
+}
+/* the project's start: the head's cylinder and the byte of the track under it (to_next_byte: unused since 1.0.55, the
+ * byte clock follows the absolute time) */
 static void host_floppy_start(int cyl, long off, double to_next_byte) {
+    (void)to_next_byte;
     HFL.cyl = cyl; HFL.off = ((off % HFL_TRACK) + HFL_TRACK) % HFL_TRACK; HFL.tvalid = 0;
-    /* HOST_FLOPPY_PHASE: colour clocks added to the next byte's time. The byte clock's phase is the emulator RUN's: a
-     * capture (arek bpstate) and a trace (arek trace run) of the same disk were 15 colour clocks apart (SWIV; the
-     * period is 56 in both) - to compare with a trace, take the phase that makes `arek bus diff` empty during a read */
-    HFL.next_m = (long long)floor((h_abs() + to_next_byte + (getenv("HOST_FLOPPY_PHASE") ? atof(getenv("HOST_FLOPPY_PHASE")) : 0)) * 8.0 + 0.5); HFL.acc = 0;
+    HFL.next_m = hfl_next_on_grid(h_abs()); HFL.acc = 0;
 }
 
 /* ---- the track as the head reads it (vAmiga AmigaEncoder) ---- */
@@ -185,11 +199,11 @@ static double hfl_next_slot(double after, long *slot) {
     }
 }
 static void hfl_run_to(HFloppy *f, double t, int dry) {
-    if (f->next_m < 0) { f->next_m = (long long)floor(h_abs() * 8.0) + 442; f->acc = 0; }
+    if (f->next_m < 0) { f->next_m = hfl_next_on_grid(h_abs()); f->acc = 0; }
     for (;;) {
         double tb = (double)((f->next_m + 7) / 8); long slot = -1;        /* served on a whole colour clock */ double td = hfl_next_slot(f->dma_done, &slot);
         if (tb > t && td > t) break;
-        if (tb <= td) {                                  /* in one colour clock the byte comes before the disk slot (either order fits SWIV's bus log once the phase is right) */                                  /* in one colour clock the byte comes first (measured on SWIV: the read's DSKBLK on the original's colour clock; the other order is 8 early) */
+        if (tb < td) {                                   /* in one colour clock the disk slot is served before the byte (vAmiga: its DAS slot before DSK) */
             hfl_byte(f, tb, dry);
             /* vAmiga schedules the next byte RELATIVE to the colour clock in which this one was served (its events run
              * on whole colour clocks): 442 master cycles after it is 55.25 colour clocks - served in the 56th. A byte
@@ -218,7 +232,7 @@ static void hfl_dsklen(uint16_t v) {
 /* a CPU write to a custom register the controller has */
 static void hfl_reg_write(uint32_t off, uint16_t v) {
     HFloppy *f = &HFL;
-    if (off == 0x020 || off == 0x022 || off == 0x024 || off == 0x07e || off == 0x09e || off == 0x096) hfl_run(h_abs());
+    if (off == 0x020 || off == 0x022 || off == 0x024 || off == 0x07e || off == 0x09e || off == 0x096) hfl_run(h_acc_abs());
     if (off == 0x020) f->dskpt = (f->dskpt & 0x0000ffffu) | ((uint32_t)(v & 0x001f) << 16);
     else if (off == 0x022) f->dskpt = (f->dskpt & 0xffff0000u) | (v & 0xfffeu);
     else if (off == 0x024) hfl_dsklen(v);
@@ -227,7 +241,7 @@ static void hfl_reg_write(uint32_t off, uint16_t v) {
     else if (off == 0x096) { if (v & 0x8000) f->dmacon |= v & 0x7fff; else f->dmacon &= (uint16_t)~v; }
 }
 static uint16_t hfl_dskbytr(void) {
-    HFloppy *f = &HFL; hfl_run(h_abs());
+    HFloppy *f = &HFL; hfl_run(h_acc_abs());
     uint16_t r = f->incoming;
     if ((f->dmacon & 0x0210) == 0x0210 && f->state != 0) r |= 0x4000;
     if (f->dsklen & 0x4000) r |= 0x2000;

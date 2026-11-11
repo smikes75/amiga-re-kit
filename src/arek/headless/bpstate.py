@@ -87,31 +87,43 @@ def state(conf, events, addr, npass, t_end, t_set=0, ram_len=524288, keep=None,
     config.require(conf, 'ROM', 'VAHL')
     tmp = keep or tempfile.mkdtemp(prefix='arek-bp')
     os.makedirs(tmp, exist_ok=True)
-    dump = os.path.join(tmp, 'ram_%x_%d.bin' % (addr, npass))
-    onstop = os.path.join(tmp, 'onstop_%x_%d.retrosh' % (addr, npass))
-    lines = ['try debugger', 'r cpu', '? agnus', '? agnus beam']
-    lines += ['try r %s' % chip for chip in CHIPS]
-    lines += ['try ? ciaa', 'try ? ciab']                # 1.0.50: asleep or not, and since when (cia_regs)
-    lines += ['try ? df0', 'try ? paula dc', 'try ? agnus events']   # 1.0.53: the drive's head, the disk controller, the next byte's time (parse_drive)
-    lines += ['commander', 'mem save bin %s 0 %d' % (dump, ram_len)]
-    regions = []
-    for base, length in ram_regions:
-        filename = os.path.join(tmp, 'ram_%x_%d_%x.bin' % (addr, npass, base))
-        lines.append('mem save bin %s $%x %d' % (filename, base, length))
-        regions.append({'base': base, 'length': length, 'file': filename})
-    lines.append('screenshot save ' + os.path.join(tmp, 'stable.png') if screenshot else 'shutdown')
-    Path(onstop).write_text('\n'.join(lines) + '\n')
+    onstop, dump, regions = stop_script(tmp, '%x_%d' % (addr, npass), ram_len, ram_regions, screenshot)
     ev = list(events) + [(t_set, 'debugger'),
                          (t_set, 'break at $%x %d' % (addr, npass)),
                          (t_set, 'commander')]
     ev += [(t_set, command) for command in after_break]
     script = shot.build_script(conf, adf, ev, t_end, os.path.join(tmp, 'unused.png'), setup)
     Path(tmp, 'capture_%x_%d.retrosh' % (addr, npass)).write_text(script)
-    if os.path.exists(dump):
-        os.unlink(dump)
     out = shot.run_script(conf, script, capture=True, env={'VAHL_ONSTOP': onstop}, timeout=timeout)
     if not os.path.exists(dump):
         return None, out
+    return parse_stop(out, dump, regions), out
+
+
+def stop_script(tmp, tag, ram_len=524288, ram_regions=(), screenshot=False):
+    """The RetroShell script a stop runs (``VAHL_ONSTOP``): the registers, the chips, the CIAs, the drive, then the RAM
+    dumps into ``tmp``. Returns (script path, chip RAM dump path, regions)."""
+    dump = os.path.join(tmp, 'ram_%s.bin' % tag)
+    onstop = os.path.join(tmp, 'onstop_%s.retrosh' % tag)
+    lines = ['try debugger', 'r cpu', '? agnus', '? agnus beam']
+    lines += ['try r %s' % chip for chip in CHIPS]
+    lines += ['try ? ciaa', 'try ? ciab']                # 1.0.50: asleep or not, and since when (cia_regs)
+    lines += ['try ? df0', 'try ? paula dc', 'try ? agnus events']   # 1.0.53: the drive's head and the disk controller (parse_drive)
+    lines += ['commander', 'mem save bin %s 0 %d' % (dump, ram_len)]
+    regions = []
+    for base, length in ram_regions:
+        filename = os.path.join(tmp, 'ram_%s_%x.bin' % (tag, base))
+        lines.append('mem save bin %s $%x %d' % (filename, base, length))
+        regions.append({'base': base, 'length': length, 'file': filename})
+    lines.append('screenshot save ' + os.path.join(tmp, 'stable.png') if screenshot else 'shutdown')
+    Path(onstop).write_text('\n'.join(lines) + '\n')
+    if os.path.exists(dump):
+        os.unlink(dump)
+    return onstop, dump, regions
+
+
+def parse_stop(out, dump, regions):
+    """The state a stop script printed and dumped (``stop_script``)."""
     st = parse_regs(out)
     st['beam'] = parse_beam(out)
     st['chips'] = parse_chips(out)
@@ -120,7 +132,7 @@ def state(conf, events, addr, npass, t_end, t_set=0, ram_len=524288, keep=None,
     st['drive'] = parse_drive(out)
     st['ram'] = Path(dump).read_bytes()
     st['regions'] = regions
-    return st, out
+    return st
 
 
 def parse_regs(out):
@@ -318,11 +330,17 @@ def capture(conf, folder, addr, npass, t_end, events=(), t_set=0, ram_len=524288
     (folder / 'capture.log').write_text(log)
     if st is None or st['pc'] != addr:
         raise RuntimeError('breakpoint not captured; see %s' % (folder / 'capture.log'))
+    return write_capture(folder, st, conf, adf, 'ram_%x_%d.bin' % (addr, npass), screenshot,
+                         events=list(events), breakpoint=addr, skip=npass, set_at=t_set, end=t_end)
+
+
+def write_capture(folder, st, conf, adf, ram_file, screenshot=False, **extra):
+    """``cpu.json`` and ``creg.bin`` of a capture folder from the state a stop gave (``parse_stop``)."""
+    folder = Path(folder)
     meta = {k: v for k, v in st.items() if k != 'ram'}
     adf = adf or conf.get('ADF1')
-    meta.update(machine=conf.get('MACHINE', 'A500_OCS_1MB'), events=list(events),
-                breakpoint=addr, skip=npass, set_at=t_set, end=t_end,
-                ram_base=0, ram_bytes=len(st['ram']), ram_file='ram_%x_%d.bin' % (addr, npass),
+    meta.update(machine=conf.get('MACHINE', 'A500_OCS_1MB'), **extra)
+    meta.update(ram_base=0, ram_bytes=len(st['ram']), ram_file=ram_file,
                 ram_sha256=hashlib.sha256(st['ram']).hexdigest(),
                 assets={k: hashlib.sha256(Path(p).read_bytes()).hexdigest()
                         for k, p in (('VAHL', conf['VAHL']), ('ROM', conf['ROM']), ('ADF', adf))})

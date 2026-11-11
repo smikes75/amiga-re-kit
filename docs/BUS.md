@@ -80,6 +80,17 @@ jsr/bsr push two words after). The runtime always has the hooks `BUS_ACCESS` (ev
 the chip bus, in rd8/rd16/wr8/wr16), `BUS_BLIT` (BLTSIZE) and `BUS_BBUSY` (DMACONR bit 14); they are
 empty unless the translation is built with `-DBUS_HOOK`.
 
+Since 1.0.55 a row has six bytes: `words, extra, flags`, the order / sample rules of 1.0.53, and the index of the
+instruction's **bus pattern** (`BUS_VAR`, `BUS_PAT` beside the table; `arek.m68k.buspat`). A pattern is the sequence
+the 68000 really makes, measured on Moira: clocks without the bus, program reads, data accesses, the clocks that
+depend on the data, and where the interrupt level is sampled; an instruction whose sequence depends on the outcome
+(a branch, dbcc, scc) has one pattern per clock count and the glue picks it by the count the translation charged.
+The model plays the pattern (`arek_bus_pat_begin`) when the host switches the cycle-exact order on (`bus.order2`,
+i.e. `-DHOST_IPL_MODEL=1` of the kit's host): each access waits for its own free slot in the pattern's order. Without
+the switch, for a row without a pattern and for a translation with shorter rows the model works as before (all
+prefetches, then the data accesses, then the idle clocks). `arek difftest --moira DIR --bus-patterns FILE` measures
+the table again.
+
 ```c
 /* game.c = arek recomp --timing --bus-table ... ; then once: */
 #include "arek_bus_glue.h"

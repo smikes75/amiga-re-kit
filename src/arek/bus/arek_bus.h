@@ -59,6 +59,10 @@ typedef struct ArekBus {
      * frame's map started from - arek_bus_cpu_reg works the rest of the frame out again (journal_on: the host's switch) */
     uint16_t regs0[0x100]; int jn, journal_on, remap; uint32_t jt[32]; uint16_t jreg[32], jval[32];
     double acc_t[4]; uint32_t poll_back;  /* 1.0.53: when the last four CPU accesses were asked for (0 = the last); the instruction samples its interrupt level poll_back cycles before its last (timing.bus_poll) */
+    /* 1.0.55: the instruction's bus pattern (arek.m68k.buspat: Moira's order of idle clocks and bus cycles, and where the
+     * interrupt level is sampled) - arek_bus_pat_begin; the accesses of the translation take its data cycles in order */
+    int pat_off;                         /* the host's switch: 1 = do not use the patterns (HOST_BUS_PAT=0) */
+    const uint8_t *pat; int pat_on, pat_n, pat_i, pat_pj, pat_pd, pat_acc, pat_v, poll_valid; double pat_poll;
     int order2;                          /* 1.0.53: honour the bus table's fourth byte (the host's timing model) */
     uint32_t in_defer;                   /* 1.0.53: the instruction's last prefetch is still to come - 1 at its end, 2 / 3 before the data access after one / two (timing.bus_order) */
     int cpu_fast;                        /* 1.0.51: a faster CPU (the host moves its time back): a slot the CPU itself took is free for it */
@@ -91,6 +95,12 @@ double arek_bus_access(ArekBus *b, double t);   /* jeden pristup procesoru (pouz
 /* 1.0.51: take the last CPU access back (its slot is free again) and return the time it was asked for - for an access the
  * 68000 makes AFTER something the model has not done yet (the prefetch behind a CIA access); the caller makes it again. Two calls take the last two back. */
 double arek_bus_undo_last(ArekBus *b);
+/* 1.0.55: an instruction by its pattern p = { n items, poll cycle (255: before the first), poll delta, items } with
+ * items 1-127 = clocks without the bus, 0x80 = a read of the program stream, 0x81 = a data access, 0xfe = the clocks
+ * that depend on the data (clocks - everything else). Runs up to the first data access; arek_bus_data / arek_bus_slow
+ * take the data cycles in order, arek_bus_insn_end runs what is left. After the end b->pat_poll is the time the
+ * instruction sampled the interrupt level (b->poll_valid). */
+double arek_bus_pat_begin(ArekBus *b, double t, const uint8_t *p, uint32_t clocks);
 double arek_bus_blit(ArekBus *b, double t, uint16_t con0, uint16_t con1, uint16_t size);
 int arek_bus_bbusy(ArekBus *b, double t);
 

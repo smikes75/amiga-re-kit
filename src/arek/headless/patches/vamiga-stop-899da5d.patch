@@ -1,0 +1,25 @@
+diff --git a/Core/Components/CPU/CPU.cpp b/Core/Components/CPU/CPU.cpp
+index 3f8cabf..dc40c67 100644
+--- a/Core/Components/CPU/CPU.cpp
++++ b/Core/Components/CPU/CPU.cpp
+@@ -359,7 +359,19 @@ Moira::didReachBreakpoint(u32 addr)
+ {
+     vahlpoke::apply(amiga.mem, 'P', (long long)addr, (long long)agnus.pos.frame);
+     vahl_apply_inputs(amiga, u16(agnus.pos.v));
+-    if (vahl_trace_open()) { vahl_trace_write(addr, 0, 0); return; }
++    if (vahl_trace_open()) {
++        vahl_trace_write(addr, 0, 0);
++        // VAHL_STOP_FRAME=F [VAHL_STOP_ADDR=hex]: the first breakpoint hit in frame >= F (at that address, when given) is
++        // recorded AND stops the run as a breakpoint without a trace does - VAHL_ONSTOP then dumps the machine. A state
++        // and a trace of ONE run (the same inputs file, the same frame numbers).
++        static long stopFrame = -2, stopAddr = -1; static bool stopped = false;
++        if (stopFrame == -2) {
++            const char *f = getenv("VAHL_STOP_FRAME"); stopFrame = f ? atol(f) : -1;
++            if (const char *a = getenv("VAHL_STOP_ADDR")) stopAddr = strtol(a, nullptr, 16);
++        }
++        if (stopFrame < 0 || stopped || (long)agnus.pos.frame < stopFrame || (stopAddr >= 0 && (long)addr != stopAddr)) return;
++        stopped = true;
++    }
+     amiga.setFlag(RL::BREAKPOINT_REACHED);
+ }
+ 

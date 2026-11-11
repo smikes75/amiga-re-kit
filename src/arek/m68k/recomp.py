@@ -810,15 +810,36 @@ class Gen:
         with code at $400 and at $C00000 does not get 12 MB of zeros); bus_tab_row(pc) finds the row,
         a host's arek_bus_glue.h calls it in tick_hook."""
         from .timing import bus_table_entry, bus_order, bus_poll
+        from . import buspat
+        pats, pat_off, blob, var_ix, var_tab = {}, {}, bytearray(), {}, []
+
+        def var_of(i):
+            """1.0.55: the index + 1 of the instruction's pattern list in BUS_VAR (0: no pattern known)."""
+            try:
+                vs = buspat.variants(i)
+            except Exception:                            # noqa: BLE001 - an instruction the table cannot key
+                vs = None
+            if not vs:
+                return 0
+            key = tuple((v['clocks'], buspat.encode(v)) for v in vs)
+            if key not in var_ix:
+                var_ix[key] = len(var_tab) // 2 + 1
+                for n, (c, enc) in enumerate(key):
+                    if enc not in pat_off:
+                        pat_off[enc] = len(blob)
+                        blob.extend(enc)
+                    var_tab.extend([(c & 0x7fff) | (0x8000 if n == len(key) - 1 else 0), pat_off[enc]])
+            return var_ix[key]
         n = max(1, len(self.data) // 2)
         rows = {}
         for pc, i in self.tab_insns.items():
             k = (pc - self.base) // 2
             if 0 <= k < n:
                 try:
-                    rows[k] = '%d,%d,%d' % bus_table_entry(i) + ',%d' % (bus_order(i) | bus_poll(i) << 2)
+                    v = var_of(i)
+                    rows[k] = '%d,%d,%d' % bus_table_entry(i) + ',%d,%d,%d' % (bus_order(i) | bus_poll(i) << 2, v & 255, v >> 8)
                 except Unsupported:
-                    rows[k] = '%d,0,0,0' % ((i.end - i.addr) // 2)
+                    rows[k] = '%d,0,0,0,0,0' % ((i.end - i.addr) // 2)
         segs = []
         for k in sorted(rows):
             if segs and k - segs[-1][1] <= 256:
@@ -830,16 +851,21 @@ class Gen:
         self.emit('/* bus table (recomp --bus-table): words, extra accesses, flags per instruction word, in %d segment(s) of the image */' % len(segs))
         self.emit('#define BUS_SPARSE 1')
         self.emit('#define BUS_ROW4 1')                    # 1.0.53: a fourth byte, timing.bus_order (the last prefetch's place)
+        self.emit('#define BUS_ROW6 1')                    # 1.0.55: bytes 5-6, the instruction's bus pattern list (arek.m68k.buspat)
+        if len(blob) > 0xffff or len(var_tab) // 2 > 0xfffe:
+            raise Unsupported('bus table: %d bytes of patterns' % len(blob))
+        self.emit('static const uint8_t BUS_PAT[%d] = {%s};' % (max(1, len(blob)), ','.join(str(b) for b in blob) or '0'))
+        self.emit('static const uint16_t BUS_VAR[%d] = {%s};' % (max(2, len(var_tab)), ','.join(str(x) for x in var_tab) or '0,0'))
         self.emit('#define BUS_LO 0x%xu' % self.base)
         for j, (a, b) in enumerate(segs):
-            self.emit('static const uint8_t BUS_SEG%d[%d][4] = {' % (j, b - a + 1))
+            self.emit('static const uint8_t BUS_SEG%d[%d][6] = {' % (j, b - a + 1))
             for k in range(a, b + 1, 16):
-                self.emit('  ' + ','.join('{%s}' % rows.get(q, '0,0,0,0') for q in range(k, min(b + 1, k + 16))) + ',')
+                self.emit('  ' + ','.join('{%s}' % rows.get(q, '0,0,0,0,0,0') for q in range(k, min(b + 1, k + 16))) + ',')
             self.emit('};')
         self.emit('#define BUS_SEGS_N %d' % len(segs))
         self.emit('static const uint32_t BUS_SEG_LO[BUS_SEGS_N] = {%s};' % ', '.join('0x%xu' % (self.base + 2 * a) for a, b in segs))
         self.emit('static const uint32_t BUS_SEG_HI[BUS_SEGS_N] = {%s};' % ', '.join('0x%xu' % (self.base + 2 * b + 2) for a, b in segs))
-        self.emit('static const uint8_t (*const BUS_SEGS[BUS_SEGS_N])[4] = {%s};' % ', '.join('BUS_SEG%d' % j for j in range(len(segs))))
+        self.emit('static const uint8_t (*const BUS_SEGS[BUS_SEGS_N])[6] = {%s};' % ', '.join('BUS_SEG%d' % j for j in range(len(segs))))
         self.emit('static inline const uint8_t *bus_tab_row(uint32_t pc) {')
         self.emit('    for (int k = 0; k < BUS_SEGS_N; k++) if (pc >= BUS_SEG_LO[k] && pc < BUS_SEG_HI[k]) return BUS_SEGS[k][(pc - BUS_SEG_LO[k]) >> 1];')
         self.emit('    return 0;')

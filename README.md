@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.54 on PyPI, 2719 tests. Extracted from five game
+- **The kit:** version 1.0.55 on PyPI, 2731 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -47,7 +47,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2719 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2731 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -160,11 +160,12 @@ arek web test http://localhost:8911/?test=1            # ... and §6: the menu a
 
 # 6. time inside the frame: the bus model per DMA slot (docs/BUS.md)
 arek bus     copy lib/                                 # the model's C sources into a rebuild (arek_bus_glue.h behind the translation's hooks)
-arek recomp  main.bin --base c00000 --auto c00000 --timing --bus-table --out game.c   # bus table: words, extra accesses, flags per instruction
+arek recomp  main.bin --base c00000 --auto c00000 --timing --bus-table --out game.c   # bus table: words, extra accesses, flags and the bus pattern per instruction
 arek roots   main.bin --base c00000 --lo c00fa0 --hi c58a8c --json roots.json        # static roots of a whole game (slot tables, pointer tables, stored handlers)
 arek recomp  main.bin --base c00000 --auto-file roots.txt --resume --out game.c       # 1.0.26: tasks with their own stacks (rte / rts into another task)
 arek difftest --moira ~/src/vamiga                    # 1.0.26: every opcode through the translation and through Moira, vAmiga's 68000
 arek difftest --corpus cases.txt.gz                   # the same against recorded results: a C compiler is enough
+arek difftest --moira ~/src/vamiga --bus-patterns buspat.json   # 1.0.55: every instruction's bus cycles and interrupt sample point, measured on Moira
 arek recomp  main.bin --base c00000 --auto-file roots.txt --auto-soft --out game.c    # a root into data is dropped, not refused
 arek selftest bus                                      # the model against this VAHeadless's bus log (synthetic program, BLTPRI blits)
 arek selftest audio                                    # the Paula model (audio DMA slots, output bytes) against this VAHeadless's logs

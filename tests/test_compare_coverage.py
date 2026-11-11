@@ -327,3 +327,17 @@ def test_sound_after_the_end_of_the_rebuilds_log_is_named(tmp_path):
     reglog(r, [(f, 0x0a6, f) for f in range(78)])
     rows = parity.suite(cfg, base=str(tmp_path), run=False)
     assert any('ends 22 frames' in p for p in rows[0]['problems']) and not parity.suite_ok(rows)
+
+
+def test_capture_at_needs_a_folder_and_a_breakpoint(tmp_path):
+    """1.0.55: `arek trace run --capture-at` stops a traced run at a breakpoint hit and dumps the machine; without a
+    folder, without a breakpoint, or into an existing folder it is refused before the emulator starts."""
+    from arek.headless import trace
+    conf = {'VAHL': str(tmp_path / 'none'), 'ROM': str(tmp_path / 'rom'), 'ADF1': str(tmp_path / 'adf')}
+    (tmp_path / 'adf').write_bytes(bytes(901120))
+    for kw in (dict(breaks=[0x100], capture_at=5), dict(breaks=[0x100], capture_at=5, capture_dir=str(tmp_path))):
+        with pytest.raises(trace.TraceError):
+            trace.capture(conf, str(tmp_path / 't.vtr'), [], 1, 2, **kw)
+    assert trace.PATCH_OF['VAHL_STOP_FRAME'] == 'vamiga-stop-899da5d.patch'
+    import os
+    assert os.path.exists(os.path.join(os.path.dirname(trace.__file__), 'patches', 'vamiga-stop-899da5d.patch'))

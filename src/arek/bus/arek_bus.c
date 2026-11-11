@@ -47,7 +47,36 @@ double arek_bus_undo_last(ArekBus *b) {
     b->acc_t[0] = b->acc_t[1]; b->acc_t[1] = b->acc_t[2]; b->acc_t[2] = b->acc_t[3]; return t;
 }
 
+static double arek_pat_access(ArekBus *b, double t) {
+    int k = b->pat_acc++;
+    if (k == b->pat_pj && b->pat_pd < 4) b->pat_poll = t + b->pat_pd * 0.5;        /* inside the cycle, before its access (and its wait) */
+    t = arek_bus_access(b, t);
+    if (k == b->pat_pj && b->pat_pd >= 4) b->pat_poll = t + (b->pat_pd - 4) * 0.5; /* behind the cycle */
+    return t;
+}
+static double arek_pat_run(ArekBus *b, double t, int to_data) {
+    while (b->pat_i < b->pat_n) {
+        uint8_t x = b->pat[b->pat_i];
+        if (x == 0x81 && to_data) return t;
+        b->pat_i++;
+        if (x == 0x80 || x == 0x81) t = arek_pat_access(b, t);
+        else if (x == 0xfe) { if (b->pat_v > 0) t += b->pat_v * 0.5; }
+        else t += x * 0.5;
+    }
+    return t;
+}
+double arek_bus_pat_begin(ArekBus *b, double t, const uint8_t *p, uint32_t clocks) {
+    t = arek_bus_insn_end(b, t);
+    int fixed = 0;
+    for (int i = 0; i < p[0]; i++) { uint8_t x = p[3 + i]; fixed += (x == 0x80 || x == 0x81) ? 4 : x == 0xfe ? 0 : x; }
+    b->pat = p + 3; b->pat_n = p[0]; b->pat_i = 0; b->pat_pj = p[1] == 255 ? -1 : p[1]; b->pat_pd = p[2]; b->pat_acc = 0;
+    b->pat_v = (int)clocks - fixed; b->pat_on = 1;
+    b->pat_poll = t + (b->pat_pj < 0 ? b->pat_pd * 0.5 : 0);
+    return arek_pat_run(b, t, 1);
+}
+
 double arek_bus_insn_end(ArekBus *b, double t) {
+    if (b->pat_on) { t = arek_pat_run(b, t, 0); b->pat_on = 0; b->poll_valid = 1; }   /* 1.0.55: the rest of the instruction's pattern */
     if (b->in_defer) { b->in_defer = 0; b->in_l++; t = arek_bus_access(b, t); }   /* 1.0.53: the last prefetch, after the operand's accesses and before the idle clocks */
     int rem = (int)b->in_n - (int)b->in_pre - 4 * (int)(b->in_l + b->in_da + b->in_tail); if (rem > 0) t += rem * 0.5;
     /* 1.0.47 (SWIV KIT-GAP 2): the reads an instruction makes after its internal clocks - move to SR / CCR reads two
@@ -66,10 +95,16 @@ double arek_bus_insn(ArekBus *b, double t, uint32_t cycles, uint32_t accesses, u
 }
 
 double arek_bus_data(ArekBus *b, double t) {
+    if (b->pat_on) {                                         /* 1.0.55: the pattern's next data cycle (none left: the translation made an access the 68000 does not) */
+        t = arek_pat_run(b, t, 1);
+        if (b->pat_i < b->pat_n) { b->pat_i++; t = arek_pat_access(b, t); }
+        return t;
+    }
     if (b->in_defer >= 2 && b->in_da == b->in_defer - 1) { b->in_defer = 0; b->in_l++; t = arek_bus_access(b, t); }   /* read, PREFETCH, write */
     b->in_da++; return arek_bus_access(b, t);
 }
 double arek_bus_slow(ArekBus *b, double t, double cck) {
+    if (b->pat_on) return t + cck;                           /* 1.0.55: the host took the pattern's data cycle back (arek_bus_undo_last) and spends its own time */
     if (b->in_defer >= 2 && b->in_da == b->in_defer - 1) { b->in_defer = 0; b->in_l++; t = arek_bus_access(b, t); }
     b->acc_t[3] = b->acc_t[2]; b->acc_t[2] = b->acc_t[1]; b->acc_t[1] = b->acc_t[0]; b->acc_t[0] = t;   /* a CIA access is a bus cycle of the instruction too */
     b->in_da++; return t + cck;

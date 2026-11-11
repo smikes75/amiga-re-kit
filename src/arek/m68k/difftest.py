@@ -392,7 +392,8 @@ int main(int argc, char **argv) {
 def parse_result(line):
     t = line.split()
     return {'flags': int(t[0], 16), 'cycles': int(t[1], 16), 'pc': int(t[2], 16), 'sr': int(t[3], 16),
-            'd': [int(x, 16) for x in t[4:12]], 'a': [int(x, 16) for x in t[12:20]], 'mem': t[20] if len(t) > 20 else '-'}
+            'd': [int(x, 16) for x in t[4:12]], 'a': [int(x, 16) for x in t[12:20]], 'mem': t[20] if len(t) > 20 else '-',
+            'bus': t[21] if len(t) > 22 else None, 'poll': int(t[22]) if len(t) > 22 else None}    # 1.0.55: Moira's bus pattern of the first instruction
 
 
 def differences(ref, got):
@@ -794,10 +795,67 @@ def check_corpus(path, work, jobs=None):
     return res
 
 
+def collect_patterns(moira, build_dir, work, seed=3, progress=None):
+    """Moira's bus pattern of every instruction the decoder reads (1.0.55, ``buspat.build`` makes the table of it):
+    {key: [{'code', 'kind', 'text', 'runs': [(bus, poll, cycles)]}]}. Two passes: random extension words, then for the
+    shapes still without a pattern fixed ones that keep every absolute address inside the RAM."""
+    from . import buspat
+    exe = build_harness(moira, build_dir)
+    rng = random.Random(seed)
+    res = {}
+
+    def run(rows):
+        for i in range(0, len(rows), 4000):
+            for op, ok, why in _validate(exe, rows[i:i + 4000], 6, work):
+                if ok:
+                    info = ok[1]
+                    res.setdefault(str(op), []).append({'code': info['m']['code'].hex(), 'kind': info['kind'], 'text': info['text'],
+                                                        'runs': sorted({(r['bus'], r['poll'], r['cycles']) for _, r in info['cases']})})
+            if progress:
+                progress('%d programs' % min(i + 4000, len(rows)))
+    rows = []
+    for op in range(0x10000):
+        for c in opcode_programs(rng, op, 2)[:2]:
+            rows.append((op, plain_program(c, rng, nstates=6)))
+    rows += [(('ctl', k), p) for k, p in enumerate(control_programs(rng))]
+    run(rows)
+    table, _ = buspat.build(res, decode)
+    buspat._TABLE = table
+    rows = []
+    safe = be16(0x0001) + be16(0x2340) + be16(0x0001) + be16(0x2350) + be16(0x0001)
+    even = be16(0x0002) + be16(0x2340) + be16(0x0002) + be16(0x2350) + be16(0x0002)
+    low = be16(0x2340) + be16(0x2350) + be16(0x0002) + be16(0x2360) + be16(0x0002)
+    for op in range(0x10000):
+        # absolute long / absolute short and PC-relative / two short addresses / a movem list of two before an address
+        # ... / a short address before a long one (move $2340.w,$2350.l)
+        for ext in (safe, even, low, be16(0x0003) + be16(0x2340) + safe, be16(0x0003) + safe, be16(0x2340) + be16(0) + be16(0x2350) + even):
+            try:
+                ins = decode(be16(op) + ext, 0x8000, 0x8000)
+            except (Unsupported, IndexError, ValueError):
+                continue
+            if ins.kind in CONTROL or buspat.variants(ins) is not None:
+                continue
+            rows.append((('safe', op), plain_program((be16(op) + ext)[:ins.end - ins.addr], rng, nstates=6)))
+    run(rows)
+    buspat._TABLE = None
+    return res
+
+
 def main(a):
     """arek difftest."""
     work = a.work or tempfile.mkdtemp(prefix='arek-difftest-')
     Path(work).mkdir(parents=True, exist_ok=True)
+    if getattr(a, 'bus_patterns', None):
+        from . import buspat
+        if not a.moira:
+            raise SystemExit('difftest --bus-patterns: --moira DIR (the vAmiga source or its Moira folder)')
+        got = collect_patterns(a.moira, Path(work) / 'moira', work, progress=(lambda s: print(s, flush=True)) if a.verbose else None)
+        table, problems = buspat.build(got, decode)
+        Path(a.bus_patterns).write_text(json.dumps(table, separators=(',', ':'), sort_keys=True) + '\n')
+        print('%d shapes, %d movem shapes in %s; %d without a pattern' % (len(table['shapes']), len(table['movem']), a.bus_patterns, len(problems)))
+        for q in problems[:40] if a.verbose else ():
+            print('  ', q[0], q[1])
+        return 0
     if a.corpus:
         res = check_corpus(a.corpus, work, a.jobs)
     else:

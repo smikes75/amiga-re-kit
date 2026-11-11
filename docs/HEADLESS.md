@@ -48,6 +48,15 @@ inputs --inputs-v 0:312` exact and `--inputs-v 200:312` not (the test's handler 
 record its sha256 next to every measurement; a build without the mouse
 patch ignores mouse tokens silently, which is why `arek trace run --inputs` with mouse tokens refuses it.
 
+**1.0.55: `vamiga-stop-899da5d.patch`** (apply last, the ninth): `VAHL_STOP_FRAME=F` (and `VAHL_STOP_ADDR=hex`) - in a
+traced run the first breakpoint hit in frame F or later is recorded and then stops the emulator like a breakpoint without a
+trace, so `VAHL_ONSTOP` dumps the machine. `arek trace run ... --capture-at F --capture-dir DIR [--capture-addr A]` uses it: a
+state (cpu.json with the CIAs and the drive, creg.bin, the RAM - what `arek bpstate` writes) and a trace of ONE run, with the
+run's own `--inputs` file and frame numbers. Why one run matters: two runs of the same script are not the same run (a `wait N`
+click lands in another frame), and the frame number is what a host's disk and E clock phases follow. The build with all nine
+patches is `VAHeadless-899da5d-kit-stop` (sha256 f99f5103fdf72224...); `arek selftest bus|display|display --c|audio|inputs|mouse`
+give on it what they give on `-kit-frames`.
+
 **Which build do I have?** Both commits print `vAmiga Headless v5.0b2`; only
 the build date in the banner differs. Measure it instead: break right after
 the game's own loader returns (`arek bpstate --address <return>`) and compare

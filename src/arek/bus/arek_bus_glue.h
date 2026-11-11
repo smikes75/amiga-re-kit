@@ -64,6 +64,13 @@ static inline void arek_glue_insn(uint32_t pc, uint32_t clocks) {
 #ifdef BUS_ROW4
         if (AREK_GLUE.bus.order2) { ord = row[3] & 3; AREK_GLUE.bus.poll_back = (row[3] >> 2) & 3; }
 #endif
+#ifdef BUS_ROW6                                  /* 1.0.55: the instruction's bus pattern (arek.m68k.buspat), one per clock count */
+        if (AREK_GLUE.bus.order2 && !AREK_GLUE.bus.pat_off) { uint32_t var = row[4] | (uint32_t)row[5] << 8;
+            if (var) { const uint16_t *v = BUS_VAR + 2 * (var - 1), *any = 0, *hit = 0;
+                for (;; v += 2) { uint32_t c = v[0] & 0x7fffu; if (c == clocks) { hit = v; break; } if (!c) any = v; if (v[0] & 0x8000u) break; }
+                if (!hit) hit = any;
+                if (hit) { AREK_GLUE.bus.poll_back = 0; AREK_GLUE.t = arek_bus_pat_begin(&AREK_GLUE.bus, AREK_GLUE.t, BUS_PAT + hit[1], clocks); return; } } }
+#endif
     } }
 #elif defined(BUS_N)
     uint32_t i = (pc - BUS_LO) >> 1;           /* the dense table of kit 0.5.15 - 0.6.4 */

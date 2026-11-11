@@ -361,7 +361,8 @@ def test_bus_table_is_sparse():
     img[far:far + 4] = prog
     src, _, _ = recomp.generate(bytes(img), 0, auto=[0, far], bus_table=True)
     assert 'BUS_SEGS_N 2' in src and 'BUS_SEG_LO[BUS_SEGS_N] = {0x0u, 0x100000u}' in src and 'BUS_SEG_HI[BUS_SEGS_N] = {0x4u, 0x100004u}' in src
-    assert src.count('{1,0,0,0},{1,3,0,0}') == 2 and len(src) < 200000                 # nop, rts in both; no 12 MB of zeros
+    import re
+    assert len(re.findall(r'\{1,0,0,0,\d+,\d+\},\{1,3,0,0,\d+,\d+\}', src)) == 2 and len(src) < 200000                 # nop, rts in both; no 12 MB of zeros
 
 
 PAULA_HARNESS = r"""

@@ -6,10 +6,28 @@
 // flags: 1 an exception other than TRAP, 2 an access above the mirrored chip RAM, 4 a write into the instruction itself,
 // 8 no stop reached. Chip RAM repeats up to $200000 as in the translation's runtime; above it reads give 0, writes are
 // dropped. The run's memory comes back from a journal, so a case costs what it touches.
-#include "Moira.h"
 #include <map>
 #include <string>
 #include <vector>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cstdint>
+#include <algorithm>
+#include <functional>
+#include <iostream>
+#include <sstream>
+#include <optional>
+#include <array>
+#include <utility>
+#include <stdexcept>
+// 1.0.55: the bus pattern of an instruction needs Moira's own registers (reg.ipl: where the interrupt level was
+// sampled) - the standard headers above are in, so the two words below reach only Moira's classes
+#define protected public
+#define private public
+#include "Moira.h"
+#undef protected
+#undef private
 
 namespace vamiga::moira {
 enum { F_EXC = 1, F_OUT = 2, F_SELF = 4, F_RUN = 8 };
@@ -31,17 +49,23 @@ static inline void put(uint32_t a, uint8_t v) {
     JOURNAL.push_back({o, MEM[o]});
     MEM[o] = v;
 }
-void Moira::sync(int cycles) { clock += cycles; }
-u8 Moira::read8(u32 a) const { uint32_t o; return at(a, o) ? MEM[o] : 0; }
-u16 Moira::read16(u32 a) const { uint32_t o; return at(a, o) ? (u16)((MEM[o] << 8) | MEM[(o + 1) % MEMSZ]) : 0; }
+// The bus pattern of the instruction under test (the first execute() of a case): every sync(n) as n, a data read as -1,
+// a read of the program stream (function code USER_PROG: prefetch, extension words, PC-relative operands) as -3, a
+// write as -2, in order. The IPL pin holds the number of events so far, so the value POLL_IPL latches (reg.ipl) says
+// before which event the instruction sampled the interrupt level.
+static std::vector<int> EV; static bool REC = false;
+static inline void ev(const Moira *m, int e) { if (REC) { EV.push_back(e); const_cast<Moira *>(m)->ipl = (u8)std::min<size_t>(EV.size(), 250); } }
+void Moira::sync(int cycles) { clock += cycles; ev(this, cycles); }
+u8 Moira::read8(u32 a) const { ev(this, (fcl & 3) == 2 ? -3 : -1); uint32_t o; return at(a, o) ? MEM[o] : 0; }
+u16 Moira::read16(u32 a) const { ev(this, (fcl & 3) == 2 ? -3 : -1); uint32_t o; return at(a, o) ? (u16)((MEM[o] << 8) | MEM[(o + 1) % MEMSZ]) : 0; }
 u32 Moira::read32(u32 a) const { return ((u32)read16(a) << 16) | read16(a + 2); }
 u16 Moira::read16OnReset(u32 a) const {
     switch (a) { case 0: return R_SP >> 16; case 2: return R_SP & 0xffff; case 4: return R_PC >> 16; case 6: return R_PC & 0xffff; }
     return read16(a);
 }
 u16 Moira::read16Dasm(u32 a) const { return read16(a); }
-void Moira::write8(u32 a, u8 v) const { put(a, v); }
-void Moira::write16(u32 a, u16 v) const { put(a, v >> 8); put(a + 1, v & 0xff); }
+void Moira::write8(u32 a, u8 v) const { ev(this, -2); put(a, v); }
+void Moira::write16(u32 a, u16 v) const { ev(this, -2); put(a, v >> 8); put(a + 1, v & 0xff); }
 void Moira::write32(u32 a, u32 v) const { write16(a, v >> 16); write16(a + 2, v & 0xffff); }
 u8 Moira::dsack(u32) const { return 0; }
 u16 Moira::readIrqUserVector(u8) const { return 0; }
@@ -132,8 +156,11 @@ static int run(int argc, char **argv) {
         FLAGS = 0;
         i64 c0 = cpu.getClock();
         bool stopped = false;
+        EV.clear(); cpu.ipl = 0; cpu.reg.ipl = 0; int poll = 0;
         for (int n = 0; n < 8 && !(FLAGS & F_EXC); n++) {
+            REC = (n == 0);
             cpu.execute();
+            if (n == 0) { poll = cpu.reg.ipl; REC = false; cpu.ipl = 0; cpu.reg.ipl = 0; }
             uint32_t pc = cpu.getPC() & 0xffffff;                // 24 address lines: a flag in the top byte is the same place
             if (pc == s1 || pc == s2) { stopped = true; break; }
         }
@@ -150,7 +177,14 @@ static int run(int argc, char **argv) {
                 snprintf(t, sizeof t, "%s%x=%02x", mem.empty() ? "" : ",", kv.first, MEM[kv.first]);
                 mem += t;
             }
-        fprintf(out, " %s\n", mem.empty() ? "-" : mem.c_str());
+        fprintf(out, " %s", mem.empty() ? "-" : mem.c_str());
+        {   // the bus pattern: clocks without the bus as a number, a read as r, a write as w; a bus cycle is 2 clocks, the access, 2 clocks
+            std::string b; int idle = 0; int polled = -1, k = 0;
+            // Moira: sync(2) access sync(2) is one bus cycle; the events before the poll are counted in `poll`
+            for (size_t i = 0; i < EV.size(); i++) { char t[16]; snprintf(t, sizeof t, "%s%s", b.empty() ? "" : ",", EV[i] == -1 ? "r" : EV[i] == -3 ? "f" : EV[i] == -2 ? "w" : std::to_string(EV[i]).c_str()); b += t; }
+            (void)idle; (void)polled; (void)k;
+            fprintf(out, " %s %d\n", b.empty() ? "-" : b.c_str(), poll);
+        }
         for (auto it = JOURNAL.rbegin(); it != JOURNAL.rend(); ++it) MEM[it->first] = it->second;
     }
     fclose(in); fclose(out);

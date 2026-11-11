@@ -52,15 +52,19 @@ static int    H_IRQ_DEPTH = 0;
  * INTENA change (vAmiga: iplPipe). Without the model the host takes an interrupt at the first instruction boundary at
  * which the request is there (VERTB: H_VBL_LAT colour clocks into the frame, 10, fitted). With it: at the boundary of
  * the first instruction whose sample point (its end - H_IRQ_POLL - the wait of its last access) is at or after the
- * request's time + H_IPL_PIPE. Request times: VERTB at H_VBL_LAT (2 with the model), a CPU write to INTENA / INTREQ
+ * request's time + H_IPL_PIPE. Request times: VERTB at H_VBL_LAT (0 with the model), a CPU write to INTENA / INTREQ
  * at the write, anything else at the boundary that found it. Measured on SWIV's boot (frame 790, vAmiga): after
  * `move.w #$8020,INTENA` the original runs one more instruction before the pending VERTB is taken - the model does
  * too; the first VBL entry of the next frame falls on the original's slot. NOT measured: other request sources,
  * instructions that sample earlier than their last bus cycle (shifts, mulu, dbf...). Hence opt-in. */
+/* 1.0.55: the request times are vAmiga's own, nothing fitted: Paula's level reaches the pins 3 colour clocks after
+ * INTREQ / INTENA change (iplPipe); VERTB is requested at colour clock 0 of the frame, a CIA's interrupt in the E cycle
+ * in which its counter reaches 0, a CPU write to INTENA / INTREQ lands one colour clock after its slot. (1.0.50-1.0.54
+ * had 2 + 2 for VERTB and 6 + 2 for a CIA: one clock late and right - SWIV's boot met the difference at frame 2146.) */
 #ifdef HOST_IPL_MODEL
-static double H_IRQ_POLL = 1, H_IPL_PIPE = 2;
+static double H_IRQ_POLL = 1, H_IPL_PIPE = 3;
 #else
-static double H_IRQ_POLL = -1, H_IPL_PIPE = 2;
+static double H_IRQ_POLL = -1, H_IPL_PIPE = 3;
 #endif
 static double H_POLL_T = 0, H_EVT_T = -1e30, H_PEND_T[7]; static uint8_t H_PEND_ON[7], H_PEND_INIT = 0;
 static void h_irq_mark(void);
@@ -78,6 +82,7 @@ static int H_CIA_SYNC = 0;
 static int    H_CPU_NUM = 16; static double H_CPU_PREV = -1, H_CPU_CREDIT = 0;
 #define H_CIA_START (H_CIA_SYNC ? H_CIA_START_N : 0)   /* extra E cycles from the write that starts a timer to its first count: 0 measured (SWIV, one-shot restarted by its handler: intervals 17 751-17 767 against the original's 17 752-17 771); HOST_CIA_START to try others */
 static int    H_CIA_START_N = 0;
+static double H_CIA_IRQ_LAT = 5.0;       /* colour clocks from the model's underflow to the CIA's interrupt request: one E cycle - vAmiga requests it in the cycle its counter reaches 0, the model counts one further; HOST_CIA_IRQ to try others */
 static long   H_TICKS = 0;              /* instructions run (1.0.51: which accesses belong to one instruction) */
 static int    H_JDEPTH = 0; static uint8_t H_JLEV[8];   /* 1.0.48: handlers entered by a jump (HOST_VECTOR_JUMP), by level */
 static uint8_t H_CIAA_PRA = 0xfe;        /* $BFE001: bits 6/7 = fire port 0/1 (0 = pressed), bit 1 = LED output */
@@ -108,6 +113,10 @@ static char *H_SHOT_PREFIX = 0; static long H_SHOT_FIRST = 0, H_SHOT_LAST = -1;
 static uint16_t h_rd16cb(void *ctx, uint32_t a) { (void)ctx; return (uint16_t)rd16_raw(a & 0x7fffe); }
 static inline double h_now(void) { return arek_glue_time(); }
 static inline double h_abs(void) { return H_PAULA.frame_base + h_now(); }
+/* 1.0.55: the absolute colour clock of the chip-bus access a register hook is called for - its own slot; the model's time
+ * is already behind the cycle. What happens in a later slot (the disk's DMA word that raises DSKBLK in slot 7, 9 or 11)
+ * is not visible to a read in the slot before it: SWIV's poll loop left its 31st read one pass (13 colour clocks) early */
+static inline double h_acc_abs(void) { return H_CIA_SYNC ? h_abs() - 2 + arek_glue_bus()->slotoff : h_abs(); }
 static double h_ephase(void) { double t2 = 2.0 * h_abs(); return fmod(floor(t2), 10.0); }
 static int64_t h_eticks(void) { return (int64_t)floor(h_abs() / 5.0); }   /* E clock cycles: 10 CPU clocks = 5 CCK; 64 bits - in wasm32 a long passed 2^31 after ~151 000 frames (G47) */
 /* the CIAs' timers: counted lazily in E ticks; an underflow reloads the latch, sets the ICR bit and, with the mask bit,
@@ -151,7 +160,7 @@ static void h_cia_poll(void) {
     double due = H_CIA_DUE;
     h_irq_mark();
     for (int i = 0; i < 2; i++) for (int k = 0; k < 2; k++) h_cia_run(i, k);
-    if (H_CIA_SYNC) { H_EVT_T = due + 5.0; h_irq_mark(); }   /* 1.0.52: the CIA pulls its interrupt line one E cycle after the underflow (vAmiga: CIASetInt0 -> 1) */
+    if (H_CIA_SYNC) { H_EVT_T = due + H_CIA_IRQ_LAT; h_irq_mark(); }   /* 1.0.52: the request comes an E cycle after the model's underflow (vAmiga raises it in the cycle its counter reaches 0) */
     h_cia_due();
 }
 static int h_cia_reg(uint32_t a, int *i) {           /* the CIA and register of an address, or -1 */
@@ -170,8 +179,9 @@ static void host_init(double t0) {
     if (getenv("HOST_CPU_SPEED")) { int n = atoi(getenv("HOST_CPU_SPEED")); if (n >= 2 && n <= 16) H_CPU_NUM = n; }
     if (getenv("HOST_CIA_SYNC")) H_CIA_SYNC = atoi(getenv("HOST_CIA_SYNC"));
     if (getenv("HOST_CIA_START")) H_CIA_START_N = atoi(getenv("HOST_CIA_START"));
+    if (getenv("HOST_CIA_IRQ")) H_CIA_IRQ_LAT = atof(getenv("HOST_CIA_IRQ"));
     if (getenv("HOST_IPL_PIPE")) H_IPL_PIPE = atof(getenv("HOST_IPL_PIPE"));
-    H_VBL_LAT = H_IRQ_POLL >= 0 ? 2 : 10;
+    H_VBL_LAT = H_IRQ_POLL >= 0 ? 0 : 10;
     if (getenv("HOST_VBL_LAT")) H_VBL_LAT = atof(getenv("HOST_VBL_LAT"));
     if (getenv("HOST_IRQ_PRE")) H_IRQ_PRE = (uint32_t)atoi(getenv("HOST_IRQ_PRE"));
     if (getenv("HOST_IRQ_CYC")) H_IRQ_CYC = (uint32_t)atoi(getenv("HOST_IRQ_CYC"));
@@ -210,12 +220,19 @@ int hw_read_hook(uint32_t off, uint32_t *v) {
     double t = h_now(); long tt = (long)t; int vp = (int)(tt / HOST_HPOS), hp = (int)(tt % HOST_HPOS), lof = H_LOF;
     /* 1.0.40: the frame rolls at an instruction boundary; a read made past the frame's end inside the instruction is
      * already in the next field - line 0 on, not a line 313 (whose low byte $39 a wait for line $39 took for its line) */
+    /* 1.0.55, with the timing model: the position is the one of the access's own slot (not of the time behind it) and
+     * Agnus reports it five colour clocks ahead; in the first two of a line still with the old line number (vAmiga's
+     * peekVHPOSR / peekVPOSR). SWIV's level 6 handler adds VHPOSR to its random seed: every entry at the original's
+     * colour clock, the value 4 too low, another branch nine frames later */
+    if (H_CIA_SYNC) { ArekBus *bb = arek_glue_bus(); long sl = bb->last_slot >= 0 ? bb->last_slot : tt - 2 + bb->slotoff; if (sl < 0) sl = 0;
+        vp = (int)(sl / HOST_HPOS); hp = (int)(sl % HOST_HPOS); }
     if (vp >= H_LINES) { vp -= H_LINES; if (ARD_R[0x100 >> 1] & 0x0004) lof ^= 1; else if (!H_LINES_FORCED) lof = 1; }
+    if (H_CIA_SYNC) { int v0 = vp; hp += 5; if (hp >= HOST_HPOS) { hp -= HOST_HPOS; vp++; } if (vp >= H_LINES) vp = 0; if (hp <= 1) vp = v0; }
     switch (off) {
     case 0x004: *v = (lof << 15) | ((vp >> 8) & 1); return 1;                   /* VPOSR (OCS PAL Agnus id 0) */
     case 0x006: *v = ((vp & 0xff) << 8) | (hp & 0xff); return 1;                 /* VHPOSR */
 #ifdef HOST_FLOPPY
-    case 0x01e: hfl_run(h_abs()); *v = H_INTREQ; return 1;                      /* INTREQR: a loader polls DSKBLK here */
+    case 0x01e: hfl_run(h_acc_abs()); *v = H_INTREQ; return 1;                      /* INTREQR: a loader polls DSKBLK here */
     case 0x01a: *v = hfl_dskbytr(); return 1;                                    /* DSKBYTR */
 #else
     case 0x01e: *v = H_INTREQ; return 1;                                         /* INTREQR */
@@ -259,7 +276,7 @@ static void h_cia_wait2(int write) {
     if (H_CIA_SYNC) {
         int rmw = write && H_CIA_RD_N == H_TICKS;                              /* this instruction read a CIA before: its write comes last */
         if (!write) H_CIA_RD_N = H_TICKS;
-        ArekBus *bb = arek_glue_bus(); int redo = !rmw && H_CIA_UNDO_N != H_TICKS && !bb->in_defer;   /* 1.0.53: with the table's order the last prefetch has not been made yet */
+        ArekBus *bb = arek_glue_bus(); int redo = !rmw && H_CIA_UNDO_N != H_TICKS && !bb->in_defer && !bb->pat_on;   /* 1.0.53: with the table's order the last prefetch has not been made yet */
         arek_glue_set_time(arek_bus_undo_last(bb)); if (bb->in_da) bb->in_da--;   /* the runtime counted this access as one on the chip bus (bus_access_hook): it is not */
         if (redo) { H_CIA_UNDO_N = H_TICKS; arek_glue_set_time(arek_bus_undo_last(bb)); }   /* the last prefetch comes after this access */
         long clk = (long)floor(2.0 * h_now()) + 2;                             /* the sync is worked out 2 clocks into the bus cycle */
@@ -306,13 +323,13 @@ void cia_write_hook(uint32_t a, uint8_t v) {
     int i, reg = h_cia_reg(a, &i);
     if (reg >= 4 && reg <= 7) {                         /* the latch; the high byte loads a stopped timer (and starts a one-shot) */
         int k = (reg - 4) >> 1; HCiaTimer *t = &H_CIA[i].t[k]; h_cia_run(i, k);
-        if (reg & 1) { t->latch = (uint16_t)((t->latch & 0xff) | (v << 8)); if (!(t->cr & 1)) { t->cnt = t->latch; if (t->cr & 8) { t->cr |= 1; t->e0 = h_eticks() + H_CIA_START; } } }
+        if (reg & 1) { t->latch = (uint16_t)((t->latch & 0xff) | (v << 8)); if (!(t->cr & 1)) { t->cnt = t->latch; if (t->cr & 8) { t->cr |= 1; t->e0 = h_eticks() + H_CIA_START + H_CIA_SYNC; } } }   /* 1.0.55: a start that also loads counts one E cycle later (vAmiga: the load clears CountA2) */
         else t->latch = (uint16_t)((t->latch & 0xff00) | v);
     } else if (reg == 13) { if (v & 0x80) H_CIA[i].mask |= v & 0x7f; else H_CIA[i].mask &= (uint8_t)~v; h_cia_raise(i); }
     else if (reg == 14 || reg == 15) {                 /* control: START (0), ONESHOT (3), FORCE LOAD (4, not stored) */
         int k = reg - 14; HCiaTimer *t = &H_CIA[i].t[k]; h_cia_run(i, k);
-        if (v & 0x10) t->cnt = t->latch;
-        if ((v & 1) && !(t->cr & 1)) t->e0 = h_eticks() + H_CIA_START;
+        if (v & 0x10) { t->cnt = t->latch; if (H_CIA_SYNC && (t->cr & 1)) t->e0 = h_eticks() + 1; }   /* a forced load skips a count */
+        if ((v & 1) && !(t->cr & 1)) t->e0 = h_eticks() + H_CIA_START + ((v & 0x10) ? H_CIA_SYNC : 0);
         t->cr = (uint8_t)(v & 0xef);
     }
     if (reg >= 4 && reg <= 15) h_cia_due();           /* a latch, the mask or a control register changed what is due */
@@ -354,7 +371,7 @@ static void host_events(void) {
         arek_glue_frame(H_LINES);
         arek_paula_frame(&H_PAULA, H_PAULA.frame_base + len);
         H_FRAME++; H_COP_DONE = 0; H_COP_IDX = 0; H_NEXTMAP = 0;
-        if (H_VBL_LAT <= 0) H_INTREQ |= 0x0020; else H_VERTB_PEND = 1;
+        if (H_VBL_LAT <= 0 && H_IRQ_POLL < 0) H_INTREQ |= 0x0020; else H_VERTB_PEND = 1;
         if (h_frame_cb) h_frame_cb();
     }
     if (H_VERTB_PEND && h_now() >= H_VBL_LAT) { h_irq_mark(); H_INTREQ |= 0x0020; H_VERTB_PEND = 0; H_EVT_T = H_PAULA.frame_base + H_VBL_LAT; h_irq_mark(); }
@@ -518,8 +535,9 @@ void tick_hook(M68 *m, uint32_t pc, uint32_t clocks) {
           if (dt > 0) { H_CPU_CREDIT += dt * (16 - H_CPU_NUM) / 16.0; double w = floor(H_CPU_CREDIT);   /* whole colour clocks only: the accesses stay on the slots' grid */
                         if (w > 0) { H_CPU_CREDIT -= w; arek_glue_set_time(arek_glue_time() - w); } } }
       H_CPU_PREV = h_abs();
-      H_POLL_T = H_PAULA.frame_base + bb->acc_t[bb->poll_back & 3] + H_IRQ_POLL; bb->poll_back = 0;   /* where the instruction that just ended sampled the IPL pins: H_IRQ_POLL colour clocks into its last bus cycle (1.0.53: by that cycle's start, not by the instruction's end - idle clocks may follow it) */
-      bb->order2 = H_CIA_SYNC; }
+      if (bb->poll_valid) { H_POLL_T = H_PAULA.frame_base + bb->pat_poll; bb->poll_valid = 0; bb->poll_back = 0; }   /* 1.0.55: by the instruction's pattern */
+      else { H_POLL_T = H_PAULA.frame_base + bb->acc_t[bb->poll_back & 3] + H_IRQ_POLL; bb->poll_back = 0; }   /* where the instruction that just ended sampled the IPL pins: H_IRQ_POLL colour clocks into its last bus cycle (1.0.53: by that cycle's start, not by the instruction's end - idle clocks may follow it) */
+      bb->order2 = H_CIA_SYNC; { static int po = -1; if (po < 0) po = getenv("HOST_BUS_PAT") && !atoi(getenv("HOST_BUS_PAT")); bb->pat_off = po; } }
     host_events();
     arek_paula_run(&H_PAULA, h_abs());
     { int ln = (int)(h_now() / HOST_HPOS); if (ln > ARD_NEXT) ard_until(ln); }

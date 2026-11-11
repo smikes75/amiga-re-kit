@@ -3,6 +3,55 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.55 (2026-11-11)
+
+- floppy model: the byte clock needs no measured phase - vAmiga starts it at power-on and serves a byte in every
+  56th colour clock, so in absolute colour clocks (frame x 313 x 227 + line x 227 + slot) a byte is served at 1 modulo
+  56 in every run. The host takes it from its absolute time, i.e. from state.txt's frame number, which must be the
+  frame of the run it is compared with (SWIV's capture was made at frame 789 of its own run and carried the trace's
+  790: 71 051 mod 56 = 43, the "15 colour clocks between runs" of 1.0.54). `@drive`'s due field is ignored;
+  HOST_FLOPPY_PHASE stays as an offset for a state without the original's frame number. In one colour clock the
+  disk's DMA slot is served before the byte (vAmiga's order). SWIV: the same 110 451 instruction times in a row and
+  an empty `arek bus diff`, now without any setting
+
+- the bus pattern of every instruction, measured on Moira (`arek.m68k.buspat`, `buspat.json`: 1314 shapes + 28 of
+  movem): its clocks without the bus and its bus cycles in the order the processor makes them (program reads, data
+  accesses, the clocks that depend on the data), and the place where it samples the interrupt level. Until now a host's
+  model made the prefetches first, then the data accesses, then the idle clocks, with the rules of 1.0.53 for the last
+  prefetch and the sample - the right length on a free bus, but beside DMA every access waits for ITS slot, so the
+  order decides where the instruction ends. `arek recomp --bus-table` writes rows of six bytes (the pattern's index;
+  `BUS_PAT`, `BUS_VAR`, one variant per clock count for a branch taken or not, dbcc, scc) and the bus model plays the
+  pattern (`arek_bus_pat_begin`); used with `-DHOST_IPL_MODEL=1` only, **translations must be regenerated**, a row
+  without a pattern and an older translation go the old way. `HOST_BUS_PAT=0` in the environment of host_trace / the
+  native engine switches the patterns off for a comparison. The clocks that depend on the data are the whole gap (the
+  instruction's count minus everything else), not the smallest gap Moira's random operands showed plus a rest: mulu by
+  a word with one 1 bit was a colour clock too long
+- the timing model's request times are vAmiga's own now, nothing fitted: Paula's level reaches the 68000 three colour
+  clocks after INTREQ / INTENA change, VERTB is requested at colour clock 0 of the frame, a CIA's interrupt in the E
+  cycle in which its counter reaches 0 (1.0.50-1.0.54 had 2 + 2 and 6 + 2: VERTB one clock late - an instruction that
+  starts on clock 2 of a frame meets it). A CIA timer started by a write that also loads it (the high byte in one-shot
+  mode, the control register with FORCE LOAD) counts one E cycle later than one started by its control register alone;
+  a forced load of a running timer skips a count
+- with the timing model VHPOSR / VPOSR are read as Agnus reports them: the position of the access's own slot plus five
+  colour clocks, in the first two clocks of a line still with the old line number (a game that seeds its random
+  numbers from VHPOSR in an interrupt handler: SWIV)
+- floppy model: a CPU read of INTREQR / DSKBYTR and a write to the disk registers see the disk up to the access's own
+  slot - the DMA word in the next slot (7, 9, 11) that raises DSKBLK is not there yet (a poll loop left a read one
+  pass early, once in 31 reads)
+- measured on SWIV's whole boot against vAmiga, from the capture at frame 790 to the title at frame 2613 (45 disk
+  reads, the decompressor beside five bitplanes, 5 200 level 6 entries of the music routine, the VBL handler, the
+  random numbers): 22 780 instruction times of 22 780 equal at 14 addresses, and 1 687 863 of 1 687 863 at 28
+  addresses over the first 600 frames (1.0.54: 111 441 in a row)
+- `arek difftest --moira DIR --bus-patterns FILE` measures the table again (30 s); the harness logs every bus cycle
+  and sync of an instruction and the position of the interrupt sample. `tests/data/buspat_corpus.json` keeps Moira's
+  events for every shape: the table and the C executor are tested without Moira
+
+- `arek trace run --capture-at FRAME --capture-dir DIR [--capture-addr A] [--capture-region BASE:LEN]`: a traced run
+  (with its `--inputs` file) stops at the first breakpoint hit in that frame or later and dumps the machine as
+  `arek bpstate` does - a state and a trace of one run. Needs the emulator built with the new
+  `vamiga-stop-899da5d.patch` (`VAHL_STOP_FRAME`, `VAHL_STOP_ADDR`); the stop script and the capture writer are shared
+  with bpstate (`bpstate.stop_script`, `parse_stop`, `write_capture`)
+
 ## 1.0.54 (2026-11-11)
 
 - floppy model, measured on SWIV's first read against vAmiga (per-instruction times and the bus log): a byte passes
