@@ -64,6 +64,19 @@ static double H_IRQ_POLL = -1, H_IPL_PIPE = 2;
 #endif
 static double H_POLL_T = 0, H_EVT_T = -1e30, H_PEND_T[7]; static uint8_t H_PEND_ON[7], H_PEND_INIT = 0;
 static void h_irq_mark(void);
+#ifdef HOST_IPL_MODEL
+static int H_CIA_SYNC = 1;
+#else
+static int H_CIA_SYNC = 0;
+#endif
+/* 1.0.51 (Turrican II KIT-GAPS 34): a faster CPU for a game mode that asks more of it than the original (more live
+ * objects in a wider field). H_CPU_NUM sixteenths of the time between two instruction boundaries count (16 = the
+ * 68000, to the byte; 8 = twice the instructions a frame). The frame, the Copper, the blitter, the CIAs and Paula keep
+ * their times; an interrupt comes at the same beam position and its handler runs faster too. The time an extern
+ * spends (host_spend) is not scaled. Set it at a frame's start: the engine's engine_cpu_speed(n), HOST_CPU_SPEED in
+ * the environment for host_trace and the native engine. */
+static int    H_CPU_NUM = 16; static double H_CPU_PREV = -1, H_CPU_CREDIT = 0;
+static long   H_TICKS = 0;              /* instructions run (1.0.51: which accesses belong to one instruction) */
 static int    H_JDEPTH = 0; static uint8_t H_JLEV[8];   /* 1.0.48: handlers entered by a jump (HOST_VECTOR_JUMP), by level */
 static uint8_t H_CIAA_PRA = 0xfe;        /* $BFE001: bits 6/7 = fire port 0/1 (0 = pressed), bit 1 = LED output */
 static uint8_t H_CIAA_SDR = 0, H_CIAA_ICR = 0, H_CIAA_DDRA = 0x03, H_CIAB_ICR = 0;
@@ -149,6 +162,8 @@ static void host_reset(void);
 static void host_init(double t0) {
     host_reset();
     if (getenv("HOST_IRQ_POLL")) H_IRQ_POLL = atof(getenv("HOST_IRQ_POLL"));
+    if (getenv("HOST_CPU_SPEED")) { int n = atoi(getenv("HOST_CPU_SPEED")); if (n >= 2 && n <= 16) H_CPU_NUM = n; }
+    if (getenv("HOST_CIA_SYNC")) H_CIA_SYNC = atoi(getenv("HOST_CIA_SYNC"));
     if (getenv("HOST_IPL_PIPE")) H_IPL_PIPE = atof(getenv("HOST_IPL_PIPE"));
     H_VBL_LAT = H_IRQ_POLL >= 0 ? 2 : 10;
     if (getenv("HOST_VBL_LAT")) H_VBL_LAT = atof(getenv("HOST_VBL_LAT"));
@@ -211,13 +226,36 @@ void hw_write_hook(uint32_t off, uint32_t v) {
     if (off == 0x034) { for (int k = 8; k <= 14; k += 2) if (v & (1u << (k + 1))) H_POTGOR = (uint16_t)((H_POTGOR & ~(1u << k)) | (v & (1u << k))); }   /* POTGO: an output pin reads back (G40) */
     if ((off >= 0x0a0 && off < 0x0e0) || (off == 0x096 && (v & 0x000f)) || (off == 0x09c && (v & 0x0780))) arek_paula_write(&H_PAULA, h_abs(), off, (uint16_t)v);
 }
-/* the E clock (10 CPU clocks = 5 CCK): a CIA access and an autovector wait for its phase (measured on 3 instructions) */
-static void h_cia_wait(void) {
+/* the E clock (10 CPU clocks = 5 CCK): a CIA access waits for its phase.
+ * 1.0.51 (SWIV KIT-GAPS 7), with -DHOST_IPL_MODEL=1 (or HOST_CIA_SYNC=1 in the environment): vAmiga's rule
+ * (Agnus::syncWithEClock, OCS) - at the access the CPU waits until E clock position 2, and takes the position of the
+ * next E cycle when that one is less than 6 clocks away: 6 to 15 clocks, then the bus cycle. The position at a frame's
+ * start is (2 * frame) mod 10 (142 102 CPU clocks a frame). The access is placed where the 68000 makes it: the model
+ * performs an instruction's prefetches first, the 68000 reads its operand BEFORE the last prefetch (4 clocks earlier);
+ * the write of a read-modify-write instruction (bclr, addq to memory) comes after that prefetch. Measured on SWIV's
+ * VBL handler against vAmiga: bclr #6,$BFEE01 20 colour clocks (the old rule: 17), move.b $BFED01,d0 12 (10).
+ * Without the switch: the rule fitted on three instructions (H_CIA_A + ((H_CIA_B - phase) mod 10) clocks). */
+static long H_CIA_RD_N = -1, H_CIA_UNDO_N = -1;
+static void h_cia_wait2(int write) {
+    if (H_CIA_SYNC) {
+        int rmw = write && H_CIA_RD_N == H_TICKS;                              /* this instruction read a CIA before: its write comes last */
+        if (!write) H_CIA_RD_N = H_TICKS;
+        ArekBus *bb = arek_glue_bus(); int redo = !rmw && H_CIA_UNDO_N != H_TICKS;
+        arek_glue_set_time(arek_bus_undo_last(bb)); if (bb->in_da) bb->in_da--;   /* the runtime counted this access as one on the chip bus (bus_access_hook): it is not */
+        if (redo) { H_CIA_UNDO_N = H_TICKS; arek_glue_set_time(arek_bus_undo_last(bb)); }   /* the last prefetch comes after this access */
+        long clk = (long)floor(2.0 * h_now()) + 2;                             /* the sync is worked out 2 clocks into the bus cycle */
+        int e = (int)(((2 * (H_FRAME0 + H_FRAME) + clk) % 10 + 10) % 10), d = ((2 - e) % 10 + 10) % 10; if (d < 6) d += 10;
+        if (H_CIA_LOG) fprintf(H_CIA_LOG, "%06x %.1f %d %d\n", H_PC, h_abs(), e, d + 4);
+        arek_glue_slow((d + 4) * 0.5);
+        if (redo) arek_glue_set_time(arek_bus_access(bb, arek_glue_time()));
+        return;
+    }
     if (H_CIA_A < 0) { arek_glue_slow(7); return; }
     int ph = (int)h_ephase(); int clk = H_CIA_A + ((H_CIA_B - ph) % 10 + 10) % 10;
     if (H_CIA_LOG) fprintf(H_CIA_LOG, "%06x %.1f %d %d\n", H_PC, h_abs(), ph, clk);
     arek_glue_slow(clk * 0.5);
 }
+static void h_cia_wait(void) { h_cia_wait2(0); }
 uint8_t cia_read_hook(uint32_t a) {
     h_cia_wait();
 #ifdef HOST_CIA_READ
@@ -235,7 +273,7 @@ uint8_t cia_read_hook(uint32_t a) {
 }
 void cia_write_hook(uint32_t a, uint8_t v) {
 #ifdef HOST_CIA_WRITE
-    if (HOST_CIA_WRITE(a, v)) { h_cia_wait(); return; }
+    if (HOST_CIA_WRITE(a, v)) { h_cia_wait2(1); return; }
 #endif
     int i, reg = h_cia_reg(a, &i);
     if (reg >= 4 && reg <= 7) {                         /* the latch; the high byte loads a stopped timer (and starts a one-shot) */
@@ -253,7 +291,7 @@ void cia_write_hook(uint32_t a, uint8_t v) {
     if (a == 0xbfe201) H_CIAA_DDRA = v;
     if (a == 0xbfe001 && (H_CIAA_DDRA & 2)) { H_LED_OFF = (v >> 1) & 1; H_CIAA_PRA = (uint8_t)((H_CIAA_PRA & ~2) | (v & 2)); }
     if (a == 0xbfec01) H_CIAA_SDR = v;                 /* SDR is loaded by a write: the keyboard handshake writes $FF and reads it back (G53 - a held key repeated) */
-    h_cia_wait();
+    h_cia_wait2(1);
 }
 
 /* the next frame's map behind the end of the current one, so an instruction crossing the frame end sees the refresh
@@ -309,6 +347,7 @@ static void host_reset(void) {
     H_IO_UNKNOWN = 0; H_IO_LAST = 0; H_IRQS = 0; H_PC = 0;
     RET_PC = NO_RET;
     H_JDEPTH = 0;
+    H_CPU_NUM = 16; H_CPU_PREV = -1; H_CPU_CREDIT = 0;
     H_PEND_INIT = 0; H_EVT_T = -1e30; for (int i = 0; i < 7; i++) { H_PEND_ON[i] = 0; H_PEND_T[i] = -1e30; }
 }
 
@@ -413,11 +452,16 @@ void tick_hook(M68 *m, uint32_t pc, uint32_t clocks) {
     /* an instruction boundary: finish the previous instruction's internal cycles first (arek_bus_insn_end is idempotent),
        so interrupts, time events and records see the time of its end (measured: VBL only after the bmi of a wait loop) */
     { ArekBus *bb = arek_glue_bus(); arek_glue_set_time(arek_bus_insn_end(bb, arek_glue_time()));
+      bb->cpu_fast = H_CPU_NUM != 16;
+      if (H_CPU_NUM != 16 && H_CPU_PREV >= 0) { double now = h_abs(), dt = now - H_CPU_PREV;
+          if (dt > 0) { H_CPU_CREDIT += dt * (16 - H_CPU_NUM) / 16.0; double w = floor(H_CPU_CREDIT);   /* whole colour clocks only: the accesses stay on the slots' grid */
+                        if (w > 0) { H_CPU_CREDIT -= w; arek_glue_set_time(arek_glue_time() - w); } } }
+      H_CPU_PREV = h_abs();
       H_POLL_T = h_abs() - H_IRQ_POLL - bb->last_wait; }   /* 1.0.50: where the instruction that just ended sampled the IPL pins */
     host_events();
     arek_paula_run(&H_PAULA, h_abs());
     { int ln = (int)(h_now() / HOST_HPOS); if (ln > ARD_NEXT) ard_until(ln); }
-    H_PC = pc;
+    H_PC = pc; H_TICKS++;
     while (H_JDEPTH && (int)((m->srhi >> 8) & 7) < H_JLEV[H_JDEPTH - 1]) H_JDEPTH--;   /* a handler entered by a jump is over */
     if (h_pc_cb) h_pc_cb(m, pc);          /* before an interrupt is accepted: as the emulator's breakpoint (pc reached) */
     { long n0 = H_IRQS; host_irq(m, pc);
@@ -451,5 +495,6 @@ void host_spend(M68 *m, double cck, double access_every) {
         { int ln = (int)(h_now() / HOST_HPOS); if (ln > ARD_NEXT) ard_until(ln); }
         host_irq(m, H_PC);                                   /* a handler taken here advances the clock: its time counts */
     }
+    H_CPU_PREV = h_abs();                                    /* 1.0.51: the original's time, not the CPU's work - not scaled */
 }
 #endif

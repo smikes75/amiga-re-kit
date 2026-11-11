@@ -3,6 +3,23 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.51 (2026-11-11)
+
+- host, with `-DHOST_IPL_MODEL=1` (SWIV KIT-GAPS 7): CIA accesses wait for the E clock as vAmiga does
+  (Agnus::syncWithEClock: position 2, the next cycle's when less than 6 clocks away - 6 to 15 clocks, worked out 2
+  clocks into the bus cycle), at the place the 68000 makes them (before the instruction's last prefetch; the write of
+  a read-modify-write after it: `arek_bus_undo_last`), and no longer counted a second time as a chip-bus access.
+  SWIV's VBL handler against vAmiga: 56 of 56 times equal over two frames (before -3 / -2 colour clocks per CIA
+  instruction, -5 to -10 a frame); the second VBL entry is now on the original's slot AND instruction. Without the
+  define nothing changes (the rule fitted on three instructions stays)
+
+- host (Turrican II KIT-GAPS 34): a faster CPU - `engine_cpu_speed(n)` (from the next frame's start; the page calls it
+  between frames, as a key) and `HOST_CPU_SPEED=n` for host_trace: n sixteenths of the 68000's time per instruction
+  (16 = the original, to the byte; 8 = twice the instructions a frame). The frame, Copper, blitter, CIAs and Paula
+  keep their times; `host_spend` is not scaled. For a game mode that asks more of the CPU than the original did
+- note: the native engine without `--thread` leaves a frame only in a wait loop the translation knows (WAIT_LOOP); a
+  game spinning in a plain loop needs the threaded engine (a test with `nop; bra` timed out for this reason)
+
 ## 1.0.50 (2026-11-11)
 
 - captures (SWIV KIT-GAPS 5): a CIA nobody touches sleeps in vAmiga and `r ciab` prints its counters as they were when

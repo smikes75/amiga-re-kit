@@ -28,14 +28,21 @@ double arek_bus_access(ArekBus *b, double tt) {
     uint32_t cap = (uint32_t)(b->maxlines * b->hpos);
     { uint32_t lim = (uint32_t)(b->lines * b->hpos) + (uint32_t)b->hpos; if (lim < cap) cap = lim; }
     uint32_t t = (uint32_t)tt; if ((double)t < tt) t++; t += b->slotoff;
+    b->prev_t0 = b->last_t0; b->prev_slot = b->last_slot; b->last_t0 = tt; b->last_slot = -1;
     arek_bus_blt_advance(b, t); b->last_wait = 0;
-    if (t < cap && b->own[t]) {
+#define AREK_BUS_TAKEN(o) ((o) && !(b->cpu_fast && (o) == AREK_BUS_CPU))
+    if (t < cap && AREK_BUS_TAKEN(b->own[t])) {
         int delay = 0;
-        do { t++; arek_bus_blt_advance(b, t); if (++delay == 2) b->bls = 1; } while (t < cap && b->own[t]);
+        do { t++; arek_bus_blt_advance(b, t); if (++delay == 2) b->bls = 1; } while (t < cap && AREK_BUS_TAKEN(b->own[t]));
         b->bls = 0; b->wait_n += delay; b->last_wait = delay;
     }
-    if (t < cap) b->own[t] = AREK_BUS_CPU;
+    if (t < cap) { b->own[t] = AREK_BUS_CPU; b->last_slot = (long)t; }
     b->cpu_n++; return t + 2 - b->slotoff;
+}
+
+double arek_bus_undo_last(ArekBus *b) {
+    if (b->last_slot >= 0 && b->own[b->last_slot] == AREK_BUS_CPU) { b->own[b->last_slot] = AREK_BUS_FREE; b->cpu_n--; }
+    double t = b->last_t0; b->last_t0 = b->prev_t0; b->last_slot = b->prev_slot; b->prev_slot = -1; return t;
 }
 
 double arek_bus_insn_end(ArekBus *b, double t) {

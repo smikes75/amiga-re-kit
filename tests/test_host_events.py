@@ -161,3 +161,122 @@ def test_a_restart_is_the_first_run_again(tmp_path):
     w = run(tmp_path, prog, 6, [MAIN, L3], args=['--keys', 'none', '--twice'])
     assert len(w.lines) == 2 and w.lines[0] == w.lines[1], w.lines
     assert w(0x4010) >> 8 == 0xff                                            # a stopped timer at its first value
+
+
+def test_cia_accesses_wait_for_the_e_clock_as_the_original(tmp_path):
+    """1.0.51 (SWIV KIT-GAPS 7), -DHOST_IPL_MODEL=1: a CIA access waits for E clock position 2 and for the next cycle's
+    when that is less than 6 clocks away (vAmiga Agnus::syncWithEClock) - 6 to 15 clocks, worked out 2 clocks into the
+    bus cycle, at the place the 68000 makes the access (before the instruction's last prefetch; the write of bclr after
+    it). Measured on SWIV's VBL handler against vAmiga: 56 of 56 times equal over two frames (before: -3 and -2 colour
+    clocks at the first two CIA instructions). Here the same rule in Python against the host's pc log."""
+    import os
+    from arek import bus as busmod
+    cc = busmod.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    HOST = os.path.dirname(host.__file__)
+    BUS = os.path.dirname(busmod.__file__)
+    code = ('41f900bfe001'      # 1000 lea $bfe001,a0
+            '4a10'              # 1006 tst.b (a0)
+            '08100006'          # 1008 btst #6,(a0)
+            '10280d00'          # 100c move.b $d00(a0),d0
+            '08a800060e00'      # 1010 bclr #6,$e00(a0)
+            '11400e00'          # 1016 move.b d0,$e00(a0)
+            '4e71'              # 101a nop
+            '52b84000' '60fa')  # 101c addq.l #1,$4000; bra.s 101c
+    img = bytearray(0x2000)
+    img[0x1000:0x1000 + len(code) // 2] = bytes.fromhex(code)
+    img[0x1100:0x1102] = bytes.fromhex('4e73')
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[0x1000, 0x1100], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x101cu', '-DHOST_IPL_MODEL=1',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'),
+                    os.path.join(BUS, 'arek_bus_vamiga.c'), '-lm', '-o', str(exe)], check=True)
+    pcs = [0x1006, 0x1008, 0x100c, 0x1010, 0x1016, 0x101a]
+    (tmp_path / 'pcs.txt').write_text(''.join('%x\n' % p for p in pcs))
+    for frame in (100, 101, 103):                       # the E clock's position at a frame's start: (2 * frame) mod 10
+        for t0 in (100 * 227 + 60, 100 * 227 + 61, 100 * 227 + 63):
+            st = tmp_path / ('state_%d_%d' % (frame, t0))
+            st.mkdir()
+            ram = bytearray(0x80000)
+            ram[:len(img)] = img
+            (st / 'chip.bin').write_bytes(ram)
+            (st / 'slow.bin').write_bytes(bytes(0x80000))
+            (st / 'creg.bin').write_bytes(bytes(512))
+            (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2700 %d 0 1000\nfe 0 0 0 0 5500\n%d\n' % (t0, frame))
+            log = tmp_path / 'pc.txt'
+            r = subprocess.run([str(exe), str(st), str(tmp_path / 'o.vtr'), '1', '--pclog', str(log), str(tmp_path / 'pcs.txt')],
+                               capture_output=True, text=True, timeout=60)
+            assert r.returncode == 0, r.stderr
+            got = {}
+            for line in log.read_text().splitlines():
+                f, pc, v, h = line.split()
+                got.setdefault(int(pc, 16), int(v) * 227 + int(h))
+
+            def wait(clk):                               # clk: CPU clocks into the frame at the start of the bus cycle
+                e = (2 * frame + clk + 2) % 10
+                d = (2 - e) % 10
+                return d + 10 if d < 6 else d
+            t = 2 * got[0x1006]
+            want = {0x1006: t}
+            t += 8 + wait(t)                             # tst.b (a0): the read, then the prefetch
+            want[0x1008] = t
+            t += 12 + wait(t + 4)                        # btst #6,(a0): the bit number, the read, the prefetch
+            want[0x100c] = t
+            t += 12 + wait(t + 4)                        # move.b d16(a0),d0
+            want[0x1010] = t
+            d1 = wait(t + 8)                             # bclr #6,d16(a0): two words, the read, the prefetch, the write
+            t += 20 + d1 + wait(t + 8 + d1 + 4 + 4)
+            want[0x1016] = t
+            t += 12 + wait(t + 4)                        # move.b d0,d16(a0): the displacement, the write, the prefetch
+            want[0x101a] = t
+            assert {p: 2 * got[p] for p in pcs} == want, (frame, t0, got, want)
+
+
+def test_a_faster_cpu_runs_more_instructions_a_frame(tmp_path):
+    """1.0.51 (Turrican II KIT-GAPS 34): HOST_CPU_SPEED / engine_cpu_speed(n) - n sixteenths of the 68000's time per
+    instruction. The frames stay frames (one VERTB each); the loop gets through twice the passes at 8, and 16 is the
+    host as it was, to the byte."""
+    import os
+    from arek import bus as busmod
+    from arek.headless import trace
+    cc = busmod.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    HOST = os.path.dirname(host.__file__)
+    BUS = os.path.dirname(busmod.__file__)
+    img = bytearray(0x2000)
+    code = '4df900dff000' '3d7cc020009a' '52b84010' '60fa'      # INTENA: master + VERTB; 100c: addq.l #1,$4010; bra.s 100c
+    img[0x1000:0x1000 + len(code) // 2] = bytes.fromhex(code)
+    img[0x1100:0x1100 + len(L3_H) // 2] = bytes.fromhex(L3_H)
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[0x1000, 0x1100], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x100cu',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'),
+                    os.path.join(BUS, 'arek_bus_vamiga.c'), '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    (st / 'creg.bin').write_bytes(bytes(512))
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
+
+    def go(speed):
+        env = {k: v for k, v in os.environ.items() if k != 'HOST_CPU_SPEED'}
+        if speed is not None:
+            env['HOST_CPU_SPEED'] = str(speed)
+        out = tmp_path / ('o%s.vtr' % speed)
+        r = subprocess.run([str(exe), str(st), str(out), '3'], capture_output=True, text=True, timeout=60, env=env)
+        assert r.returncode == 0, r.stderr
+        recs = list(trace.records(str(out)))
+        return len(recs), len({x['frame'] for x in recs}), out.read_bytes(), r.stderr
+    n0, f0, b0, e0 = go(None)
+    n16, f16, b16, _ = go(16)
+    n8, f8, b8, e8 = go(8)
+    assert b16 == b0 and n0 > 1000
+    assert f8 == f0 and abs(n8 - 2 * n0) < 0.02 * n0, (n0, f0, n8, f8)
+    assert e8.split('irqs')[1].split()[0] == e0.split('irqs')[1].split()[0]        # as many interrupts: one VERTB a frame

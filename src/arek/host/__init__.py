@@ -28,7 +28,7 @@ ENGINE_API = ('engine_alloc', 'engine_init', 'engine_set_disk', 'engine_run', 'e
               'engine_fr_naud', 'engine_fr_led', 'engine_aud_ring', 'engine_aud_size', 'engine_rgb', 'engine_rgb_w', 'engine_rgb_h',
               'engine_pix', 'engine_pix_w', 'engine_pix_h', 'engine_led', 'engine_frame_no', 'engine_peek8', 'engine_poke8',
               'engine_disk_reads', 'engine_disk_fails', 'engine_hash_hex', 'engine_stop', 'engine_parked', 'engine_threaded',
-              'engine_aud_written', 'engine_aud_read', 'engine_aud_low', 'engine_hash_on')
+              'engine_aud_written', 'engine_aud_read', 'engine_aud_low', 'engine_hash_on', 'engine_cpu_speed')
 
 
 def copy(dest):

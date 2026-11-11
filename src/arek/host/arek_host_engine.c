@@ -156,7 +156,8 @@ static void e_apply_keys(void) {
         int v = E_KQ[kr % E_KEYQ], c = v & 0x7f; __atomic_store_n(&E_KQ_R, kr + 1, __ATOMIC_SEQ_CST);
         H_CIAA_SDR = (uint8_t)~((c << 1) | ((v & 0x100) ? 0 : 1)); H_CIAA_ICR |= 0x08; h_cia_raise(0); }   /* 1.0.12: SP in ICR raises PORTS when the game enabled it (Turrican II KIT-GAPS 19) */
 }
-static void e_frame_start(void) { e_apply_keys(); }
+static volatile int E_CPU_PEND = 0;
+static void e_frame_start(void) { e_apply_keys(); if (E_CPU_PEND) { H_CPU_NUM = E_CPU_PEND; E_CPU_PEND = 0; } }
 /* the frame is drawn (ARD_PIX): its screenshot, its samples into the ring, its record; the page may now read them */
 static void e_frame_done(void) {
     int n = G_DONE; GFr *f = &G_FR[n % G_NFR];
@@ -301,6 +302,9 @@ API int engine_peek8(uint32_t a) { if (a < MEMSZ) return MEM[a];
     if (a - SLOWBASE < SLOWSZ) return SLOW[a - SLOWBASE];
 #endif
     return -1; }
+/* 1.0.51: the CPU's speed from the next frame's start on - n sixteenths of the 68000's time per instruction (16 = the
+ * original, 8 = twice as fast; 2 to 16). Deterministic by frame: the page sets it between frames, as a key. */
+API int engine_cpu_speed(int n) { if (n < 2 || n > 16) return -1; E_CPU_PEND = n; return 0; }
 API void engine_poke8(uint32_t a, int v) { if (a < MEMSZ) MEM[a] = (uint8_t)v;
 #if SLOWSZ
     else if (a - SLOWBASE < SLOWSZ) SLOW[a - SLOWBASE] = (uint8_t)v;

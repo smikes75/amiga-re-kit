@@ -54,6 +54,8 @@ typedef struct ArekBus {
     uint32_t cpu_n, wait_n;    /* cte volajici: pristupy procesoru a takty cekani v tomto snimku */
     /* vnitrni: registry, ktere copper psal minuly snimek (plati na zacatku dalsiho), blitter, rozpracovana instrukce */
     uint16_t copr[0x100]; uint8_t copw[0x100];
+    double last_t0, prev_t0; long last_slot, prev_slot;      /* 1.0.51: the last CPU access - when it was asked for and the slot it took (arek_bus_undo_last), and the one before */
+    int cpu_fast;                        /* 1.0.51: a faster CPU (the host moves its time back): a slot the CPU itself took is free for it */
     int last_wait;                       /* 1.0.50: colour clocks the last CPU access waited for a free slot (the host's IPL sample point) */
     struct { int on, busy, phase, pc, lockD; uint32_t left, bt; const uint8_t *prog; } bl;
     int bls;
@@ -80,6 +82,9 @@ double arek_bus_access(ArekBus *b, double t);   /* jeden pristup procesoru (pouz
 
 /* Blitter: zapis BLTSIZE procesorem (pristup uz zapocitany, t = cas procesoru po nem). Vraci cas procesoru (rezim car zatim jen
  * odhadem h * 8 taktu procesoru, blitter se nespusti). arek_bus_bbusy: BBUSY v taktu cteni DMACONR procesorem. */
+/* 1.0.51: take the last CPU access back (its slot is free again) and return the time it was asked for - for an access the
+ * 68000 makes AFTER something the model has not done yet (the prefetch behind a CIA access); the caller makes it again. Two calls take the last two back. */
+double arek_bus_undo_last(ArekBus *b);
 double arek_bus_blit(ArekBus *b, double t, uint16_t con0, uint16_t con1, uint16_t size);
 int arek_bus_bbusy(ArekBus *b, double t);
 
