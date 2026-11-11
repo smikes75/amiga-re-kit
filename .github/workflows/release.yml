@@ -1,0 +1,50 @@
+# A release: pushing the tag vX.Y.Z builds the packages and uploads them to PyPI - no token, no manual upload.
+# PyPI trusts this workflow of this repository (Trusted Publishing, OIDC): pypi.org -> amiga-re-kit -> Settings ->
+# Publishing -> GitHub publisher: owner smikes75, repository amiga-re-kit, workflow release.yml, no environment.
+# Before the upload: the fast suite once more (as tests.yml), and the tag must be the version in src/arek/__init__.py.
+# The full suite (browser tests) and the self-tests against the headless emulator are run on the developer's machine
+# BEFORE the tag is pushed - this workflow cannot run them. A version on PyPI cannot be replaced, only yanked.
+# If the upload fails (the publisher is not set up on PyPI yet): set it up and re-run the failed job.
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -e '.[dev]' cryptography build setuptools
+      - run: python -m pytest -q -m "not browser"
+        env:
+          AREK_REQUIRE_TOOLS: '1'
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write          # the OIDC token PyPI exchanges for an upload token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: the tag is the package's version
+        run: |
+          python - "$GITHUB_REF_NAME" <<'PY'
+          import re, sys
+          v = re.search(r'__version__ = "(.+?)"', open('src/arek/__init__.py').read()).group(1)
+          sys.exit(0 if sys.argv[1] == 'v' + v else 'tag %s is not version %s' % (sys.argv[1], v))
+          PY
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086   # release/v1 (v1.14.3)
