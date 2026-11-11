@@ -95,6 +95,23 @@ int main(int argc, char **argv) {
             n[f] = 0; for (long k = 0; k < 312L * 227; k++) n[f] += own[k] >= AREK_BUS_BITPLANE && own[k] < AREK_BUS_BITPLANE + 6;
         }
         printf("bitplane %ld %ld %ld %ld\n", n[0], n[1], n[2], n[3]);
+    } else if (!strcmp(mode, "mid")) {                        /* 1.0.52: DMA switched on by the CPU in the middle of a frame */
+        regs[0x096 >> 1] = 0; B.journal_on = atoi(argv[3]); memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
+        long before = 0; for (long k = 0; k < 312L * 227; k++) before += own[k] >= AREK_BUS_BITPLANE && own[k] <= AREK_BUS_COPPER;
+        uint32_t now = 100 * 227 + 50; own[now - 3] = AREK_BUS_CPU;
+        regs[0x096 >> 1] = 0x0380; int r = arek_bus_cpu_reg(&B, 0x096, 0x8380, now);
+        long cop_lo = 0, cop_hi = 0, bpl_lo = 0, bpl_hi = 0;
+        for (long k = 0; k < 312L * 227; k++) { int o = own[k];
+            if (o == AREK_BUS_COPPER) { if (k <= now) cop_lo++; else cop_hi++; }
+            if (o >= AREK_BUS_BITPLANE && o < AREK_BUS_BITPLANE + 6) { if (k < 101 * 227) bpl_lo++; else bpl_hi++; } }
+        printf("r %d before %ld cop %ld %ld bpl %ld %ld cpu %d\n", r, before, cop_lo, cop_hi, bpl_lo, bpl_hi, own[now - 3] == AREK_BUS_CPU);
+    } else if (!strcmp(mode, "mid2")) {                       /* 1.0.52: COP1LC, then COPEN, by the CPU in the middle of a frame */
+        regs[0x096 >> 1] = 0x0200; regs[0x080 >> 1] = 0; regs[0x082 >> 1] = 0; B.journal_on = 1; memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
+        uint32_t now = 215 * 227 + 180;
+        regs[0x082 >> 1] = 0x1000; arek_bus_cpu_reg(&B, 0x080, 0, now); arek_bus_cpu_reg(&B, 0x082, 0x1000, now + 2);
+        regs[0x096 >> 1] = 0x0280; int r = arek_bus_cpu_reg(&B, 0x096, 0x8280, now + 10);
+        long cop = 0, first = -1; for (long k = 0; k < 312L * 227; k++) if (own[k] == AREK_BUS_COPPER) { cop++; if (first < 0) first = k - 215 * 227; }
+        printf("r %d cop %ld first %ld\n", r, cop, first);
     } else if (!strcmp(mode, "tail")) {                       /* 1.0.47: reads at the instruction's end, after its internal clocks */
         regs[0x096 >> 1] = 0; memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
         double t = 1000, t0 = t; int tail = atoi(argv[3]);
@@ -525,6 +542,20 @@ def test_a_register_the_copper_wrote_holds_in_later_frames(harness):
     original, 0 in the host, the CPU 4 % faster). A later write by the CPU still wins."""
     n = [int(x) for x in harness('8380', 'hold').split()[1:]]
     assert n[0] > 1000 and n[1] >= n[0] and n[2] == n[1] and n[3] == 0, n
+
+
+def test_dma_switched_on_by_the_cpu_in_the_middle_of_a_frame(harness):
+    """1.0.52 (SWIV KIT-GAPS 9): the frame's map is worked out at its start; a CPU write to DMACON in the middle of the
+    frame (SWIV's loader: COPEN on line 215) changed nothing until the next frame, while the original's Copper runs at
+    once - from where its pointer stood at the vertical blank - and its bitplane DMA starts on the following lines.
+    With the journal the rest of the frame is worked out again; what has been stays."""
+    off = dict(zip(*[iter(harness('0000', 'mid', 0).split())] * 2)) if False else harness('0000', 'mid', 0).split()
+    on = harness('0000', 'mid', 1).split()
+    assert off[:4] == ['r', '0', 'before', '0'] and off[5:7] == ['0', '0'] and off[8:10] == ['0', '0']        # as before: nothing this frame
+    assert on[1] == '1' and on[5] == '0' and int(on[6]) >= 3            # the Copper: nothing before the write, the list after it
+    assert int(on[8]) <= 100 and int(on[9]) > 1000 and on[11] == '1'     # bitplanes from this line's DDFSTRT on; the CPU's own slot kept
+    m2 = harness('0000', 'mid2').split()                                 # COP1LC written while the Copper has not run: it starts there, at once
+    assert m2[1] == '1' and int(m2[3]) >= 4 and 190 <= int(m2[5]) <= 192, m2
 
 
 def test_reads_at_the_end_of_an_instruction(harness):

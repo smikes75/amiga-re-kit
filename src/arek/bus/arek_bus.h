@@ -55,6 +55,9 @@ typedef struct ArekBus {
     /* vnitrni: registry, ktere copper psal minuly snimek (plati na zacatku dalsiho), blitter, rozpracovana instrukce */
     uint16_t copr[0x100]; uint8_t copw[0x100];
     double last_t0, prev_t0; long last_slot, prev_slot;      /* 1.0.51: the last CPU access - when it was asked for and the slot it took (arek_bus_undo_last), and the one before */
+    /* 1.0.52 (SWIV KIT-GAPS 9): the CPU's writes to the registers that steer DMA, with their slots, and the registers the
+     * frame's map started from - arek_bus_cpu_reg works the rest of the frame out again (journal_on: the host's switch) */
+    uint16_t regs0[0x100]; int jn, journal_on, remap; uint32_t jt[32]; uint16_t jreg[32], jval[32];
     int cpu_fast;                        /* 1.0.51: a faster CPU (the host moves its time back): a slot the CPU itself took is free for it */
     int last_wait;                       /* 1.0.50: colour clocks the last CPU access waited for a free slot (the host's IPL sample point) */
     struct { int on, busy, phase, pc, lockD; uint32_t left, bt; const uint8_t *prog; } bl;
@@ -93,6 +96,11 @@ int arek_bus_bbusy(ArekBus *b, double t);
  * next frame's map starts from the CPU's value (regs), not the Copper's (copr) - e.g. COP1LC set by the CPU after a list
  * that wrote COP1LC to itself */
 static inline void arek_bus_cpu_write(ArekBus *b, uint32_t off) { b->copw[(off & 0x1fe) >> 1] = 0; }
+/* 1.0.52: a CPU write of v to custom register off at slot now (the frame's colour clock): DMACON, DIWSTRT/STOP,
+ * DDFSTRT/STOP, BPLCON0, COPJMP1/2 take effect in THIS frame's map from that slot on (the Copper switched on in the
+ * middle of a frame runs from where its pointer stood, bitplane DMA starts on the next line...). Returns 1 when the
+ * map was worked out again. Needs journal_on. */
+int arek_bus_cpu_reg(ArekBus *b, uint32_t off, uint16_t v, uint32_t now);
 static inline void arek_bus_mark(ArekBus *b, uint32_t k, uint8_t who) { if (k < (uint32_t)(b->maxlines * b->hpos) && !b->own[k]) b->own[k] = who; }
 
 /* vnitrni (arek_bus_vamiga.c) */

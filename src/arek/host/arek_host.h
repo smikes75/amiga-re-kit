@@ -76,6 +76,8 @@ static int H_CIA_SYNC = 0;
  * spends (host_spend) is not scaled. Set it at a frame's start: the engine's engine_cpu_speed(n), HOST_CPU_SPEED in
  * the environment for host_trace and the native engine. */
 static int    H_CPU_NUM = 16; static double H_CPU_PREV = -1, H_CPU_CREDIT = 0;
+#define H_CIA_START (H_CIA_SYNC ? H_CIA_START_N : 0)   /* extra E cycles from the write that starts a timer to its first count: 0 measured (SWIV, one-shot restarted by its handler: intervals 17 751-17 767 against the original's 17 752-17 771); HOST_CIA_START to try others */
+static int    H_CIA_START_N = 0;
 static long   H_TICKS = 0;              /* instructions run (1.0.51: which accesses belong to one instruction) */
 static int    H_JDEPTH = 0; static uint8_t H_JLEV[8];   /* 1.0.48: handlers entered by a jump (HOST_VECTOR_JUMP), by level */
 static uint8_t H_CIAA_PRA = 0xfe;        /* $BFE001: bits 6/7 = fire port 0/1 (0 = pressed), bit 1 = LED output */
@@ -115,8 +117,8 @@ static void h_cia_raise(int i) { if (*h_cia_icr(i) & H_CIA[i].mask) H_INTREQ |= 
 static void h_cia_run(int i, int k) {
     HCiaTimer *t = &H_CIA[i].t[k]; int64_t now = h_eticks();
     if (!(t->cr & 1)) { t->e0 = now; return; }
+    if (now <= t->e0) return;                              /* 1.0.52: also a timer that starts counting later (H_CIA_START) */
     int64_t n = now - t->e0; t->e0 = now;
-    if (n <= 0) return;
     if (n <= t->cnt) { t->cnt = (uint16_t)(t->cnt - n); return; }
     *h_cia_icr(i) |= (uint8_t)(1 << k); h_cia_raise(i);
     if (t->cr & 8) { t->cr &= ~1; t->cnt = t->latch; return; }   /* one-shot: stops */
@@ -146,7 +148,10 @@ static void host_cia_state(const unsigned v[16]) {
 }
 static void h_cia_poll(void) {
     if (H_CIA_DUE < 0 || h_abs() < H_CIA_DUE) return;
+    double due = H_CIA_DUE;
+    h_irq_mark();
     for (int i = 0; i < 2; i++) for (int k = 0; k < 2; k++) h_cia_run(i, k);
+    if (H_CIA_SYNC) { H_EVT_T = due + 5.0; h_irq_mark(); }   /* 1.0.52: the CIA pulls its interrupt line one E cycle after the underflow (vAmiga: CIASetInt0 -> 1) */
     h_cia_due();
 }
 static int h_cia_reg(uint32_t a, int *i) {           /* the CIA and register of an address, or -1 */
@@ -164,6 +169,7 @@ static void host_init(double t0) {
     if (getenv("HOST_IRQ_POLL")) H_IRQ_POLL = atof(getenv("HOST_IRQ_POLL"));
     if (getenv("HOST_CPU_SPEED")) { int n = atoi(getenv("HOST_CPU_SPEED")); if (n >= 2 && n <= 16) H_CPU_NUM = n; }
     if (getenv("HOST_CIA_SYNC")) H_CIA_SYNC = atoi(getenv("HOST_CIA_SYNC"));
+    if (getenv("HOST_CIA_START")) H_CIA_START_N = atoi(getenv("HOST_CIA_START"));
     if (getenv("HOST_IPL_PIPE")) H_IPL_PIPE = atof(getenv("HOST_IPL_PIPE"));
     H_VBL_LAT = H_IRQ_POLL >= 0 ? 2 : 10;
     if (getenv("HOST_VBL_LAT")) H_VBL_LAT = atof(getenv("HOST_VBL_LAT"));
@@ -213,6 +219,7 @@ int hw_read_hook(uint32_t off, uint32_t *v) {
 }
 void hw_write_hook(uint32_t off, uint32_t v) {
     arek_bus_cpu_write(arek_glue_bus(), off);                     /* the CPU's write is the later one (G50) */
+    { ArekBus *bb = arek_glue_bus(); bb->journal_on = H_CIA_SYNC; arek_bus_cpu_reg(bb, off, (uint16_t)v, (uint32_t)h_now()); }   /* 1.0.52: DMA registers written in the middle of a frame (with the timing model) */
     if ((off >= 0x080 && off <= 0x086) || (off >= 0x08e && off <= 0x094) || (off >= 0x0e0 && off <= 0x10a) ||
         (off >= 0x120 && off <= 0x1be)) { ard_until((int)(h_now() / HOST_HPOS)); ard_write(off, (uint16_t)v); }
     if (off == 0x02e) { ard_until((int)(h_now() / HOST_HPOS)); ARD_CDANG = (int)((v >> 1) & 1); arek_glue_bus()->cdang = ARD_CDANG; }   /* 1.0.47: COPCON */
@@ -275,23 +282,24 @@ void cia_write_hook(uint32_t a, uint8_t v) {
 #ifdef HOST_CIA_WRITE
     if (HOST_CIA_WRITE(a, v)) { h_cia_wait2(1); return; }
 #endif
+    if (H_CIA_SYNC) h_cia_wait2(1);                     /* 1.0.52: the write lands after its wait for the E clock - a timer it starts, starts then */
     int i, reg = h_cia_reg(a, &i);
     if (reg >= 4 && reg <= 7) {                         /* the latch; the high byte loads a stopped timer (and starts a one-shot) */
         int k = (reg - 4) >> 1; HCiaTimer *t = &H_CIA[i].t[k]; h_cia_run(i, k);
-        if (reg & 1) { t->latch = (uint16_t)((t->latch & 0xff) | (v << 8)); if (!(t->cr & 1)) { t->cnt = t->latch; if (t->cr & 8) { t->cr |= 1; t->e0 = h_eticks(); } } }
+        if (reg & 1) { t->latch = (uint16_t)((t->latch & 0xff) | (v << 8)); if (!(t->cr & 1)) { t->cnt = t->latch; if (t->cr & 8) { t->cr |= 1; t->e0 = h_eticks() + H_CIA_START; } } }
         else t->latch = (uint16_t)((t->latch & 0xff00) | v);
     } else if (reg == 13) { if (v & 0x80) H_CIA[i].mask |= v & 0x7f; else H_CIA[i].mask &= (uint8_t)~v; h_cia_raise(i); }
     else if (reg == 14 || reg == 15) {                 /* control: START (0), ONESHOT (3), FORCE LOAD (4, not stored) */
         int k = reg - 14; HCiaTimer *t = &H_CIA[i].t[k]; h_cia_run(i, k);
         if (v & 0x10) t->cnt = t->latch;
-        if ((v & 1) && !(t->cr & 1)) t->e0 = h_eticks();
+        if ((v & 1) && !(t->cr & 1)) t->e0 = h_eticks() + H_CIA_START;
         t->cr = (uint8_t)(v & 0xef);
     }
     if (reg >= 4 && reg <= 15) h_cia_due();           /* a latch, the mask or a control register changed what is due */
     if (a == 0xbfe201) H_CIAA_DDRA = v;
     if (a == 0xbfe001 && (H_CIAA_DDRA & 2)) { H_LED_OFF = (v >> 1) & 1; H_CIAA_PRA = (uint8_t)((H_CIAA_PRA & ~2) | (v & 2)); }
     if (a == 0xbfec01) H_CIAA_SDR = v;                 /* SDR is loaded by a write: the keyboard handshake writes $FF and reads it back (G53 - a held key repeated) */
-    h_cia_wait2(1);
+    if (!H_CIA_SYNC) h_cia_wait2(1);
 }
 
 /* the next frame's map behind the end of the current one, so an instruction crossing the frame end sees the refresh
@@ -361,6 +369,15 @@ static const uint16_t H_LEVEL_MASK[7] = { 0, 0x0007, 0x0008, 0x0070, 0x0780, 0x1
 static void h_enter_pre(M68 *m, uint32_t pc, int level) {
     uint32_t sr = sr_get(m);
     if (H_IRQ_E >= 0) { int ph = (int)h_ephase(); arek_glue_add_clocks((uint32_t)(((H_IRQ_E - ph) % 10 + 10) % 10)); }
+    if (H_CIA_SYNC) {      /* 1.0.52, with the timing model: the 44 clocks as the 68000 spends them (Moira execInterrupt + jumpToVector) - 6 idle, PC low
+                            * to the stack, 8 idle (the autovector), SR and PC high, the vector's two words, a prefetch, 2 idle, a prefetch.
+                            * Beside the Copper's slots at a frame's start the accesses wait where the original's do (SWIV: entry slot 34, not 32) */
+        ArekBus *bb = arek_glue_bus(); double tt = arek_glue_time() + 3.0;
+        tt = arek_bus_access(bb, tt); tt += 4.0;
+        for (int k = 0; k < 5; k++) tt = arek_bus_access(bb, tt);
+        tt += 1.0; tt = arek_bus_access(bb, tt);
+        arek_glue_set_time(tt);
+    } else
     { ArekBus *bb = arek_glue_bus(); double tt = arek_bus_insn(bb, arek_glue_time(), H_IRQ_CYC, H_IRQ_ACC, H_IRQ_PRE);
       arek_glue_set_time(arek_bus_insn_end(bb, tt)); }
     m->a[7] -= 4; wr16_raw(m->a[7], pc >> 16); wr16_raw(m->a[7] + 2, pc & 0xffff);

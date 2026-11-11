@@ -22,12 +22,23 @@ void arek_bus_frame_map(ArekBus *b) {
      * copper uz nepise (1.0.49, SWIV KIT-GAPS 6: seznam s BPLCON0 nahradil prazdny, model se po jednom snimku vratil k hodnote
      * procesoru a bitplany zmizely z mapy: 5120 slotu na snimek v originalu, 0 v modelu) */
     for (int i = 0; i < 0x100; i++) if (b->copw[i]) R[i] = b->copr[i];
+    if (b->remap) memcpy(R, b->regs0, sizeof R);            /* 1.0.52: the frame again, from what it started with + the CPU's writes at their slots */
+    else { memcpy(b->regs0, R, sizeof R); b->jn = 0; }
+    int ji = 0;
+#define AREK_JOURNAL(at) while (ji < b->jn && b->jt[ji] <= (uint32_t)(at)) { uint32_t jr = b->jreg[ji]; uint16_t jv = b->jval[ji]; ji++; \
+        if (jr == 0x096) { if (jv & 0x8000) R[0x096 >> 1] |= jv & 0x7fff; else R[0x096 >> 1] &= (uint16_t)~jv; } \
+        else if (jr == 0x088) { cp = ((uint32_t)R[0x080 >> 1] << 16 | R[0x082 >> 1]) & b->chipmask; cst = 1; cnext = (int)(at); } \
+        else if (jr == 0x08a) { cp = ((uint32_t)R[0x084 >> 1] << 16 | R[0x086 >> 1]) & b->chipmask; cst = 1; cnext = (int)(at); } \
+        else { R[jr >> 1] = jv; \
+               if ((jr == 0x080 || jr == 0x082) && !cact) cp = ((uint32_t)R[0x080 >> 1] << 16 | R[0x082 >> 1]) & b->chipmask; } }   /* vAmiga pokeCOP1LC: a Copper that has not run in this frame takes the new address at once */
     uint32_t cp = ((uint32_t)R[0x080 >> 1] << 16 | R[0x082 >> 1]) & b->chipmask; if (!cp) cp = b->cop_default;   /* COP1LC jeste nezapsany (start ze stavu) */
+    int cact = 0;                                            /* 1.0.52: the Copper has fetched in this frame */
     int cst = 1, cnext = 0; uint16_t c1 = 0, c2 = 0; uint32_t cwait = 0, cmask = 0;   /* copper: 1 FETCH, 2 MOVE, 3 WAIT_OR_SKIP, 4 WAIT1, 5 WAIT2, 6 cekani, 7 SKIP1, 8 SKIP2, 0 stop */
     int vflop = 0; BSpr S[8]; for (int n = 0; n < 8; n++) { S[n].ptr = ((uint32_t)R[(0x120 >> 1) + 2 * n] << 16 | R[(0x122 >> 1) + 2 * n]) & b->chipmask; S[n].st = 0; S[n].vs = S[n].ve = -1; }
     for (uint32_t v = 0; v < NL; v++) {
         uint8_t *L = b->own + v * H;
         L[1] = L[3] = L[5] = L[H - 1] = 2;   /* obnova: PAL 1/3/5/226 */
+        AREK_JOURNAL(v * H);
         { int s = R[0x08e >> 1] >> 8, e = (R[0x090 >> 1] >> 8) | ((R[0x090 >> 1] & 0x8000) ? 0 : 0x100); if ((int)v == e) vflop = 0; if ((int)v == s) vflop = 1; }
         uint16_t dma = R[0x096 >> 1]; int den = dma & 0x200;
         /* sprity: radek 25 nacte POS/CTL vzdy (i kdyz je copper zapsal), data od vstart do vstop - 1, na vstop dalsi POS/CTL.
@@ -51,10 +62,12 @@ void arek_bus_frame_map(ArekBus *b) {
         int bdone = 0;
         for (int h = 0; h < (int)H; h++) {
             /* bitplany radku podle registru na zacatku nacitani (DDFSTRT) */
+            if (ji < b->jn && b->jt[ji] <= v * H + (uint32_t)h) { AREK_JOURNAL(v * H + (uint32_t)h); dma = R[0x096 >> 1]; den = dma & 0x200; }
             int ddfs = R[0x092 >> 1] & 0xfc;
             if (v || h) {                    /* rychlost: preskocit takty, kdy se nic nedeje (bitplany jeste ne, copper ceka nebo stoji) */
                 int nh = (int)H; if (!bdone && ddfs >= h && ddfs < nh) nh = ddfs;
                 if (cst != 0 && den && (dma & 0x80)) { int c = cnext - (int)(v * H); if (c < h) c = h; if (c < nh) nh = c; }
+                if (ji < b->jn) { int c = (int)b->jt[ji] - (int)(v * H); if (c > h && c < nh) nh = c; }
                 if (nh > h) { h = nh - 1; continue; }
             }
             if (!bdone && h == ddfs) {
@@ -77,6 +90,7 @@ void arek_bus_frame_map(ArekBus *b) {
             switch (cst) {
             case 1:   /* FETCH */
                 if (!freeb) { cnext = v * H + h + 1; break; }
+                cact = 1;
                 L[h] = 24; c1 = b->rd16(b->ctx, cp); cp += 2; cst = (c1 & 1) ? 3 : 2; cnext = v * H + h + 2; break;
             case 2:   /* MOVE */
                 if (!freeb) { cnext = v * H + h + 1; break; }
@@ -171,4 +185,27 @@ void arek_bus_blt_advance(ArekBus *b, uint32_t t) {     /* udalosti blitru v tak
 }
 void arek_bus_blt_start(ArekBus *b, uint32_t t0, uint16_t con0, uint32_t words) {   /* t0 = takt zapisu BLTSIZE; registr plati o takt pozdeji */
     b->bl.on = 1; b->bl.busy = 1; b->bl.phase = 1; b->bl.pc = 0; b->bl.lockD = 1; b->bl.left = words; b->bl.prog = BPROG[(con0 >> 8) & 15]; b->bl.bt = t0 + 2;
+}
+
+/* 1.0.52 (SWIV KIT-GAPS 9): see arek_bus.h */
+int arek_bus_cpu_reg(ArekBus *b, uint32_t off, uint16_t v, uint32_t now) {
+    static uint8_t old[512 * 256];                                 /* the host's map: 400 lines of 227 */
+    off &= 0x1fe;
+    if (!b->journal_on) return 0;
+    if (!(off == 0x096 ? (v & 0x03a0) : (off == 0x088 || off == 0x08a || off == 0x08e || off == 0x090 || off == 0x092 || off == 0x094 || off == 0x100 ||
+                                          (off >= 0x080 && off <= 0x086)))) return 0;
+    if (b->jn >= 32) return 0;
+    b->jt[b->jn] = now; b->jreg[b->jn] = (uint16_t)off; b->jval[b->jn] = v; b->jn++;
+    if (off >= 0x080 && off <= 0x086) return 0;                    /* COPxLC: only a later COPJMP (or the next frame) uses it */
+    size_t n = (size_t)b->maxlines * (size_t)b->hpos; if (n > sizeof old) return 0;
+    memcpy(old, b->own, n);
+    double ci = b->cop_int; int cn = b->cop_irq_n;
+    b->remap = 1; arek_bus_frame_map(b); b->remap = 0;
+    (void)ci; (void)cn;
+    for (size_t k = 0; k < n; k++) {
+        uint8_t o = old[k];
+        if (k <= now) b->own[k] = o;                               /* what has been stays */
+        else if (!b->own[k] && (o == AREK_BUS_CPU || (o >= AREK_BUS_AUDIO && o < AREK_BUS_BITPLANE) || o == AREK_BUS_BLITTER)) b->own[k] = o;
+    }
+    return 1;
 }

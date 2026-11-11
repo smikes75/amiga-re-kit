@@ -3,6 +3,22 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.52 (2026-11-11)
+
+With `-DHOST_IPL_MODEL=1` only (the timing model measured on SWIV against vAmiga; without the define a host behaves as 1.0.49):
+
+- bus model (SWIV KIT-GAPS 9): CPU writes to DMACON, DIWSTRT/STOP, DDFSTRT/STOP, BPLCON0 and COPJMP take effect in the
+  SAME frame from their slot on (`arek_bus_cpu_reg`: the rest of the frame's map is worked out again); a COP1LC written
+  while the Copper has not run in the frame is where it starts (vAmiga pokeCOP1LC). SWIV's loader switches the Copper
+  and the bitplanes on in line 215: per-instruction times of frames 790-792 against the original 1262 of 1263 equal
+  (before: 13, the rest 12 to 26 colour clocks early)
+- host: a CIA write lands AFTER its wait for the E clock (a timer it starts, starts then); the CIA's interrupt reaches
+  the pins one E cycle after the underflow. SWIV, a one-shot timer restarted by its handler: level-6 entries within
+  10 colour clocks of the original over two frames, no drift (before: 10 to 60 early and growing)
+- host: the interrupt entry spends its 44 clocks in the 68000's order (6 idle, a write, 8 idle, two writes, the
+  vector, a prefetch, 2 idle, a prefetch) - beside the Copper's slots at a frame's start the accesses wait where the
+  original's do. SWIV's boot: 25 VBL entries in a row on the original's slot and instruction (before: 2)
+
 ## 1.0.51 (2026-11-11)
 
 - host, with `-DHOST_IPL_MODEL=1` (SWIV KIT-GAPS 7): CIA accesses wait for the E clock as vAmiga does
