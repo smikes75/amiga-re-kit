@@ -45,7 +45,14 @@ goes before or after the call. `host_trace --reglog-regs 040-076,09c` chooses th
 
 `HOST_VECTOR_HANDLER(name, vec)` makes a handler that jumps through the game's own vector in RAM
 (`host_vec_l1/l2/l3/l4/l5/l6` for $64-$78 are ready: `-DHOST_L2=host_vec_l2` for the keyboard's CIA-A, 1.0.12) - for a game that changes its
-handlers at run time, an intro and a level (1.0.6, Turrican II). Overlays: inside a module (`--lib --prefix NAME:LO:HI --overlay-module`), a direct bsr / jsr to its own range is an
+handlers at run time, an intro and a level (1.0.6, Turrican II). With `recomp --resume`, `host_jmp_l1..l6` (`HOST_VECTOR_JUMP(name, vec)`, 1.0.48) enter the
+handler by a JUMP, as the 68000 does: no C frame waits for its `rte`. Use them when a handler leaves on another stack by
+other means than its own `rte` - a scheduler called by `jsr` that ends in `rts` on the next task's stack, a sound handler
+that moves a7 from channel to channel (S.W.I.V.). Called from C (`host_vec_lN`), such an `rts` onto a higher stack reads as a plain
+return, the handler's C frame returns and the interrupted routine goes on with a foreign stack (`unknown routine`,
+accesses outside RAM some frames later). Not for a host whose own C routine takes interrupts and must go on afterwards
+(`host_spend` in an extern): its frame is dropped as well and the interrupted instruction runs again - the routine has to
+remember where it was. The trace's tick records skip such a handler by its level (`H_IN_IRQ`). Overlays: inside a module (`--lib --prefix NAME:LO:HI --overlay-module`), a direct bsr / jsr to its own range is an
 ordinary call - walked and translated (1.0.11); only targets outside it in an overlay area go through `overlay_call`.
 The module fingerprint (`overlay_fp`, 256 bytes of RAM) is a raw read of the host, not a CPU access - until
 1.0.6 it was bus-counted and every `overlay_call` cost emulated time (Turrican II: 7 modules = 9 lines of the frame,

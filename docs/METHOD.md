@@ -111,7 +111,7 @@ asleep. `arek recomp --resume` makes every translated instruction a target of `c
 `RESUME_PC` names), so all the run needs is on the 68000's own stacks; a jump onto another stack (`rte` or `rts` that does
 not return to the caller) drops the C frames and goes on at the target through `TASK_RUN`, which the kit's hosts and the
 driver wrap around their first call. Pre-emptive switches from an interrupt handler work too: the stacked PC can be any
-instruction, and the host's interrupt depth is reset. The cost is code size (a `switch` per routine) and a `longjmp` per
+instruction, and the host's interrupt depth is reset. When a handler changes stacks by anything but its own `rte` (a scheduler's `rts`), enter it by a jump: `HOST_L3=host_jmp_l3` (1.0.48, docs/HOST.md). The cost is code size (a `switch` per routine) and a `longjmp` per
 switch; a run that switched ends at an exit or the host's stop, as there is no C caller left to return to.
 
 ### Checking the translation against the 68000

@@ -873,11 +873,8 @@ class Gen:
         self.emit('}')
         self.emit('void call_addr(M68 *m, uint32_t a) {')
         self.emit('    a = ADDR24(a);                   /* 1.0.27: a target with a flag in its top byte is the same address */')
-        self.emit('    switch (a) {')
-        for e in sorted(set(self.all_entries())):
-            self.emit('    case 0x%xu: %s(m); return;' % (e, self.flow.fname(e)))
-        self.resume_cases(sorted(set(self.all_entries())))
-        self.emit('    }')
+        ents = sorted(set(self.all_entries()))
+        self.emit_switch('a', [(e, '%s(m); return;' % self.flow.fname(e)) for e in ents] + self.resume_cases(ents), '    ')
         for b, n, k in self.flow.overlays:
             self.emit('    if (a - 0x%xu < 0x%xu) { overlay_call(m, a); return; }' % (b, n))
         self.emit('    unknown_call(a);')
@@ -899,12 +896,8 @@ class Gen:
         name = self.flow.prefix[0] or 'module_%x' % base
         self.emit('static void ovl_%s(M68 *m, uint32_t a) {' % name)
         self.emit('    a = ADDR24(a);')
-        self.emit('    switch (a) {')
         own = sorted(set(x for x in self.all_entries() if self.flow.in_module(x)))
-        for e in own:
-            self.emit('    case 0x%xu: %s(m); return;' % (e, self.flow.fname(e)))
-        self.resume_cases(own)
-        self.emit('    }')
+        self.emit_switch('a', [(e, '%s(m); return;' % self.flow.fname(e)) for e in own] + self.resume_cases(own), '    ')
         self.emit('    unknown_call(a);')
         self.emit('}')
         self.emit('__attribute__((constructor)) static void ovl_%s_register(void) '
@@ -918,11 +911,38 @@ class Gen:
         """--resume: the dispatcher's cases for the instructions inside the routines; of several routines holding one
         instruction (a shared tail) the first will do, all the state is in M68 and RAM."""
         seen = set(entries)
+        out = []
         for e in entries:
             for a in self.labels.get(e, ()):
                 if a not in seen:
                     seen.add(a)
-                    self.emit('    case 0x%xu: RESUME_PC = 0x%xu; %s(m); return;' % (a, a, self.flow.fname(e)))
+                    out.append((a, 'RESUME_PC = 0x%xu; %s(m); return;' % (a, self.flow.fname(e))))
+        return out
+
+    SWITCH_SPAN = 0x4000
+
+    def emit_switch(self, var, cases, ind):
+        """``switch (var)`` over (value, statement) pairs. 1.0.48 (SWIV KIT-GAPS 3): a WebAssembly br_table holds at
+        most 65 520 targets, and a switch whose values span more comes out of emcc wrong - silently (a value that has a
+        case reaches the default), as a module the browser refuses, or as a failed build; measured with emcc 6.0.12 on
+        the 11 684 cases of a --resume dispatcher. Values that span more than SWITCH_SPAN are therefore switched by
+        their 4 KB block first: no table is longer than 4096."""
+        if not cases or max(c[0] for c in cases) - min(c[0] for c in cases) < self.SWITCH_SPAN:
+            self.emit('%sswitch (%s) {' % (ind, var))
+            for v, st in cases:
+                self.emit('%scase 0x%xu: %s' % (ind, v, st))
+            self.emit('%s}' % ind)
+            return
+        blocks = {}
+        for v, st in cases:
+            blocks.setdefault(v >> 12, []).append((v, st))
+        self.emit('%sswitch (%s >> 12) {' % (ind, var))
+        for b in sorted(blocks):
+            self.emit('%scase 0x%xu: switch (%s) {' % (ind, b, var))
+            for v, st in blocks[b]:
+                self.emit('%s    case 0x%xu: %s' % (ind, v, st))
+            self.emit('%s    } break;' % ind)
+        self.emit('%s}' % ind)
 
     def routine_head(self, entry, insns):
         """The values rts and rte compare the stack with, and with --resume the way in at any instruction."""
@@ -934,10 +954,9 @@ class Gen:
                       % ('' if 'rts' in kinds else 'e0 = m->a[7], '))
         if self.resume:
             self.labels[entry] = [i.addr for i in insns]
-            self.emit('    if (RESUME_PC) { uint32_t r_ = RESUME_PC; RESUME_PC = 0; switch (r_) {')
-            for i in insns:
-                self.emit('        case 0x%xu: goto L%06x;' % (i.addr, i.addr))
-            self.emit('    } }')
+            self.emit('    if (RESUME_PC) { uint32_t r_ = RESUME_PC; RESUME_PC = 0;')
+            self.emit_switch('r_', [(i.addr, 'goto L%06x;' % i.addr) for i in insns], '        ')
+            self.emit('    }')
 
     def func_head(self, entry):
         """The function head; with the profile the body is a static function wrapped by the

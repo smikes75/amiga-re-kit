@@ -726,3 +726,74 @@ def test_inputs_first_frame_of_the_original(tmp_path):
     assert trace.inputs_first_frame(recs[:1]) is None
     from arek import cli
     assert cli.main(['trace', 'inputs-frame', str(out)]) == 0                           # the host's own trace: its handler records are on line 0
+
+
+SCHED = {
+    COPLIST: 'fffffffe',
+    MAIN: '4df900dff000'          # lea $dff000,a6
+          '3d7cc020009a'          # move.w #$c020,$9a(a6)    INTENA: master + VERTB
+          '52b84000'              # 100c: addq.l #1,$4000
+          '4eb81200'              # jsr $1200                 this task gives way by itself
+          '60f6',                 # bra.s 100c
+    0x1040: '52b84004'            # the other task: addq.l #1,$4004 - it runs until the interrupt takes it
+            '20384000'            # move.l $4000,d0
+            '22384004'            # move.l $4004,d1
+            '60f2',               # bra.s 1040
+    L3: '33fc002000dff09c'        # move.w #$20,$dff09c       clear VERTB
+        '4eb81200'                # jsr $1200                 the scheduler: comes back when this task runs again
+        '4e73',                   # rte
+    0x1200: '2b4f000e'            # move.l a7,14(a5)          the task sleeps inside the scheduler
+            '2a55'                # movea.l (a5),a5
+            '2e6d000e'            # movea.l 14(a5),a7
+            '4e75',               # rts                       into the other task: its own call, or its handler's
+    0x3000: '00003100',           # +0 next
+    0x3100: '00003000',
+    0x310e: '00004ffc',           # +14 saved a7 of the task not run yet
+    0x4ffc: '00001040',
+}
+
+
+@pytest.mark.parametrize('vec', ['host_jmp_l3', 'host_vec_l3'])
+def test_host_tasks_switched_by_an_rts_inside_the_handler(tmp_path, vec):
+    """1.0.48 (SWIV KIT-GAPS 4), --resume: a scheduler that ends in rts on the other task's stack, called by one task
+    itself and by the interrupt handler of the other. Entered by a jump (host_jmp_l3) both tasks run on and the records
+    know when the handler is over. Entered as a C call (host_vec_l3) the scheduler's rts onto the higher stack reads as
+    a plain return, the handler's C frame returns and the interrupted routine goes on with the other task's stack -
+    kept here as the measured reason for host_jmp."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    img = bytearray(0x5000)
+    for at, hx in SCHED.items():
+        img[at:at + len(hx) // 2] = bytes.fromhex(hx)
+    img[0x6c:0x70] = struct.pack('>I', L3)
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[MAIN, 0x1040, L3, 0x1200], timing=True, bus_table=True, resume=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1040u',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=' + vec,
+                    os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'),
+                    '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', 0x0200)
+    creg[0x82:0x84] = struct.pack('>H', COPLIST)
+    (st / 'creg.bin').write_bytes(creg)
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 3000 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
+    out = tmp_path / 'run.vtr'
+    try:
+        r = subprocess.run([str(exe), str(st), str(out), '9', '--full'], capture_output=True, text=True, timeout=60)
+        code, err = r.returncode, r.stderr
+    except subprocess.TimeoutExpired:
+        code, err = -1, 'timeout'
+    recs = [x for x in trace.records(str(out)) if x['pc'] == 0x1040] if code == 0 else []
+    frames = sorted({x['frame'] for x in recs})
+    good = (code == 0 and len(frames) >= 6 and len(recs) > 1000
+            and recs[-1]['d'][0] > recs[10]['d'][0] > 0 and recs[-1]['d'][1] > recs[10]['d'][1] > 0
+            and all(x['a'][7] == 0x5000 for x in recs))                     # this task on its own stack at every tick
+    assert good == (vec == 'host_jmp_l3'), (vec, code, err[-300:], len(recs), frames[:8])

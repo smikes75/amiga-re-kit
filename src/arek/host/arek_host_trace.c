@@ -88,7 +88,7 @@ static void on_pc(M68 *m, uint32_t pc) {
 #ifdef HOST_L3_PC
     if (pc == HOST_L3_PC) { record(m, pc); return; }
 #endif
-    if (pc == TICK_PC && !H_IRQ_DEPTH) record(m, pc);
+    if (pc == TICK_PC && !H_IN_IRQ) record(m, pc);
 }
 static FILE *R_AUD = 0;
 static void r_aud(int ch, double t, int value) {

@@ -3,6 +3,20 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.48 (2026-11-11)
+
+- wasm (SWIV KIT-GAPS 3): a `switch` whose values span more than a WebAssembly br_table holds (65 520 targets) comes
+  out of emcc 6.0.12 wrong - a value that has a case reaches the default, or the module does not load, or the build
+  fails; natively it is right. The dispatchers of a translation (`call_addr`, an overlay module's, the `--resume` way
+  into a routine) are emitted by 4 KB blocks when their values span $4000 or more (`Gen.emit_switch`). SWIV, 11 684
+  cases: wasm stopped at "unknown routine" for an address that has a case; by blocks 3000 frames, native = wasm
+
+- host, `--resume` (SWIV KIT-GAPS 4): `HOST_VECTOR_JUMP` / `host_jmp_l1..l6` enter the game's handler by a jump, as the
+  68000 does - no C frame waits for its rte. For handlers that leave on another stack by other means than their own
+  rte (a scheduler ending in rts, a7 moved from channel to channel): called from C (`host_vec_lN`) such an rts reads as
+  a plain return and the interrupted routine goes on with a foreign stack. `H_IN_IRQ` (the trace's tick records)
+  follows such handlers by their level
+
 ## 1.0.47 (2026-11-11)
 
 - Copper (SWIV KIT-GAP 1): a MOVE to a register below $40 stops the Copper until the next frame, one to $40-$7E does

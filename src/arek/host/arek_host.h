@@ -46,6 +46,7 @@ static int    H_COP_DONE = 0;            /* the copper's interrupt of this frame
 static int    H_COP_IDX = 0;             /* 1.0.6: how many of the bus model's cop_irq[] of this frame were raised (any INTREQ bits the Copper sets, Turrican II KIT-GAPS 7) */
 static int    H_BLIT_PEND = 0;           /* 1.0.5: a blit the CPU started is running; INTREQ BLIT when it ends (Turrican II KIT-GAPS 3) */
 static int    H_IRQ_DEPTH = 0;
+static int    H_JDEPTH = 0; static uint8_t H_JLEV[8];   /* 1.0.48: handlers entered by a jump (HOST_VECTOR_JUMP), by level */
 static uint8_t H_CIAA_PRA = 0xfe;        /* $BFE001: bits 6/7 = fire port 0/1 (0 = pressed), bit 1 = LED output */
 static uint8_t H_CIAA_SDR = 0, H_CIAA_ICR = 0, H_CIAA_DDRA = 0x03, H_CIAB_ICR = 0;
 typedef struct { uint16_t latch, cnt; uint8_t cr; int64_t e0; } HCiaTimer;   /* e0 in E ticks: 64 bits (G47: a long is 32 bits in wasm32) */   /* e0: the E tick of the last update */
@@ -275,6 +276,7 @@ static void host_reset(void) {
     H_CIA[0] = cia0; H_CIA[1] = cia0; H_CIAB_ICR = 0; H_CIAA_DDRA = 0x03; H_CIA_DUE = 0;
     H_IO_UNKNOWN = 0; H_IO_LAST = 0; H_IRQS = 0; H_PC = 0;
     RET_PC = NO_RET;
+    H_JDEPTH = 0;
 }
 
 /* an interrupt at an instruction boundary: the highest enabled level above the mask; SR and PC to the stack, the
@@ -312,6 +314,28 @@ HOST_VECTOR_HANDLER(host_vec_l3, 0x6c)
 HOST_VECTOR_HANDLER(host_vec_l4, 0x70)
 HOST_VECTOR_HANDLER(host_vec_l5, 0x74)
 HOST_VECTOR_HANDLER(host_vec_l6, 0x78)
+/* 1.0.48 (SWIV KIT-GAPS 4), with recomp --resume: HOST_VECTOR_JUMP(name, vec) = the handler is entered by a JUMP, as the
+ * 68000 enters it - no C frame waits for its rte. For a game whose handlers leave on another stack by other means than
+ * their own rte: a scheduler called by jsr that ends in rts on the next task's stack, a sound handler that moves a7
+ * from channel to channel. Called from C, such an rts above the routine's entry reads as a plain return, the C callers
+ * return one after another and the interrupted routine goes on with a foreign stack. Entered by a jump, the frame the
+ * host pushed is all there is: the handler's rte (or whatever ends it) goes on at the stacked PC through TASK_RUN.
+ * -DHOST_L3=host_jmp_l3 etc. Not for a host that takes interrupts inside a C routine of its own which must go on
+ * afterwards (host_spend in an extern): its frame is dropped too and the interrupted instruction runs again - the
+ * routine has to remember where it was. "Inside an interrupt" (H_IN_IRQ, the trace's tick records) is kept by the
+ * level: a handler entered at level n is over at the first instruction that runs below n. */
+#define H_IN_IRQ (H_IRQ_DEPTH || H_JDEPTH)
+#ifdef AREK_RESUME
+#define HOST_VECTOR_JUMP(name, vec) void name(M68 *m) { \
+    if (H_JDEPTH < 8) H_JLEV[H_JDEPTH++] = (uint8_t)((m->srhi >> 8) & 7); \
+    task_jump(m, ((uint32_t)rd16_raw((uint32_t)(vec)) << 16) | rd16_raw((uint32_t)(vec) + 2)); }
+HOST_VECTOR_JUMP(host_jmp_l1, 0x64)
+HOST_VECTOR_JUMP(host_jmp_l2, 0x68)
+HOST_VECTOR_JUMP(host_jmp_l3, 0x6c)
+HOST_VECTOR_JUMP(host_jmp_l4, 0x70)
+HOST_VECTOR_JUMP(host_jmp_l5, 0x74)
+HOST_VECTOR_JUMP(host_jmp_l6, 0x78)
+#endif
 static void host_irq(M68 *m, uint32_t pc) {
     uint16_t intena = CREG[0x09a >> 1];
     if (!(intena & 0x4000)) return;
@@ -350,6 +374,7 @@ void tick_hook(M68 *m, uint32_t pc, uint32_t clocks) {
     arek_paula_run(&H_PAULA, h_abs());
     { int ln = (int)(h_now() / HOST_HPOS); if (ln > ARD_NEXT) ard_until(ln); }
     H_PC = pc;
+    while (H_JDEPTH && (int)((m->srhi >> 8) & 7) < H_JLEV[H_JDEPTH - 1]) H_JDEPTH--;   /* a handler entered by a jump is over */
     if (h_pc_cb) h_pc_cb(m, pc);          /* before an interrupt is accepted: as the emulator's breakpoint (pc reached) */
     { long n0 = H_IRQS; host_irq(m, pc);
       if (H_IRQS != n0 && h_pc_cb) h_pc_cb(m, pc); }   /* after the rte the pc is reached again: the breakpoint fires twice */
