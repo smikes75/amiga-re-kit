@@ -151,7 +151,11 @@ static void h_cia_due(void) {
 static void host_cia_state(const unsigned v[16]) {
     for (int i = 0; i < 2; i++) { const unsigned *c = v + 8 * i;
         for (int k = 0; k < 2; k++) { HCiaTimer *t = &H_CIA[i].t[k];
-            t->latch = (uint16_t)c[3 * k]; t->cnt = (uint16_t)c[3 * k + 1]; t->cr = (uint8_t)c[3 * k + 2]; t->e0 = h_eticks(); }
+            t->latch = (uint16_t)c[3 * k]; t->cnt = (uint16_t)c[3 * k + 1]; t->cr = (uint8_t)c[3 * k + 2];
+            /* 1.0.56: the emulator's counter is two E cycles ahead of the model's (which counts from the write that starts a
+             * timer; the 8520 from two cycles later) - a running timer of a capture underflowed two cycles late (SWIV, a
+             * capture in the game: the first level 6 entry 2 colour clocks late, the next ones right) */
+            t->e0 = h_eticks() - ((H_CIA_SYNC && (t->cr & 1)) ? 2 : 0); }
         H_CIA[i].mask = (uint8_t)(c[6] & 0x7f); *h_cia_icr(i) = (uint8_t)(c[7] & 0x7f); }
     H_CIA_DUE = 0; h_cia_due();
 }
@@ -216,6 +220,7 @@ static void host_display_init(void) {
 #include "arek_host_disk.h"
 #include "arek_host_floppy.h"
 #endif
+static void h_premap_next(void); static int H_NEXTMAP;
 int hw_read_hook(uint32_t off, uint32_t *v) {
     double t = h_now(); long tt = (long)t; int vp = (int)(tt / HOST_HPOS), hp = (int)(tt % HOST_HPOS), lof = H_LOF;
     /* 1.0.40: the frame rolls at an instruction boundary; a read made past the frame's end inside the instruction is
@@ -248,7 +253,8 @@ void hw_write_hook(uint32_t off, uint32_t v) {
     hfl_reg_write(off, (uint16_t)v);
 #endif
     arek_bus_cpu_write(arek_glue_bus(), off);                     /* the CPU's write is the later one (G50) */
-    { ArekBus *bb = arek_glue_bus(); bb->journal_on = H_CIA_SYNC; arek_bus_cpu_reg(bb, off, (uint16_t)v, (uint32_t)h_now()); }   /* 1.0.52: DMA registers written in the middle of a frame (with the timing model) */
+    { ArekBus *bb = arek_glue_bus(); bb->journal_on = H_CIA_SYNC;
+      if (arek_bus_cpu_reg(bb, off, (uint16_t)v, (uint32_t)h_now()) && H_NEXTMAP) h_premap_next(); }   /* 1.0.56: the re-map cleared the next frame's first lines behind the end */   /* 1.0.52: DMA registers written in the middle of a frame (with the timing model) */
     if ((off >= 0x080 && off <= 0x086) || (off >= 0x08e && off <= 0x094) || (off >= 0x0e0 && off <= 0x10a) ||
         (off >= 0x120 && off <= 0x1be)) { ard_until((int)(h_now() / HOST_HPOS)); ard_write(off, (uint16_t)v); }
     if (off == 0x02e) { ard_until((int)(h_now() / HOST_HPOS)); ARD_CDANG = (int)((v >> 1) & 1); arek_glue_bus()->cdang = ARD_CDANG; }   /* 1.0.47: COPCON */
@@ -260,7 +266,7 @@ void hw_write_hook(uint32_t off, uint32_t v) {
         if (v & 0x8000) H_INTREQ |= v & 0x7fff; else H_INTREQ &= ~(v & 0x7fff); }
     if (off == 0x058) H_BLIT_PEND = 1;                                             /* 1.0.5: BLTSIZE by the CPU - INTREQ BLIT when the bus model's blit ends */
     if (off == 0x034) { for (int k = 8; k <= 14; k += 2) if (v & (1u << (k + 1))) H_POTGOR = (uint16_t)((H_POTGOR & ~(1u << k)) | (v & (1u << k))); }   /* POTGO: an output pin reads back (G40) */
-    if ((off >= 0x0a0 && off < 0x0e0) || (off == 0x096 && (v & 0x000f)) || (off == 0x09c && (v & 0x0780))) arek_paula_write(&H_PAULA, h_abs(), off, (uint16_t)v);
+    if ((off >= 0x0a0 && off < 0x0e0) || (off == 0x096 && (v & 0x000f)) || (off == 0x09c && (v & 0x0780))) arek_paula_write(&H_PAULA, h_acc_abs(), off, (uint16_t)v);   /* 1.0.56: at the write's slot (with the timing model) */
 }
 /* the E clock (10 CPU clocks = 5 CCK): a CIA access waits for its phase.
  * 1.0.51 (SWIV KIT-GAPS 7), with -DHOST_IPL_MODEL=1 (or HOST_CIA_SYNC=1 in the environment): vAmiga's rule
@@ -341,7 +347,7 @@ void cia_write_hook(uint32_t a, uint8_t v) {
 
 /* the next frame's map behind the end of the current one, so an instruction crossing the frame end sees the refresh
  * and the copper of line 0 (measured: a cmpi on 312:219 takes 18 CCK in the original, 11 without this) */
-static uint8_t OWN_NEXT[HOST_MAXLINES * HOST_HPOS]; static int H_NEXTMAP = 0;
+static uint8_t OWN_NEXT[HOST_MAXLINES * HOST_HPOS];
 static void h_premap_next(void) {
     ArekBus *b = arek_glue_bus(); ArekBus t = *b; static uint16_t R2[0x100];
     memcpy(R2, b->regs, sizeof R2); t.regs = R2; t.own = OWN_NEXT; t.lines = H_LINES;
@@ -349,11 +355,19 @@ static void h_premap_next(void) {
     for (int k = 0; k < 2 * HOST_HPOS; k++) { uint32_t j = (uint32_t)H_LINES * HOST_HPOS + k; if (j < (uint32_t)HOST_MAXLINES * HOST_HPOS && !b->own[j]) b->own[j] = OWN_NEXT[k]; }
 }
 /* the events of time: the end of the frame (VERTB), the copper's INTREQ write (COPER) */
+#ifdef HOST_FLOPPY
+/* 1.0.56: called by the bus model while a CPU access waits (for a blit that holds the bus, for lines): the disk's slots up
+ * to 160 colour clocks past the slot the wait has reached, before the blitter gets there. The disk's slots were only
+ * marked 160 colour clocks ahead of the instruction's start and a longer blit took them: it ended two slots early for
+ * every line it crossed (SWIV in the game, loading while it draws) */
+static void h_bus_ahead(ArekBus *b, uint32_t slot) { hfl_ahead(H_PAULA.frame_base + (double)slot, 160.0); b->ahead_to = slot + 96; }
+#endif
 static void host_events(void) {
     double len = (double)H_LINES * HOST_HPOS;
     if (!H_NEXTMAP && h_now() >= len - 2 * HOST_HPOS) { h_premap_next(); H_NEXTMAP = 1; }
 #ifdef HOST_FLOPPY
-    { double fe = H_PAULA.frame_base + len, ta = h_abs(); hfl_run(ta < fe ? ta : fe); if (ta < fe) hfl_ahead(ta, 160.0); }   /* the disk up to now (to the frame's end before it rolls) and its slots ahead */
+    { double fe = H_PAULA.frame_base + len, ta = h_abs(); hfl_run(ta < fe ? ta : fe); if (ta < fe) hfl_ahead(ta, 160.0);   /* the disk up to now (to the frame's end before it rolls) and its slots ahead */
+      ArekBus *bb = arek_glue_bus(); bb->ahead = h_bus_ahead; bb->ahead_to = (uint32_t)h_now() + 96; }   /* 1.0.56: and further ahead while an access waits for a blit */
 #endif
     if (h_now() >= len) {
         if (H_OWN_DUMP) { fwrite(&H_FRAME, sizeof H_FRAME, 1, H_OWN_DUMP); fwrite(OWN, 1, (size_t)H_LINES * HOST_HPOS, H_OWN_DUMP); }
@@ -370,6 +384,7 @@ static void host_events(void) {
         ARD_LAST = H_LINES - 1;
         arek_glue_frame(H_LINES);
         arek_paula_frame(&H_PAULA, H_PAULA.frame_base + len);
+        arek_glue_bus()->ahead_to = 0; arek_glue_frame_carry();     /* 1.0.56: an access that waited for a blit across the frame's end, after the audio slots are planned */
         H_FRAME++; H_COP_DONE = 0; H_COP_IDX = 0; H_NEXTMAP = 0;
         if (H_VBL_LAT <= 0 && H_IRQ_POLL < 0) H_INTREQ |= 0x0020; else H_VERTB_PEND = 1;
         if (h_frame_cb) h_frame_cb();
@@ -377,6 +392,7 @@ static void host_events(void) {
     if (H_VERTB_PEND && h_now() >= H_VBL_LAT) { h_irq_mark(); H_INTREQ |= 0x0020; H_VERTB_PEND = 0; H_EVT_T = H_PAULA.frame_base + H_VBL_LAT; h_irq_mark(); }
 #ifdef HOST_FLOPPY
     hfl_run(h_abs()); hfl_ahead(h_abs(), 160.0);                                 /* after a frame roll: in the new frame's map */
+    arek_glue_bus()->ahead_to = (uint32_t)h_now() + 96;
 #endif
     h_cia_poll();
     ArekBus *b = arek_glue_bus();

@@ -3,6 +3,29 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.56 (2026-11-11)
+
+- with the timing model, host_trace `--reglog` stamps a CPU register write with the write's own slot, as the
+  emulator's VAHL_REGLOG does, and the Paula model gets an audio register write at that slot - the model's time is
+  already behind the bus cycle. SWIV's boot: instruction times equal, every write in the host's log one colour clock
+  later than the original's
+- a captured state with a running CIA timer (with the timing model): the emulator's counter is two E cycles ahead
+  of the model's own - the first interrupt after the capture came two E cycles late
+- bus model, an instruction that crosses the frame's end:
+  - an access that finds no slot up to one line past the end (a blit with BLTPRI holds the bus) was counted as served
+    there and forgotten; it now waits on in the new frame (`arek_bus_frame_carry`, `arek_glue_frame_carry()` - the
+    host calls it after it has planned its own DMA in the new map)
+  - the audio slots are planned one line past the frame's end too (the next frame's line 0)
+  - a CPU write that re-maps the frame (DMACON ... in its last two lines) cleared the premapped first lines of the
+    next frame: the host premaps them again
+- while a CPU access waits, the bus model asks the host for its DMA slots (`ArekBus.ahead`): the disk's slots were
+  marked 160 colour clocks ahead of an instruction's start, and a blit the CPU waited for longer took them
+- measured on SWIV against vAmiga with random play (a capture at frame 4000 made with `--capture-at`; loading, blits
+  and music at once): 172 440 instruction times of 172 440 equal at 16 addresses over 1 100 frames (1.0.55: the
+  first level 6 entry already 2 colour clocks late). From the boot's capture at frame 790 through the title into the
+  game: the VBL routine's time equal in 4 390 frames in a row, to frame 5178 (1.0.55: 2 142, to frame 2930). Open:
+  the next difference at frame 5179; the interrupts of the blitter, the audio channels and the Copper are not measured
+
 ## 1.0.55 (2026-11-11)
 
 - floppy model: the byte clock needs no measured phase - vAmiga starts it at power-on and serves a byte in every

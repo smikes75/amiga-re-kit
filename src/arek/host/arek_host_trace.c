@@ -112,8 +112,11 @@ static int r_regs_parse(const char *spec) {
 static void r_reg(uint32_t off, uint32_t v) {
     if (R_MASKED) { if (off >= 0x200 || !R_MASK[off >> 1]) return; }
     else if (!(off == 0x096 || off == 0x09a || off == 0x09c || off == 0x09e || (off >= 0x0a0 && off < 0x0e0))) return;
-    long tt = (long)h_now();
-    uint32_t rec[4] = { (uint32_t)(H_FRAME0 + H_FRAME), (uint32_t)(((tt / HOST_HPOS) << 16) | (tt % HOST_HPOS)), (off << 16) | (v & 0xffff), H_PC & 0xffffff };
+    /* 1.0.56: with the timing model the write's own slot, as VAHL_REGLOG records it (the model's time is already behind
+     * the cycle: every write of SWIV's boot was logged one colour clock late); past the frame's end: the next frame's */
+    long tt = (long)(h_acc_abs() - H_PAULA.frame_base), fr = H_FRAME0 + H_FRAME;
+    if (H_CIA_SYNC && tt >= (long)H_LINES * HOST_HPOS) { tt -= (long)H_LINES * HOST_HPOS; fr++; }
+    uint32_t rec[4] = { (uint32_t)fr, (uint32_t)(((tt / HOST_HPOS) << 16) | (tt % HOST_HPOS)), (off << 16) | (v & 0xffff), H_PC & 0xffffff };
     fwrite(rec, 4, 4, R_REG);
 }
 static void apply_input(long k) {

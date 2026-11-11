@@ -30,15 +30,38 @@ double arek_bus_access(ArekBus *b, double tt) {
     uint32_t t = (uint32_t)tt; if ((double)t < tt) t++; t += b->slotoff;
     b->prev_t0 = b->last_t0; b->prev_slot = b->last_slot; b->last_t0 = tt; b->last_slot = -1;
     b->acc_t[3] = b->acc_t[2]; b->acc_t[2] = b->acc_t[1]; b->acc_t[1] = b->acc_t[0]; b->acc_t[0] = tt;
+    /* 1.0.56: the host's other DMA (the disk's slots, marked a little ahead of the CPU's time) must be in the map before
+     * the blitter passes - a CPU access can wait for a blit for lines, and the blit then took the disk's slots */
+#define AREK_BUS_AHEAD(s) if (b->ahead && (s) >= b->ahead_to) b->ahead(b, (s))
+    AREK_BUS_AHEAD(t);
     arek_bus_blt_advance(b, t); b->last_wait = 0;
 #define AREK_BUS_TAKEN(o) ((o) && !(b->cpu_fast && (o) == AREK_BUS_CPU))
     if (t < cap && AREK_BUS_TAKEN(b->own[t])) {
         int delay = 0;
-        do { t++; arek_bus_blt_advance(b, t); if (++delay == 2) b->bls = 1; } while (t < cap && AREK_BUS_TAKEN(b->own[t]));
+        do { t++; AREK_BUS_AHEAD(t); arek_bus_blt_advance(b, t); if (++delay == 2) b->bls = 1; } while (t < cap && AREK_BUS_TAKEN(b->own[t]));
         b->bls = 0; b->wait_n += delay; b->last_wait = delay;
     }
-    if (t < cap) { b->own[t] = AREK_BUS_CPU; b->last_slot = (long)t; }
-    b->cpu_n++; return t + 2 - b->slotoff;
+    if (t < cap) { b->own[t] = AREK_BUS_CPU; b->last_slot = (long)t; b->cpu_n++; }
+    else {                                                   /* 1.0.56: no slot before the cap - arek_bus_frame_carry serves it in the next frame */
+        long rel = (long)t - (long)b->lines * b->hpos +       /* where it stood, as a slot of the next frame; behind the slot the blitter just took */
+            ((t < (uint32_t)(b->maxlines * b->hpos) && AREK_BUS_TAKEN(b->own[t])) ? 1 : 0);
+        if (!b->unserved || rel > b->carry_rel) b->carry_rel = rel;   /* the last of them: the blitter went on while the instruction's later accesses asked */
+        b->unserved++; }
+    return t + 2 - b->slotoff;
+}
+
+/* 1.0.56: after arek_bus_frame, with the CPU's time t already in the new frame: the accesses that found no slot up to one
+ * line past the old frame's end (a blit with BLTPRI that holds the bus across the frame's end) wait on in the new frame's
+ * map, from line 1 on. They were counted as served at the cap and then forgotten - the instruction ended a bus cycle
+ * early (SWIV in the game, frame 4101: a lea beside a blit, 5 colour clocks). Returns the CPU's time. */
+double arek_bus_frame_carry(ArekBus *b, double t) {
+    int n = b->unserved; b->unserved = 0;
+    if (n <= 0) return t;
+    double t0 = t - 2.0 * n;                                 /* where the first of them stood: each had taken 2 colour clocks */
+    if (t0 < (double)b->carry_rel - b->slotoff) t0 = (double)b->carry_rel - b->slotoff;
+    if (b->bl.on && t0 + b->slotoff < (double)b->bl.bt) t0 = (double)b->bl.bt - b->slotoff;   /* the slots the blit took past the old frame's end are not in the new map */
+    for (int k = 0; k < n; k++) t0 = arek_bus_access(b, t0);
+    return t0 > t ? t0 : t;
 }
 
 double arek_bus_undo_last(ArekBus *b) {

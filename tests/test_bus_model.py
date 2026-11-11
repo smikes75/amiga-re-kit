@@ -598,3 +598,51 @@ def test_the_last_prefetch_and_the_interrupt_sample_point_of_an_instruction():
     assert ent('4a13') == (T.ORD_END, 0) and ent('08130006') == (T.ORD_END, 0)      # tst.b (a3); btst #6,(a3)
     assert ent('4e75') == (T.ORD_NONE, 0) and ent('4268 0004'.replace(' ', '')) == (T.ORD_NONE, 0)   # rts; clr.w 4(a0)
     assert ent('46fc2300') == (T.ORD_NONE, 0)                         # move #,sr: its own end reads (1.0.47)
+
+
+CARRY = r"""
+#include <stdio.h>
+#include <string.h>
+#include "arek_bus.h"
+static uint16_t rd16(void *c, uint32_t a) { (void)c; (void)a; return 0xffff; }
+static int asked = 0;
+static void ahead(ArekBus *b, uint32_t slot) { asked++; b->own[slot + 40] = 3; b->ahead_to = slot + 96; }
+int main(void) {
+    static uint8_t own[400 * 227]; static uint16_t regs[0x100];
+    ArekBus B; arek_bus_init(&B, 227, 313, 400, own, regs, rd16, 0);
+    arek_bus_frame(&B, 313);
+    long end = 313L * 227, cap = end + 227;
+    /* 1: something holds every slot from line 312 slot 200 to past the cap (a blit with BLTPRI) */
+    for (long k = 312L * 227 + 200; k < cap + 4; k++) own[k] = 8;
+    double t = arek_bus_access(&B, 312.0 * 227 + 199);
+    printf("unserved %d t %ld\n", B.unserved, (long)t - end);
+    arek_bus_frame(&B, 313); t -= (double)end;                      /* the host rolls the frame: a new map */
+    for (long k = 227; k < 241; k++) own[k] = 8;                    /* the holder goes on to line 1 slot 13 */
+    t = arek_bus_frame_carry(&B, t);
+    printf("carried %d t %ld slot %ld owner %d\n", B.unserved, (long)t, B.last_slot, own[241]);
+    /* 2: the host is asked for its slots while an access waits */
+    for (long k = 5000; k < 5300; k++) own[k] = 8;
+    B.ahead = ahead; B.ahead_to = 0;
+    t = arek_bus_access(&B, 4999.0);
+    printf("asked %d served %ld disk %d\n", asked, B.last_slot, own[5040] == 8 || own[5040] == 3);
+    return 0;
+}
+"""
+
+
+def test_an_access_that_finds_no_slot_before_the_frame_rolls_waits_on_in_the_next_frame(tmp_path):
+    """1.0.56 (SWIV in the game): a blit that holds the bus across the frame's end. The waiting access was counted as
+    served one line past the end and forgotten - the instruction ended a bus cycle early. Now it is left open
+    (unserved) and arek_bus_frame_carry serves it in the new frame's map. And while an access waits, the model asks the
+    host for its own DMA slots (the disk's) before the blitter passes them."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    BUS = os.path.dirname(bus.__file__)
+    (tmp_path / 'c.c').write_text(CARRY)
+    exe = tmp_path / 'c'
+    subprocess.run([cc, '-O1', '-I', BUS, str(tmp_path / 'c.c'), os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'), '-lm', '-o', str(exe)], check=True)
+    out = subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout.splitlines()
+    assert out[0] == 'unserved 1 t 228', out                 # at the cap: one line past the end, + 2 - 1
+    assert out[1] == 'carried 0 t 242 slot 241 owner 1', out   # the first free slot of the new frame, then 2 colour clocks
+    assert out[2] == 'asked 4 served 5300 disk 1', out        # every 96 slots of the wait

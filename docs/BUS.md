@@ -113,6 +113,12 @@ blitter (`run_blit`) moves its words raw - they are the blitter's slots in the m
 mistake, 0.5.18 counts them again: KIT-GAPS 29 - the extension words an indirect jump re-reads stay raw,
 they are prefetch and in the bus table). Audio DMA slots come from the host's Paula model (`arek_bus_mark`).
 
+An instruction that crosses the frame's end (1.0.56): the host premaps the next frame's first lines behind the map's
+end, the audio slots are planned there too, and an access that still finds no slot one line past the end (a blit that
+holds the bus) is left open - after `arek_glue_frame()` and after the host has planned its own DMA in the new map it
+calls `arek_glue_frame_carry()` and the access waits on there. `ArekBus.ahead` (optional): while an access waits, the
+model asks the host for the DMA slots it marks itself (the disk's) before the blitter reaches them.
+
 ## Audio DMA (Paula), kit 0.7.0 / 0.7.1
 
 `arek_bus_paula.h` (header-only, MIT) marks the audio slots ($0D + 2n of every line) the way Paula uses them,

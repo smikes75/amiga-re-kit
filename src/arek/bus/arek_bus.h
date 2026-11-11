@@ -61,6 +61,8 @@ typedef struct ArekBus {
     double acc_t[4]; uint32_t poll_back;  /* 1.0.53: when the last four CPU accesses were asked for (0 = the last); the instruction samples its interrupt level poll_back cycles before its last (timing.bus_poll) */
     /* 1.0.55: the instruction's bus pattern (arek.m68k.buspat: Moira's order of idle clocks and bus cycles, and where the
      * interrupt level is sampled) - arek_bus_pat_begin; the accesses of the translation take its data cycles in order */
+    void (*ahead)(struct ArekBus *b, uint32_t slot); uint32_t ahead_to;   /* 1.0.56: the host marks its DMA slots up to past `slot` and sets ahead_to (the slot from which it wants to be asked again) */
+    int unserved; long carry_rel;                        /* 1.0.56: accesses that found no slot before the cap past the frame's end (arek_bus_frame_carry) */
     int pat_off;                         /* the host's switch: 1 = do not use the patterns (HOST_BUS_PAT=0) */
     const uint8_t *pat; int pat_on, pat_n, pat_i, pat_pj, pat_pd, pat_acc, pat_v, poll_valid; double pat_poll;
     int order2;                          /* 1.0.53: honour the bus table's fourth byte (the host's timing model) */
@@ -79,6 +81,7 @@ void arek_bus_init(ArekBus *b, int hpos, int lines, int maxlines, uint8_t *own, 
  * DMA noveho snimku (obnova 1/3/5/226, sprity, bitplany, copper po taktech z copper listu COP1LC). lines = radku noveho snimku.
  * Sloty zvuku si volajici dopise sam (arek_bus_mark), protoze zavisi na jeho modelu Pauly. Vynuluje cpu_n, wait_n, cop_int. */
 void arek_bus_frame(ArekBus *b, int lines);
+double arek_bus_frame_carry(ArekBus *b, double t);   /* 1.0.56: after arek_bus_frame - the accesses that found no slot before the frame rolled */
 
 /* Procesor. arek_bus_insn: zacatek instrukce (dokonci predchozi), pre = internich polotaktu pred pristupy, accesses = pristupy, ktere
  * instrukce udela hned (prefetch); cycles = celkove cykly 68000 (zbytek po pristupech se pricte jako interni cykly pri dokonceni).

@@ -404,3 +404,80 @@ def test_vertb_reaches_the_pins_three_colour_clocks_into_the_frame(tmp_path):
         at_two += starts[first] == 2
         assert k - 1 == first + 1, (d, rows[max(0, k - 6):k + 1])
     assert at_two, 'no start time put an instruction on colour clock 2: the case 3 and 4 differ in'
+
+
+def test_the_register_log_has_the_slot_of_the_write(tmp_path):
+    """1.0.56 (SWIV), -DHOST_IPL_MODEL=1: host_trace --reglog stamps a CPU write with the write's own slot, as the
+    emulator's VAHL_REGLOG does - not with the model's time behind the cycle (every write of SWIV's boot was one colour
+    clock late against the original's log while the instruction times were equal). move.w #$40,$dff0a6 started at
+    h = 60: three prefetches, the write's cycle from 66, its slot 67."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    HOST, BUS = os.path.dirname(host.__file__), os.path.dirname(bus.__file__)
+    img = bytearray(0x2000)
+    code = bytes.fromhex('33fc004000dff0a6' '60fe')      # move.w #$40,$dff0a6; bra.s self
+    img[0x1000:0x1000 + len(code)] = code
+    img[0x1100:0x1102] = bytes.fromhex('4e73')
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[0x1000, 0x1100], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1100u', '-DHOST_IPL_MODEL=1',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'),
+                    os.path.join(BUS, 'arek_bus_vamiga.c'), '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    (st / 'creg.bin').write_bytes(bytes(512))
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 %d 0 1000\nfe 0 0 0 0 5500\n100\n' % (100 * 227 + 60))
+    r = subprocess.run([str(exe), str(st), str(tmp_path / 'o.vtr'), '1', '--reglog', str(tmp_path / 'reg.bin')], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    recs = [struct.unpack('<4I', (tmp_path / 'reg.bin').read_bytes()[k:k + 16]) for k in range(0, (tmp_path / 'reg.bin').stat().st_size, 16)]
+    assert recs == [(100, (100 << 16) | 67, (0x0a6 << 16) | 0x40, 0x1000)], recs
+
+
+def test_a_captured_running_timer_underflows_in_the_emulators_e_cycle(tmp_path):
+    """1.0.56 (SWIV, a capture in the game), -DHOST_IPL_MODEL=1: the emulator's counter c of a running timer reaches 0
+    c E cycles after the capture and requests its interrupt in that cycle; three colour clocks later the level is on the
+    pins. The model's own counter runs two cycles behind the 8520's and took a captured value as its own: two cycles
+    late. Here: CIA-B timer A one-shot, counter 48, a 5-colour-clock loop - the loop pass that samples the level ends
+    1 to 5 colour clocks after it arrived."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    HOST, BUS = os.path.dirname(host.__file__), os.path.dirname(bus.__file__)
+    img = bytearray(0x2000)
+    img[0x1000:0x1002] = bytes.fromhex('60fe')                              # bra.s self
+    img[0x1100:0x1102] = bytes.fromhex('4e73')
+    l6 = bytes.fromhex('4a3900bfdd00' '33fc200000dff09c' '4e73')
+    img[0x1200:0x1200 + len(l6)] = l6
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[0x1000, 0x1100, 0x1200], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1100u', '-DHOST_IPL_MODEL=1',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', '-DHOST_L6=f_001200', os.path.join(HOST, 'arek_host_trace.c'),
+                    os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'), '-lm', '-o', str(exe)], check=True)
+    creg = bytearray(512)
+    creg[0x9a:0x9c] = struct.pack('>H', 0x6000)                             # INTENA: master, EXTER
+    (tmp_path / 'pcs.txt').write_text('1200\n')
+    for h0 in (60, 61, 62, 63, 64):
+        t0 = 100 * 227 + h0
+        st = tmp_path / ('state%d' % h0)
+        st.mkdir()
+        ram = bytearray(0x80000)
+        ram[:len(img)] = img
+        (st / 'chip.bin').write_bytes(ram)
+        (st / 'slow.bin').write_bytes(bytes(0x80000))
+        (st / 'creg.bin').write_bytes(creg)
+        (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 %d 0 1000\nfe 0 0 0 0 5500\n100\n'
+                                      'ffff ffff 0 ffff ffff 0 0 0  64 30 9 ffff ffff 0 1 0\n' % t0)
+        r = subprocess.run([str(exe), str(st), str(tmp_path / 'o.vtr'), '1', '--pclog', str(tmp_path / 'pc.txt'), str(tmp_path / 'pcs.txt')],
+                           capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, r.stderr
+        f, pc, v, h = (tmp_path / 'pc.txt').read_text().splitlines()[0].split()
+        entered = 100 * 313 * 227 + int(v) * 227 + int(h)                   # the handler's first instruction: 44 clocks after the loop's pass
+        pins = ((100 * 313 * 227 + t0) // 5 + 0x30) * 5 + 3
+        assert 1 <= entered - 22 - pins <= 5, (h0, entered - 22 - pins)

@@ -73,9 +73,13 @@ static inline double arek_paula_slot(const ArekPaula *p, int ch, double req) {  
 }
 static inline double arek_paula_per(const ArekPaulaChan *c) { return c->per ? c->per : 0x10000; }
 
+/* 1.0.56: the map's rows the audio slots are planned in - the frame and one line past its end when the map has room (the
+ * next frame's line 0, where an instruction that crosses the frame's end finds its slots: SWIV's poll loop took an audio
+ * slot of line 0 there and entered the VBL handler 4 colour clocks early) */
+static inline long arek_paula_rows(const ArekPaula *p) { const ArekBus *b = p->bus; int n = b->lines + 1 < b->maxlines ? b->lines + 1 : b->maxlines; return (long)n * b->hpos; }
 static inline void arek_paula_mark_at(ArekPaula *p, int ch, double req) {   /* the request's slot into the map, if in this frame */
     double rel = arek_paula_slot(p, ch, req) - p->frame_base;
-    if (rel >= 0 && rel < (double)p->bus->lines * p->bus->hpos) arek_bus_mark(p->bus, (uint32_t)rel, (uint8_t)(AREK_BUS_AUDIO + ch));
+    if (rel >= 0 && rel < (double)arek_paula_rows(p)) arek_bus_mark(p->bus, (uint32_t)rel, (uint8_t)(AREK_BUS_AUDIO + ch));
 }
 static inline void arek_paula_request(ArekPaula *p, ArekPaulaChan *c, int ch, double t) { if (!AREK_PAULA_HAS(c->req)) { c->req = t; arek_paula_mark_at(p, ch, t); } }
 static inline void arek_paula_irq(ArekPaula *p, ArekPaulaChan *c, int ch, double t, int quiet) {
@@ -147,9 +151,9 @@ static inline void arek_paula_step(ArekPaula *p, ArekPaulaChan *c, int ch, doubl
  * ahead so a blit does not take them; the channel's old planned slots after `from` are freed first. */
 static inline void arek_paula_predict(ArekPaula *p, int ch, double from) {
     ArekBus *b = p->bus; uint8_t code = (uint8_t)(AREK_BUS_AUDIO + ch);
-    double fend = p->frame_base + (double)b->lines * b->hpos;
+    double fend = p->frame_base + (double)arek_paula_rows(p);
     long k0 = (long)(from - p->frame_base) + 1; if (k0 < 0) k0 = 0;
-    for (long k = k0; k < (long)b->lines * b->hpos; k++) if (b->own[k] == code) b->own[k] = 0;
+    for (long k = k0; k < arek_paula_rows(p); k++) if (b->own[k] == code) b->own[k] = 0;
     ArekPaulaChan c = p->ch[ch];
     if (AREK_PAULA_HAS(c.req)) arek_paula_mark_at(p, ch, c.req);
     arek_paula_step(p, &c, ch, fend - 1e-9, 1);

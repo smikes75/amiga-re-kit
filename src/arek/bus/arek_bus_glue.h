@@ -41,6 +41,10 @@ static inline void arek_glue_frame(int lines) {
     AREK_GLUE.t = AREK_GLUE.t > len ? AREK_GLUE.t - len : 0;
     arek_bus_frame(&AREK_GLUE.bus, lines);
 }
+/* 1.0.56: after arek_glue_frame AND after the host has put its own DMA into the new map (arek_paula_frame, the disk's
+ * slots): the accesses of the instruction that crossed the frame's end and found no slot (a blit that holds the bus)
+ * wait on in the new frame. Before the host's marks the blit would take the audio and disk slots of the first lines. */
+static inline void arek_glue_frame_carry(void) { AREK_GLUE.t = arek_bus_frame_carry(&AREK_GLUE.bus, AREK_GLUE.t); }
 
 /* An access off the chip bus (CIA: 7 CCK on the E clock) counted against the current instruction. */
 static inline void arek_glue_slow(double cck) { if (AREK_GLUE.ready) AREK_GLUE.t = arek_bus_slow(&AREK_GLUE.bus, AREK_GLUE.t, cck); }
