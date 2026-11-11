@@ -97,8 +97,8 @@ def test_a_loader_reads_a_track_through_the_controller(tmp_path):
     rec = recs[0]
     t = (rec['frame'] - 100) * 313 * 227 + rec['v'] * 227 + rec['h']                # colour clocks from the start
     spin = 380e-3 * 28e6 / 8                                                         # the motor: 380 ms
-    words = 0x700 * 55.2573 * 2                                                      # $700 words at the disk's speed
-    assert spin < t < spin + 12668 * 55.2573 + words + 3000, (t, spin, words)        # at most one turn to the first sync
+    words = 0x700 * 56 * 2                                                           # $700 words: a byte every 56 colour clocks (vAmiga serves a byte in the colour clock after its 442 master cycles)
+    assert spin < t < spin + 12668 * 56 + words + 3000, (t, spin, words)             # at most one turn to the first sync
     buf = rec['ranges'][0][0x10000:0x10000 + 0x700 * 2]
     got = _sectors(buf)
     assert len(got) >= 2, sorted(got)                                                # $E00 bytes hold two or three sectors whole

@@ -122,6 +122,8 @@ static void apply_input(long k) {
     int r = !!strchr(s, 'R'), l = !!strchr(s, 'L'), u = !!strchr(s, 'U'), d = !!strchr(s, 'D'), f = !!strchr(s, 'F');
     H_JOY1 = (uint16_t)((r << 1) | (r ^ d) | (l << 9) | ((l ^ u) << 8));
     H_CIAA_PRA = (uint8_t)((H_CIAA_PRA & 0x7f) | (f ? 0 : 0x80));
+    if (strchr(s, 'M')) H_CIAA_PRA &= (uint8_t)~0x40;        /* 1.0.54: port 0's button (the left mouse button) - M pressed, m released, neither: as it was (the state's) */
+    else if (strchr(s, 'm')) H_CIAA_PRA |= 0x40;
 }
 static void on_frame(void) {
     if (H_FRAME >= MAXFRAMES) longjmp(DONE, 1);

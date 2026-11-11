@@ -3,6 +3,18 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.54 (2026-11-11)
+
+- floppy model, measured on SWIV's first read against vAmiga (per-instruction times and the bus log): a byte passes
+  every 56 colour clocks (vAmiga schedules the next byte relative to the colour clock that served this one: 442
+  master cycles later is the 56th), not every 55.26 - the first sync came 305 bytes late; the disk's slots are marked
+  across a frame's end too. With the byte clock's phase of the trace run (`HOST_FLOPPY_PHASE`: a capture and a trace
+  of the same disk are different emulator runs - 15 colour clocks apart here; the period is 56 in both): 110 451
+  instruction times in a row equal to the original's - the motor's /RDY, the seek, the whole first read (55 000
+  passes of the loader's poll loop beside the disk's DMA), its decoder and the return; `arek bus diff` empty
+- host_trace inputs: `M` / `m` in a line press / release port 0's button (the left mouse button; CIA-A PRA bit 6) -
+  SWIV's original releases it at frame 815 and its VBL handler then takes another branch
+
 ## 1.0.53 (2026-11-11)
 
 With `-DHOST_IPL_MODEL=1` only; translations must be regenerated (`arek recomp --bus-table`: the table's rows have a fourth byte):
