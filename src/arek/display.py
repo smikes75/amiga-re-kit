@@ -172,6 +172,10 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES, cd
             elif kind == 2:                             # a CTL write sets VSTOP and disarms Denise
                 s.ctl, s.armed = v, False
                 s.vstop = (v >> 8) | ((v >> 1) & 1) << 8
+            elif kind == 4:                             # 1.0.69: a write to SPRxDATA arms Denise with that word
+                s.da, s.armed = v, True
+            else:                                       # SPRxDATB
+                s.db = v
         elif off == 0x080:
             lc[0] = (lc[0] & 0xffff) | (v & 0x1f) << 16
         elif off == 0x082:

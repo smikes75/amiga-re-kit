@@ -3,6 +3,27 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.69 (2026-11-13)
+
+- host: a Copper interrupt requested while the CPU stands behind a blit across the frame's end is served. The
+  requests of the Copper's INTREQ writes were raised at instruction boundaries; with no boundary between the write
+  and the frame's end the roll forgot them
+  - Turrican II, the restart of a level after the player's death (three blits of 512 x 48 words, the CPU waiting
+    with btst / bne from line 235 into the next frame): the handler ran 4 times where the original's ran 6 and the
+    music was 2 frames late from then on. Now 6 entries on the original's frames and lines (10858/42, 10859/47,
+    10860/248 among them), and the 253 audio register writes of the 22 frames after it equal the original's
+- renderers (C and Python): a write to SPRxDATA arms the sprite with that word, SPRxDATB sets the other word - the
+  two registers were not known. A Copper list that switches sprite DMA off at the edge of a status bar and zeroes
+  them left the sprite's last line in the bar as a stripe
+  - `arek selftest display` has the case now (a sprite's data zeroed by the Copper, a sprite armed by a write
+    without DMA, disarmed by SPRxCTL): 200 of 204 060 pixels differed from the emulator, now 0 in both renderers
+  - Turrican II level 1-2: the bar is plain in the 12 frames that had the stripe, no other pixel of 225 frames changed
+- host: PORTS and EXTER in INTREQ follow the CIAs' interrupt lines as Paula has them - a bit cleared while its CIA
+  still asks (the ICR not read) is set again at once. A handler that clears INTREQ before it reads the ICR is
+  entered again, as in the original
+  - Turrican II: the handler's INTREQ write has the original's values ($2070, $21f0); frames of level 1-1 whose
+    every CPU register write equals the original's in register, value and pc: 955 of 1 282 (1 before)
+
 ## 1.0.68 (2026-11-12)
 
 - wb-scene 2.13, `passTime` and `rec.next`: the objects' passes on the time the game COMPUTED them, and the pass it

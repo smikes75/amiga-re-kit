@@ -265,6 +265,12 @@ test builds both (`tests/test_host_engine.py`, emcc and node when installed).
   background; sprites show from the line's first bitplane word on, so a line without a fetch (also one with no
   planes) shows none. In a host DMACON = 0 is the machine's state (`ARD_DMACON_KNOWN`), not "unknown": nothing
   is fetched, sprites included. The Copper still runs with COPEN off (not measured yet).
+- 1.0.69, measured with `arek selftest display` (lines $66-$69 of its disk): a write to SPRxDATA arms the sprite
+  with that word (also without any DMA), SPRxDATB sets the other word, SPRxCTL disarms - so a Copper list that
+  switches sprite DMA off and zeroes the two registers leaves no stripe of the sprite's last line. In the host
+  (not the renderer): the Copper's INTREQ writes that fell into an instruction crossing the frame's end (the CPU
+  behind a blit) are requested at the roll with their own times, and PORTS / EXTER are set again after any INTREQ
+  write while their CIA still asks (ICR & mask), as vAmiga's `Paula::setINTREQ` does.
 - 1.0.43: `host_init` starts from a clean host (`host_reset`, `ard_reset`): what the state does not carry - the frame
   count, the CIA timers, a pending blit, the field length, the renderer's registers and sprites - is as at the first
   start, so the page's restart repeats the first run (the native engine's `--twice` prints both hashes). Raw keys

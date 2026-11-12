@@ -91,6 +91,14 @@ CASES = {
                                              PLANES[:5] + [sprite(0x20000, 0x40, 0x50, 0x100, [(0xffff, 0)] * 16)]),
     'ehb illegal priority': ram_with(with_colours(setup(6, con2=0x3f, ptrs=[p for p, _ in PLANES])) + END, PLANES),
     'ham6 illegal priority': ram_with(with_colours(setup(6, con0=0x6a00, con2=0x3f, ptrs=[p for p, _ in PLANES])) + END, PLANES),
+    # 1.0.69 (Turrican II KIT-GAP 36): the Copper switches sprite DMA off on line $48 and zeroes SPR0DATA / SPR0DATB - the
+    # armed sprite shows nothing from there (without the two writes it keeps its last data: a stripe); on line $50 a
+    # write to SPR1DATA arms sprite 1 without any DMA, on line $54 a write to SPR1CTL disarms it (measured on the
+    # emulator: selftest display, lines $66-$69)
+    'sprite data written by the copper': ram_with(with_colours(setup(2, con2=0x02, ptrs=[p for p, _ in PLANES[:2]])) + sprite_copper([0x20000])
+                                                  + [0x4807, 0xfffe, 0x096, 0x0020, 0x144, 0, 0x146, 0,
+                                                     0x5007, 0xfffe, 0x148, 0x0070, 0x14c, 0xff00, 0x14e, 0x0000, 0x5407, 0xfffe, 0x14a, 0] + END,
+                                                  PLANES[:2] + [sprite(0x20000, 0x40, 0x60, 0x120, [(0xffff, 0)] * 32)]),
     'ddfstrt 24 with sprites 3 and 4': ram_with(with_colours(setup(3, con1=0x88, ddfstrt=0x24, ptrs=[p for p, _ in PLANES[:3]]))
                                                 + sprite_copper([0x20200, 0x20200, 0x20200, 0x20000, 0x20100]) + END,
                                                 PLANES[:3] + [sprite(0x20000, 0x40, 0x50, 0x180, [(0xf0f0, 0x0ff0)] * 16),
@@ -255,3 +263,17 @@ int main(void) {
     subprocess.run([cc, '-O1', '-I', os.path.dirname(os.path.abspath(host.__file__)), '-o', str(exe), str(tmp_path / 't.c'), '-lm'], check=True)
     out = subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout.split()
     assert out == ['236', '106', '0', '0', '255', '119', '255', '17'], out
+
+
+def test_sprite_data_registers_written_by_the_copper_in_python():
+    """1.0.69 (Turrican II KIT-GAP 36): the game's Copper list switches sprite DMA off at the edge of its status bar and
+    zeroes SPRxDATA / SPRxDATB; the renderer ignored the two writes and a sprite across the edge stayed in the bar as a
+    stripe. A write to SPRxDATA arms the sprite with that word (also without DMA), SPRxCTL disarms it."""
+    regs = {0x096: 0x83e0}
+    f = display.render(CASES['sprite data written by the copper'], COP, regs=regs).pixels
+    plain = display.render(ram_with(with_colours(setup(2, con2=0x02, ptrs=[p for p, _ in PLANES[:2]])) + END, PLANES[:2]), COP, regs=regs).pixels
+    own = lambda v: sum(1 for a, b in zip(f[v], plain[v]) if a != b)
+    assert own(0x44) > 0 and own(0x47) > 0                       # the sprite by DMA
+    assert [own(v) for v in range(0x48, 0x50)] == [0] * 8        # zeroed: no stripe
+    assert own(0x50) > 0 and own(0x53) > 0 and own(0x50) == own(0x53)   # armed by the write to SPR1DATA
+    assert [own(v) for v in range(0x54, 0x60)] == [0] * 12       # disarmed by the write to SPR1CTL

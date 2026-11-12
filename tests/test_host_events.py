@@ -755,3 +755,69 @@ def test_input_lines_by_the_ticks_hits_as_the_emulator_takes_them(tmp_path, by_t
     joy = {'': 0, 'R': 3, 'L': 0x300, 'U': 0x100, 'D': 1, 'RU': 0x103}
     want = ['', 'R', 'L', 'L', 'U', 'D'] if by_tick else ['', 'R', 'L', 'U', 'D', 'RU']      # frame 104 takes no line by the tick's rule
     assert [x for f, v, x in seen][:6] == [joy[k] for k in want], seen
+
+
+def _blit_freeze_prog():
+    """A blit of 512 x 48 words with BLTPRI started on line 228 every frame, the CPU waiting on BBUSY behind it; the Copper
+    raises COPER on line 236 - while the CPU stands."""
+    head = ('4df900dff000'              # lea $dff000,a6
+            '2d7c000018000080'          # move.l #$1800,$80(a6)       COP1LC
+            '3d400088'                  # move.w d0,$88(a6)           COPJMP1
+            '3d7c86c00096'              # move.w #$86c0,$96(a6)       DMACON: DMAEN BLTPRI COPEN BLTEN
+            '3d7cc010009a')             # move.w #$c010,$9a(a6)       INTENA: master, COPER
+    w1 = ('302e0006'                    # w1: move.w $6(a6),d0        VHPOSR
+          'e048'                        #     lsr.w #8,d0
+          'b07c00e4'                    #     cmp.w #$e4,d0           line 228
+          '66f4')                       #     bne.s w1
+    blit = ('3d7c09f00040'              # move.w #$09f0,$40(a6)       BLTCON0: A -> D (both cycles of a word: nothing left for the CPU)
+            '3d7c00000042'              # move.w #0,$42(a6)
+            '3d7cffff0044'              # move.w #$ffff,$44(a6)       BLTAFWM
+            '3d7cffff0046'              # move.w #$ffff,$46(a6)       BLTALWM
+            '2d7c000300000050'          # move.l #$30000,$50(a6)      BLTAPT
+            '3d7c00000064'              # move.w #0,$64(a6)           BLTAMOD
+            '2d7c000200000054'          # move.l #$20000,$54(a6)      BLTDPT
+            '3d7c00000066'              # move.w #0,$66(a6)           BLTDMOD
+            '3d7c80300058'              # move.w #$8030,$58(a6)       BLTSIZE: 512 x 48 words
+            '082e00060002'              # w2: btst #6,$2(a6)          BBUSY
+            '66f8'                      #     bne.s w2
+            '52784000')                 # addq.w #1,$4000
+    back = len(w1 + blit) // 2 + 2
+    return {MAIN: head + w1 + blit + '60%02x' % ((-back) & 0xff),
+            L3: '52784002' '33fc001000dff09c' '4e73',                 # addq.w #1,$4002; move.w #$10,$dff09c; rte
+            0x1800: 'ec01fffe' '009c8010' 'fffffffe'}                 # WAIT line 236; INTREQ <- SET COPER; end
+
+
+def test_a_copper_interrupt_raised_while_the_cpu_stands_behind_a_blit_is_served(tmp_path):
+    """1.0.69 (Turrican II KIT-GAP 35): a restart of a level runs three blits of 512 x 48 words and waits for each with
+    btst / bne; the CPU stands behind the blit from line 235 into the next frame, the Copper's INTREQ write of line 236
+    falls into it and no instruction boundary comes before the frame's end. The frame's roll forgot the request: of six
+    interrupts the original served the host served four, and the music was two frames late from then on. Here every
+    frame's request falls into such a blit: all of them must be served."""
+    w = run(tmp_path, _blit_freeze_prog(), 12, [MAIN, L3])
+    blits, irqs = w(0x4000), w(0x4002)
+    assert blits >= 10 and irqs >= blits, (blits, irqs)
+
+
+def test_ports_and_exter_follow_the_cias_interrupt_lines(tmp_path):
+    """1.0.69 (Turrican II KIT-GAP 38): Paula's PORTS and EXTER are the CIAs' interrupt lines. CIA-B's one-shot timer
+    runs out with its mask bit set: EXTER is requested. Cleared in INTREQ while the CIA still asks (its ICR not read) the
+    bit is there again at once - the original's handler wrote $2070 back where the host had $0070; after the ICR is read
+    the request stays until it is cleared, and then it is gone."""
+    prog = {MAIN: '4df900dff000'
+                  '13fc008100bfdd00'      # move.b #$81,$bfdd00       ICR mask: timer A
+                  '13fc001000bfd400'      # move.b #16,$bfd400        TALO
+                  '13fc000000bfd500'      # move.b #0,$bfd500         TAHI
+                  '13fc001900bfde00'      # move.b #$19,$bfde00       CRA: START, ONESHOT, FORCE LOAD
+                  '323c07d0' '51c9fffe'   # move.w #2000,d1; dbf d1,*
+                  '31ee001e4010'          # move.w $1e(a6),$4010      INTREQR: EXTER
+                  '3d7c2000009c'          # move.w #$2000,$9c(a6)     clear EXTER - the CIA still asks
+                  '31ee001e4012'          # move.w $1e(a6),$4012
+                  '4a3900bfdd00'          # tst.b $bfdd00             the ICR read: the CIA lets go
+                  '31ee001e4014'          # move.w $1e(a6),$4014      the request is still there
+                  '3d7c2000009c'          # move.w #$2000,$9c(a6)
+                  '31ee001e4016'          # move.w $1e(a6),$4016      gone
+                  '3d7cc020009a'          # move.w #$c020,$9a(a6)     INTENA: master, VERTB (the frames go on)
+                  + WAIT_VBL,
+            L3: L3_H}
+    w = run(tmp_path, prog, 3, [MAIN, L3])
+    assert [w(a) & 0x2000 for a in (0x4010, 0x4012, 0x4014, 0x4016)] == [0x2000, 0x2000, 0x2000, 0]

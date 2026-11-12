@@ -121,6 +121,7 @@ static void ard_write(uint32_t off, uint16_t v) {
         for (int q = 0; q < 2; q++) {
             ArdSprite *s = q ? &ARD_SPRI[(off - 0x140) >> 3] : &ARD_SPR[(off - 0x140) >> 3]; int kind = off & 6;
             if (kind == 0) s->pos = v; else if (kind == 2) { s->ctl = v; s->armed = 0; s->vstop = ARD_VSTOP(s); }   /* a CTL write sets VSTOP, disarms */
+            else if (kind == 4) { s->da = v; s->armed = 1; } else s->db = v;   /* 1.0.69 (Turrican II KIT-GAP 36): a write to SPRxDATA arms Denise with that word, SPRxDATB sets the other - a Copper that zeroes them behind a DMACON SPREN off leaves no stripe */
         }
     } else if (off == 0x080) ARD_LC[0] = (ARD_LC[0] & 0xffff) | ((uint32_t)(v & 0x1f) << 16);
     else if (off == 0x082) ARD_LC[0] = (ARD_LC[0] & 0x1f0000) | (v & 0xfffe);

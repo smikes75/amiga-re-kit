@@ -361,7 +361,8 @@ void hw_write_hook(uint32_t off, uint32_t v) {
     if (off == 0x09a || off == 0x09c) { h_irq_mark(); H_EVT_T = h_abs(); }
     if (off == 0x09c) {
         if (v & 0x0780) arek_paula_run(&H_PAULA, h_abs());      /* 1.0.43: Paula up to the write first - a request it raises inside this instruction is older than the write that clears it (it survived the acknowledge) */
-        if (v & 0x8000) H_INTREQ |= v & 0x7fff; else H_INTREQ &= ~(v & 0x7fff); }
+        if (v & 0x8000) H_INTREQ |= v & 0x7fff; else H_INTREQ &= ~(v & 0x7fff);
+        h_cia_raise(0); h_cia_raise(1); }                       /* 1.0.69 (Turrican II KIT-GAP 38): PORTS / EXTER follow the CIAs' interrupt lines - a bit cleared while its CIA still asks (ICR not read) is set again at once, as Paula has it */
     if (off == 0x058) H_BLIT_PEND = 1;                                             /* 1.0.5: BLTSIZE by the CPU - INTREQ BLIT when the bus model's blit ends */
     if (off == 0x034) { for (int k = 8; k <= 14; k += 2) if (v & (1u << (k + 1))) H_POTGOR = (uint16_t)((H_POTGOR & ~(1u << k)) | (v & (1u << k))); }   /* POTGO: an output pin reads back (G40) */
     if ((off >= 0x0a0 && off < 0x0e0) || (off == 0x096 && (v & 0x000f)) || (off == 0x09c && (v & 0x0780))) arek_paula_write(&H_PAULA, h_acc_abs() + (H_CIA_SYNC ? (off == 0x096 ? 2 : off == 0x09c ? 1 : 0) : 0), off, (uint16_t)v);   /* 1.0.56: at the write's slot (with the timing model); 1.0.60: the chip takes DMACON two colour clocks later and INTREQ one (vAmiga recordRegisterChange) - a channel switched on at slot 225 starts in the next line */
@@ -476,6 +477,13 @@ static void host_events(void) {
 #endif
     { ArekBus *bb = arek_glue_bus(); bb->ahead = h_bus_ahead; bb->ahead_to = (uint32_t)h_now() + 96; }   /* 1.0.56: and further ahead inside a long instruction */
     if (h_now() >= len) {
+        /* 1.0.69 (Turrican II KIT-GAP 35): the Copper's INTREQ writes of the frame that ends, when no instruction boundary
+         * fell between the write and the frame's end - the CPU stood behind a blit from line 235 into the next frame and the
+         * request of line 236 was forgotten with the roll (4 interrupts served of the original's 6, the music 2 frames
+         * late after every death). They are requested at their own times, so the instruction that ends the wait takes them */
+        { ArekBus *cb = arek_glue_bus();
+          if (!H_COP_DONE && cb->cop_int >= 0) { h_irq_mark(); H_INTREQ |= 0x0010; H_COP_DONE = 1; H_EVT_T = H_PAULA.frame_base + cb->cop_int; h_irq_mark(); }
+          while (H_COP_IDX < cb->cop_irq_n) { h_irq_mark(); H_INTREQ |= cb->cop_irq[H_COP_IDX].bits; H_EVT_T = H_PAULA.frame_base + cb->cop_irq[H_COP_IDX].t; h_irq_mark(); H_COP_IDX++; } }
         if (H_OWN_DUMP) { fwrite(&H_FRAME, sizeof H_FRAME, 1, H_OWN_DUMP); fwrite(OWN, 1, (size_t)H_LINES * HOST_HPOS, H_OWN_DUMP); }
         arek_paula_run(&H_PAULA, H_PAULA.frame_base + len - 1e-9);
         ard_until(ARD_LINES);
