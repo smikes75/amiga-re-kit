@@ -100,6 +100,10 @@ class EA:
                     SZ_W: '(uint16_t)m->a[%d]' % self.reg,
                     SZ_L: 'm->a[%d]' % self.reg}[sz]
         if self.kind == 'imm':
+            if getattr(self, 'live', False):        # 1.0.67 (Flow.live): the program rewrites the operand - its words as RAM holds them now
+                a = self.at
+                return {SZ_B: '(rd16_raw(0x%xu) & 0xffu)' % a, SZ_W: 'rd16_raw(0x%xu)' % a,
+                        SZ_L: '((rd16_raw(0x%xu) << 16) | rd16_raw(0x%xu))' % (a, a + 2)}[sz]
             return '0x%xu' % (self.imm & {SZ_B: 0xff, SZ_W: 0xffff, SZ_L: 0xffffffff}[sz])
         return {SZ_B: 'rd8(%s)', SZ_W: 'rd16(%s)', SZ_L: 'rd32(%s)'}[sz] % self.addr
 
@@ -194,10 +198,13 @@ def decode_ea(mode, reg, sz, r, tmp):
             e.xr, e.xa, e.xl, e.pcbase = xr, xa, xl, (pc + d8) & 0xffffff
             return e
         if reg == 4:                                # #imm
+            at = r.pc
             v = r.w() if sz != SZ_L else r.l()
             if sz == SZ_B:
                 v &= 0xff
-            return EA('imm', imm=v, text='#%d' % v)
+            e = EA('imm', imm=v, text='#%d' % v)
+            e.at = at                               # where its extension word stands (Flow.live reads it at run time)
+            return e
     raise Unsupported('adresni rezim %d/%d' % (mode, reg))
 
 
@@ -524,14 +531,17 @@ class Flow:
               every translated entry and the overlay areas)
     module    (base, key) - this translation is an overlay module: it registers itself
               under the fingerprint of its first ``key`` bytes at ``base``
+    live      addresses of instructions whose IMMEDIATE operand the program rewrites (a trainer writes the number of
+              missiles into ``move.w #n,(100,a4)``): the operand is read from RAM when the instruction runs
     smc       {address: [bytes, ...]} - an instruction the program REWRITES (a trainer that turns a ``subq`` into a
               ``tst``): the other bytes it may hold. The translation holds every variant and takes the one whose
               words are in RAM when the place runs (``smc_alts``)
     """
 
     def __init__(self, stops=(), rets=(), exits=(), externs=None, jtabs=None, indirect=None,
-                 prefix=None, lib=False, inline=None, overlays=(), dynamic=(), module=None, smc=None):
+                 prefix=None, lib=False, inline=None, overlays=(), dynamic=(), module=None, smc=None, live=()):
         self.stops, self.rets, self.exits = set(stops), set(rets), set(exits)
+        self.live = set(live)
         self.smc = {a: [bytes(b) for b in alts] for a, alts in (smc or {}).items()}
         self._smc = {}
         self.externs = dict(externs or {})

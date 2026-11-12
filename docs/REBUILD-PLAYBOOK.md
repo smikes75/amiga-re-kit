@@ -74,6 +74,10 @@ The web page must start from the visitor's disks only: no captured RAM, no state
    into `bra.s`): `arek recomp --smc ADDR=WORDS` for each place (1.0.66) - one translation for every choice of options,
    not one per choice. Measured on SWIV: 9 000 frames of random play, the trace equal byte for byte to the translation
    of the patched image with the options on and to the unpatched one's with them off.
+   A hook whose immediate OPERANDS the trainer writes (the number of missiles, the rate of fire) stays translated
+   code with `--live ADDR` per instruction (1.0.67), not an extern that reads them: with the timing model an extern's
+   TICKs have no rows in the bus table (its accesses stand in other slots beside DMA) and an interrupt inside it has no
+   address to resume at. SWIV with such an extern left the original in two landscapes and stopped in a third.
 5. **The disk routine as an extern** (`--extern ADDR=game_read`, `engine_set_disk` images), the game's unpacker as a C
    port when it is self-modifying, and the **load times of the original** for every read and unpack (measured with
    `arek trace`, by arguments, not by a formula): `host_spend(m, cck, 0)` in the extern keeps the main program in the same

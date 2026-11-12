@@ -3,6 +3,19 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.67 (2026-11-12)
+
+- `arek recomp --live ADDR` (Flow.live): an instruction whose IMMEDIATE operand the program rewrites (a trainer
+  writes the number of missiles into `move.w #n,(100,a4)`) reads the operand from RAM when it runs - byte, word or
+  long, the extension word raw as a prefetch; clocks and bus row are the instruction's own. An instruction without
+  an immediate in an extension word (moveq, addq) is refused
+  - SWIV: the crack's hook at $0008 had become an extern that read the operands itself. An extern's TICKs have no
+    rows in the bus table and no way in for a resume: with 1.0.66 the host stopped in landscape 1 (`unknown routine
+    00001a`, an interrupt inside the hook) and left the original in landscapes 3 and 4 (frames 8375 and 14151; the
+    first register write 4 colour clocks early inside the hook). The hook translated with `--live e 14 1a`:
+    landscapes 3, 4 and 1 with the trainer's options, 9 202 / 14 207 / 14 210 records equal in both memory hashes
+    and every CPU register write, to the runs' ends (frames 9989 and 14989)
+
 ## 1.0.66 (2026-11-12)
 
 - bus model, sprite DMA: the switch as Agnus has it (vAmiga `updateSpriteDMA`) - on in the line that EQUALS VSTART,

@@ -1099,6 +1099,12 @@ class Gen:
     def insn(self, i, start, end, ins=None):
         """The lines of instruction i: its TICK and its body - at a rewritten place (Flow.smc) one block per content,
         chosen by the words in RAM when the place runs; a content nobody named is unknown_call."""
+        if i.addr in self.flow.live:                       # 1.0.67: the immediate operand as RAM holds it when the instruction runs
+            eas = [e for e in (getattr(i, n, None) for n in ('src', 'ea', 'dst')) if getattr(e, 'kind', None) == 'imm' and hasattr(e, 'at')]
+            if not eas:
+                raise Unsupported('--live $%x: %s has no immediate operand in an extension word' % (i.addr, i.text))
+            for e in eas:
+                e.live = True
         own = ([self.tick(i)] if self.timing and self.tick(i) else []) + self.body(i, start, end, ins)
         alts = self.flow.smc_alts(self.data, self.base, i.addr)
         if not alts:
@@ -1703,7 +1709,7 @@ def _hex(x):
 
 
 def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern=(), ret=(),
-                    prefix=None, lib=False, inline=(), overlay=(), dynamic=(), module=None, smc=()):
+                    prefix=None, lib=False, inline=(), overlay=(), dynamic=(), module=None, smc=(), live=()):
     """Build a decoder.Flow from the command-line spellings (all addresses hex):
 
     jtab     'SITE[,SITE..]:TABLE:COUNT:STRIDE:bra|ptr[:AN|an]' - jsr/jmp (d8,An,Dn) into a table;
@@ -1716,6 +1722,7 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
     overlay  'BASE:SIZE[:KEY]' - an area code is loaded into at run time (KEY bytes hashed, 256)
     dynamic  'SITE' - jsr/jmp (An) resolved at run time by address (call_addr)
     module   'BASE[:KEY]' - this translation is an overlay module (with lib and prefix)
+    live     'ADDR' - the instruction at ADDR has an immediate operand the program rewrites: read from RAM at run time
     smc      'ADDR=WORDS[,WORDS..]' - the instruction at ADDR is rewritten by the program: the other contents, each as
              hex words from ADDR (the opcode word will do when the extension words stay)
     """
@@ -1761,7 +1768,7 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
         rew.setdefault(_hex(a), []).extend(bytes.fromhex(x) for x in alts.split(',') if x)
     return Flow(stops=map(_hex, stop), rets=map(_hex, ret), exits=map(_hex, exitat), externs=ext,
                 jtabs=jtabs, indirect=ind, prefix=pf, lib=lib, inline=inl, overlays=ovl,
-                dynamic=map(_hex, dynamic), module=mod, smc=rew)
+                dynamic=map(_hex, dynamic), module=mod, smc=rew, live=map(_hex, live))
 
 
 def _ranges(pcs):

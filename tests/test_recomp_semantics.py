@@ -309,6 +309,37 @@ def test_smc_refusals_and_the_command_line(tmp_path, capsys):
     assert '} else if ((rd16_raw(0x1012u) == 0x5279u)) {' in src and 'unknown_call(0x1012u); return; }' in src
 
 
+def test_an_immediate_the_program_rewrites_is_read_from_ram(tmp_path):
+    """1.0.67 (SWIV: the crack's trainer writes the number of missiles and the rate of fire into the immediate operands
+    of a hook it calls every frame): --live ADDR / Flow.live - the operand of the instruction at ADDR is what RAM
+    holds when it runs, byte, word or long; the clocks and the bus row are the instruction's own. Without the option
+    the image's operand is used."""
+    # 1000 move.w d0,$1014.l ; 1006 move.b d1,$101d.l ; 100c move.l d2,$1024.l      (the program writes the operands)
+    # 1012 move.w #$1111,$4000.l ; 101a move.b #$f4,$4002.l ; 1022 move.l #$11112222,$4004.l ; 102c rts
+    prog = '33c000001014' '13c10000101d' '23c200001024' '33fc111100004000' '13fc00f400004002' '23fc1111222200004004'
+    regs = {'d0': 0xabcd, 'd1': 0x77, 'd2': 0xdeadbeef}
+    flow = Flow(live={0x1012, 0x101a, 0x1022})
+    logs = []
+    d, a, f, mem = run(tmp_path, prog, regs, flow=flow, timing=True, logs=logs)
+    assert mem[0x4000:0x4008].hex() == 'abcd7700deadbeef' and flags_of(f)[1] == 'N'      # the long's sign
+    plain = []
+    *_, mem = run(tmp_path, prog, regs, timing=True, logs=plain)
+    assert mem[0x4000:0x4008].hex() == '1111f40011112222'
+    assert logs[0].split('cycles ')[1].split()[0] == plain[0].split('cycles ')[1].split()[0]
+    src, _, _ = recomp.generate(bytes.fromhex(prog + '4e75'), BASE, auto=[BASE], flow=flow, timing=True, bus_table=True)
+    ref, _, _ = recomp.generate(bytes.fromhex(prog + '4e75'), BASE, auto=[BASE], timing=True, bus_table=True)
+    assert 'rd16_raw(0x1014u)' in src and '(rd16_raw(0x101cu) & 0xffu)' in src and '((rd16_raw(0x1024u) << 16) | rd16_raw(0x1026u))' in src
+    tab = lambda t: t[t.index('static const uint8_t BUS_PAT'):t.index('static inline const uint8_t *bus_tab_row')]
+    assert tab(src) == tab(ref)                                                  # the same bus table
+    from arek.m68k.decoder import Unsupported
+    with pytest.raises(Unsupported, match='no immediate operand in an extension word'):
+        recomp.generate(bytes.fromhex(prog + '4e75'), BASE, auto=[BASE], flow=Flow(live={0x1000}))
+    f_ = tmp_path / 'p.bin'
+    f_.write_bytes(bytes.fromhex(prog + '4e75'))
+    assert cli.main(['recomp', str(f_), '--base', '0x1000', '--auto', '0x1000', '--live', '1012', '101a', '-o', str(tmp_path / 'p.c')]) == 0
+    assert 'rd16_raw(0x1014u)' in (tmp_path / 'p.c').read_text() and 'rd16_raw(0x1024u)' not in (tmp_path / 'p.c').read_text()
+
+
 def test_external_routine_and_exit_point(tmp_path):
     entry = '4eb900001020' '33c100004000' '4eb900001030' '33fc999900004002' '4e75'
     ext = '\nvoid ext_load(M68 *m) { m->d[1] = 0x5555; m->a[7] += 4; }\n'   # behaves like the routine incl. rts
