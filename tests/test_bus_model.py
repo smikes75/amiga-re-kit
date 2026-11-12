@@ -430,7 +430,7 @@ def test_selftest_audio_disk_and_conversions():
             {'frame': 330, 'v': 100, 'h': 30, 'reg': 0x0a6, 'value': 200, 'agnus': False},
             {'frame': 330, 'v': 100, 'h': 31, 'reg': 0x09a, 'value': 0xc020, 'agnus': False}]   # INTENA: not Paula's
     w = bus.paula_writes(recs, 330, 313)
-    assert w == [(100 * 227 + 30, 0x0a6, 200), (313 * 227 + 100 * 227 + 40, 0x096, 0x8001)]
+    assert w == [(100 * 227 + 30, 0x0a6, 200), (313 * 227 + 100 * 227 + 40 + 2, 0x096, 0x8001)]   # 1.0.60: the chip takes DMACON two colour clocks after the write (INTREQ one, the AUDx registers at once)
     assert bus.paula_samples([(330, 5, 6, -64, 2)], 330, 313) == [(5 * 227 + 6, 2, -64)]
     # the program's interrupt table: an entry per detection (bits, VPOSR, VHPOSR, frame counter); the counter maps to the
     # records' frames (d7 counts at line 100: an entry below line 100 belongs to the next frame)

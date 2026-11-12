@@ -126,7 +126,10 @@ def paula_writes(records, frame0, lines, hpos=227):
     out = []
     for r in records:
         if r['reg'] in (0x096, 0x09c) or 0x0a0 <= r['reg'] < 0x0e0:
-            out.append(((r['frame'] - frame0) * lines * hpos + r['v'] * hpos + r['h'], r['reg'], r['value']))
+            # 1.0.60: the chip takes DMACON two colour clocks after the write's slot and INTREQ one (vAmiga
+            # recordRegisterChange); the AUDx registers at once
+            late = 2 if r['reg'] == 0x096 else 1 if r['reg'] == 0x09c else 0
+            out.append(((r['frame'] - frame0) * lines * hpos + r['v'] * hpos + r['h'] + late, r['reg'], r['value']))
     out.sort(key=lambda x: x[0])
     return out
 

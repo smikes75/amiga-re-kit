@@ -109,6 +109,7 @@ def stop_script(tmp, tag, ram_len=524288, ram_regions=(), screenshot=False):
     lines += ['try r %s' % chip for chip in CHIPS]
     lines += ['try ? ciaa', 'try ? ciab']                # 1.0.50: asleep or not, and since when (cia_regs)
     lines += ['try ? df0', 'try ? paula dc', 'try ? agnus events']   # 1.0.53: the drive's head and the disk controller (parse_drive)
+    lines += ['try ? paula channels']                    # 1.0.60: the four audio state machines (parse_audio; a build with vamiga-audstate-899da5d.patch)
     lines += ['commander', 'mem save bin %s 0 %d' % (dump, ram_len)]
     regions = []
     for base, length in ram_regions:
@@ -130,6 +131,9 @@ def parse_stop(out, dump, regions):
     for name, sl in parse_cia_sleep(out).items():
         st['chips'].setdefault(name, {}).update(sl)
     st['drive'] = parse_drive(out)
+    audio = parse_audio(out)
+    if audio:
+        st['audio'] = audio
     st['ram'] = Path(dump).read_bytes()
     st['regions'] = regions
     return st
@@ -235,6 +239,44 @@ def parse_drive(out):
     if sect:
         res['text'] = {k: '\n'.join(v) for k, v in sect.items()}
     return res
+
+
+def parse_audio(out):
+    """``? paula channels`` of the stop script (a build with vamiga-audstate-899da5d.patch): Paula's four audio state
+    machines as a list of dicts - state, AUDxIP, AUDxON, audlenLatch, audlen, audperLatch, audper, audvolLatch, audvol,
+    auddat, buffer, intreq2, enablePenhi, enablePenlo, audxDR, audxDSR (the DMA request flags), perfin (the master
+    cycle of the next period event, None = none) and clock. Empty with a build that does not print them: a rebuild
+    started from such a capture has silent channels until the game starts them again."""
+    chans, cur, on = [], None, False
+    for line in out.splitlines():
+        s = line.strip()
+        if re.fullmatch(r'(?:try )?\? paula channels', s):
+            on = True
+            continue
+        if not on:
+            continue
+        if re.match(r'(try |r |\? |commander|mem |screenshot|shutdown)', s):
+            break
+        m = re.match(r'([A-Za-z0-9 ]+?)\s*:\s*(\S+)$', s)
+        if not m:
+            continue
+        key, val = m.group(1).strip(), m.group(2)
+        if key == 'State machine':
+            cur = {'channel': int(val)}
+            chans.append(cur)
+            continue
+        if cur is None:
+            continue
+        if val.lower() in ('yes', 'no', 'true', 'false'):
+            cur[key] = val.lower() in ('yes', 'true')
+        elif val == 'never':
+            cur[key] = None
+        else:
+            try:
+                cur[key] = int(val, 0)
+            except ValueError:
+                cur[key] = val
+    return chans if len(chans) == 4 and all('audlen' in c for c in chans) else []
 
 
 def parse_cia_sleep(out):

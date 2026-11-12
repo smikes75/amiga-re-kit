@@ -320,7 +320,17 @@ A game that reads the disk with its own loader (DSKLEN, DSKSYNC, its own MFM dec
 
 Use it with `-DHOST_IPL_MODEL=1` (the E clock of the CIA accesses and the interrupt timing belong to the same measurement).
 
-## Instruction times equal to the original's: `-DHOST_IPL_MODEL=1` (1.0.50 - 1.0.55)
+## A capture in the middle of a game: what state.txt carries
+
+`arek host state CAPTURE OUT` writes, after the registers and the frame number: the CIAs' timers (1.0.49; a running
+timer goes on from the emulator's counter), `@drive` for a host with the floppy model (1.0.53), and `@audio` (1.0.60) -
+one line per Paula channel: on, state, AUDxIP, the pending request and the next period event in absolute colour
+clocks, the pointers, the length / period / volume latches and counters, the data word and the output word. The audio
+lines need a capture made with an emulator build that has `vamiga-audstate-899da5d.patch` (docs/HEADLESS.md); without
+them a channel that is in the middle of a sample at the capture is silent in the host and takes no DMA slots until the
+game starts it again - the bus is then freer than the original's and instruction times drift within the first frame.
+
+## Instruction times equal to the original's: `-DHOST_IPL_MODEL=1` (1.0.50 - 1.0.60)
 
 Without the switch a host is exact in frames and close in lines: an interrupt is taken at the first instruction end
 after its event. A game whose behaviour depends on WHERE in a line or in a loop an interrupt lands (a loader's poll
@@ -334,6 +344,8 @@ measured against vAmiga instruction by instruction (`arek trace run --break PC..
   write lands after the wait; a timer's interrupt is requested in the E cycle its counter reaches 0; a start that also
   loads the timer (the high byte in one-shot mode, FORCE LOAD) counts one E cycle later;
 - VHPOSR / VPOSR: the position of the access's slot plus five colour clocks, the line number changing at clock 2;
+- Paula takes a CPU write to DMACON two colour clocks after its slot and one to INTREQ after one (a channel switched
+  on in the last two slots of a line starts in the next line);
 - a CPU write to DMACON, DIWSTRT / DIWSTOP, DDFSTRT / DDFSTOP, BPLCON0 or COPJMP re-plans the rest of the frame's
   slots; an idle Copper takes a new COP1LC;
 - every instruction's bus cycles in the processor's own order (the bus patterns of `arek recomp --bus-table`,

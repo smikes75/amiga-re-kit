@@ -481,3 +481,73 @@ def test_a_captured_running_timer_underflows_in_the_emulators_e_cycle(tmp_path):
         entered = 100 * 313 * 227 + int(v) * 227 + int(h)                   # the handler's first instruction: 44 clocks after the loop's pass
         pins = ((100 * 313 * 227 + t0) // 5 + 0x30) * 5 + 3
         assert 1 <= entered - 22 - pins <= 5, (h0, entered - 22 - pins)
+
+
+def _own_slots(path, owner, lines=313):
+    """(line, slot) of the slots `owner` has in a host's --own dump, frame by frame (int64 frame index + the map)."""
+    data, out, n = open(path, 'rb').read(), [], lines * 227
+    for k in range(0, len(data) - 8 - n + 1, 8 + n):
+        m = data[k + 8:k + 8 + n]
+        out.append([(i // 227, i % 227) for i in range(n) if m[i] == owner])
+    return out
+
+
+def _audio_host(tmp_path, code, t0, audio, dmacon):
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    HOST, BUS = os.path.dirname(host.__file__), os.path.dirname(bus.__file__)
+    d = tmp_path / ('h%d' % t0)
+    d.mkdir()
+    img = bytearray(0x2000)
+    prog = bytes.fromhex(code)
+    img[0x1000:0x1000 + len(prog)] = prog
+    img[0x1100:0x1102] = bytes.fromhex('4e73')
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[0x1000, 0x1100], timing=True, bus_table=True)
+    (d / 'game.c').write_text(src)
+    exe = d / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(d), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1100u', '-DHOST_IPL_MODEL=1',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'),
+                    os.path.join(BUS, 'arek_bus_vamiga.c'), '-lm', '-o', str(exe)], check=True)
+    st = d / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', dmacon)
+    (st / 'creg.bin').write_bytes(creg)
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 %d 0 1000\nfe 0 0 0 0 5500\n100\n' % t0 + audio)
+    r = subprocess.run([str(exe), str(st), str(d / 'o.vtr'), '1', '--own', str(d / 'own.bin')], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    return _own_slots(str(d / 'own.bin'), 5)[0]                      # channel 1's slots (owner 4 + channel) in the first frame
+
+
+def test_a_captured_playing_channel_goes_on_fetching(tmp_path):
+    """1.0.60 (SWIV, a capture in the game): state.txt's @audio lines (arek host state, from a capture made with a build
+    that has vamiga-audstate-899da5d.patch) put Paula's channels where the original's stood. Channel 1 in the middle
+    of a sample (state 011, period 400, the next period event 100 colour clocks after the start): the low byte ends,
+    the next word is requested and fetched in the channel's slot ($0F) of the next line, then every 800 colour clocks.
+    Without the lines the host's Paula is idle and the original's 34 audio slots a frame were none."""
+    t0 = 60 * 227 + 30
+    base = 100 * 313 * 227
+    audio = ''.join('@audio %d 0 0 1 -1 -1 0 0 3 2 7ef8 8 0 0 0 1 0 0\n' % c for c in (0, 2, 3))
+    audio += '@audio 1 1 3 1 -1 %d 0 2000 1 3e 190 40 40 6fd 80a 1 0 0\n' % (base + t0 + 100)
+    slots = _audio_host(tmp_path, '60fe', t0, audio, 0x8202)
+    first = (t0 + 100) // 227 + 1                                      # the line after the period event's
+    assert slots and slots[0] == (first, 15), slots[:3]
+    lines = [v for v, s in slots]
+    assert all(s == 15 for v, s in slots) and 3 <= lines[1] - lines[0] <= 4 and len(slots) > 60, slots[:5]   # a word every 800 colour clocks (3.5 lines)
+    assert _audio_host(tmp_path, '60fe', t0 + 1, '', 0x8202) == []      # no lines: no audio DMA
+
+
+@pytest.mark.parametrize('h0, line', [(216, 61), (218, 62)])
+def test_paula_takes_dmacon_two_colour_clocks_after_the_write(tmp_path, h0, line):
+    """1.0.60 (SWIV, frame 15193): the chips take DMACON two colour clocks after the CPU's write (vAmiga
+    recordRegisterChange). move.w #$8202,$dff096 started at h0 of line 60 writes in slot h0 + 7: from slot 223 the channel is
+    on in line 60 and its first word comes in line 61; from slot 225 it is on in line 61 and the word comes in line 62 - the host started the channel a line early and the blit beside it ended two slots late."""
+    audio = ''.join('@audio %d 0 0 1 -1 -1 0 0 3 2 7ef8 8 0 0 0 1 0 0\n' % c for c in (0, 2, 3))
+    audio += '@audio 1 0 0 1 -1 -1 2000 2000 10 10 190 40 40 0 0 1 0 0\n'
+    slots = _audio_host(tmp_path, '33fc820200dff096' '60fe', 60 * 227 + h0, audio, 0x8200)
+    assert slots and slots[0] == (line, 15), slots[:3]

@@ -3,6 +3,23 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.60 (2026-11-12)
+
+- a capture in the middle of a game carries Paula's audio channels: `? paula channels` of an emulator build with the
+  new `vamiga-audstate-899da5d.patch` (state, counters, latches, data, the pending request, the next period event),
+  `arek bpstate` / `arek trace run --capture-at` put it into cpu.json ("audio"), `arek host state` writes `@audio`
+  lines and both hosts start their Paula from them (`host_audio_state`). Without the patch nothing changes, and
+  `arek host state` warns when a channel is playing at the capture. SWIV, a capture in the desert at frame 15000:
+  channel 1 was in the middle of a sample - 34 audio slots a frame in the original, none in the host, the first
+  instruction 2 colour clocks early 33 lines after the capture
+- with the timing model Paula takes a CPU write to DMACON two colour clocks after the write's slot and one to INTREQ
+  one after (vAmiga recordRegisterChange; the AUDx registers at once): a channel switched on in slot 225 of a line
+  started a line early and the blit beside it ended two slots late (SWIV, frame 15193). The Paula check
+  (`arek selftest audio`) feeds the original's writes the same way - its numbers are unchanged
+- measured on SWIV against vAmiga from that capture (made in the scratchpad with the new build; registers and RAM
+  equal to the old build's capture): 93 978 instruction times in a row at 20 addresses, frames 15000-15335 (before:
+  68). The next difference is not the kit's: the game's trainer patches code the translation was made from
+
 ## 1.0.59 (2026-11-12)
 
 - display (arek.display and arek_display.h): with BPLCON2's PF2P above 4 - not a priority - OCS Denise ignores planes

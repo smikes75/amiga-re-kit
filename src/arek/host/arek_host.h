@@ -266,7 +266,7 @@ void hw_write_hook(uint32_t off, uint32_t v) {
         if (v & 0x8000) H_INTREQ |= v & 0x7fff; else H_INTREQ &= ~(v & 0x7fff); }
     if (off == 0x058) H_BLIT_PEND = 1;                                             /* 1.0.5: BLTSIZE by the CPU - INTREQ BLIT when the bus model's blit ends */
     if (off == 0x034) { for (int k = 8; k <= 14; k += 2) if (v & (1u << (k + 1))) H_POTGOR = (uint16_t)((H_POTGOR & ~(1u << k)) | (v & (1u << k))); }   /* POTGO: an output pin reads back (G40) */
-    if ((off >= 0x0a0 && off < 0x0e0) || (off == 0x096 && (v & 0x000f)) || (off == 0x09c && (v & 0x0780))) arek_paula_write(&H_PAULA, h_acc_abs(), off, (uint16_t)v);   /* 1.0.56: at the write's slot (with the timing model) */
+    if ((off >= 0x0a0 && off < 0x0e0) || (off == 0x096 && (v & 0x000f)) || (off == 0x09c && (v & 0x0780))) arek_paula_write(&H_PAULA, h_acc_abs() + (H_CIA_SYNC ? (off == 0x096 ? 2 : off == 0x09c ? 1 : 0) : 0), off, (uint16_t)v);   /* 1.0.56: at the write's slot (with the timing model); 1.0.60: the chip takes DMACON two colour clocks later and INTREQ one (vAmiga recordRegisterChange) - a channel switched on at slot 225 starts in the next line */
 }
 /* the E clock (10 CPU clocks = 5 CCK): a CIA access waits for its phase.
  * 1.0.51 (SWIV KIT-GAPS 7), with -DHOST_IPL_MODEL=1 (or HOST_CIA_SYNC=1 in the environment): vAmiga's rule
@@ -515,6 +515,27 @@ static void host_drive_state(const char *line) {
 #else
     (void)line;
 #endif
+}
+/* 1.0.60: state.txt's "@audio CH ON ST IP REQ PERFIN LC PTR LEN AUDLEN PER VOL VOLLATCH DAT OUT ENHI ENLO INTREQ2" lines
+ * (arek host state, from a capture made with a build that has vamiga-audstate-899da5d.patch): Paula's four channels where
+ * the original's stood - a channel in the middle of a sample goes on fetching in its slots. REQ / PERFIN: absolute colour
+ * clocks, -1 = none. After host_init. Without the lines the channels are idle until the game starts them (SWIV, a
+ * capture in the desert: 34 audio slots a frame in the original, none in the host, the first difference 33 lines on). */
+static void host_audio_state(const char *text) {
+    int any = 0;
+    for (const char *p = text; p && (p = strstr(p, "@audio")) != 0; p += 6) {
+        int ch, on, st, ip, enhi, enlo, i2; double req, perfin; unsigned lc, ptr, len, audlen, per, vol, voll, dat, out;
+        if (sscanf(p, "@audio %d %d %d %d %lf %lf %x %x %x %x %x %x %x %x %x %d %d %d", &ch, &on, &st, &ip, &req, &perfin, &lc, &ptr, &len, &audlen,
+                   &per, &vol, &voll, &dat, &out, &enhi, &enlo, &i2) != 18 || ch < 0 || ch > 3) continue;
+        ArekPaulaChan *c = &H_PAULA.ch[ch];
+        c->on = on; c->st = st; c->ip = ip; c->req = req < 0 ? AREK_PAULA_NONE : req; c->perfin = perfin < 0 ? AREK_PAULA_NONE : perfin;
+        c->lc = lc; c->ptr = ptr; c->len = (uint16_t)len; c->audlen = (uint16_t)audlen; c->per = (uint16_t)per;
+        c->vol = (uint16_t)vol; c->vol_latch = (uint16_t)voll; c->dat = (uint16_t)dat; c->out = (uint16_t)out;
+        c->en_hi = enhi; c->en_lo = enlo; c->intreq2 = i2; c->bcount = 0;
+        c->sample = (int8_t)(st == AREK_PAULA_011 ? (out & 0xff) : (out >> 8));
+        any = 1;
+    }
+    if (any) for (int ch = 0; ch < 4; ch++) arek_paula_predict(&H_PAULA, ch, h_abs());
 }
 static void host_irq(M68 *m, uint32_t pc) {
     h_irq_mark();

@@ -184,14 +184,16 @@ int main(int argc, char **argv) {
     { long fr0 = 0; if (fscanf(f, "%ld", &fr0) == 1) H_FRAME0 = fr0; }
     unsigned cia[16]; int ncia = 0;
     while (ncia < 16 && fscanf(f, "%x", &cia[ncia]) == 1) ncia++;
-    char drv[128] = ""; { char ln[128]; while (fgets(ln, sizeof ln, f)) if (strstr(ln, "@drive")) strcpy(drv, strstr(ln, "@drive")); }
+    static char rest[4096]; { size_t n = fread(rest, 1, sizeof rest - 1, f); rest[n] = 0; }   /* the @ lines: @drive, @audio (1.0.60) */
+    const char *drv = strstr(rest, "@drive");
     fclose(f);
     sr_set(&m, sr, 1); H_INTREQ = (uint16_t)intreq;
     H_LED_OFF = (pra >> 1) & 1;
     OUTF = fopen(argv[2], "wb"); if (!OUTF) { perror(argv[2]); return 1; }
     host_init(t0);
     if (ncia == 16) host_cia_state(cia);
-    if (drv[0]) host_drive_state(drv);
+    if (drv) host_drive_state(drv);
+    host_audio_state(rest);
     host_display_init();
     h_pc_cb = on_pc; h_frame_cb = on_frame;
     if (NINP && INP_FIRST < 0 && (long)(t0 / HOST_HPOS) >= 100)

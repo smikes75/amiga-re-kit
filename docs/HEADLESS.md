@@ -57,6 +57,16 @@ click lands in another frame), and the frame number is what a host's disk and E 
 patches is `VAHeadless-899da5d-kit-stop` (sha256 f99f5103fdf72224...); `arek selftest bus|display|display --c|audio|inputs|mouse`
 give on it what they give on `-kit-frames`.
 
+**1.0.60: `vamiga-audstate-899da5d.patch`** (apply last, the tenth): the debugger shell command `? paula channels`
+prints Paula's four audio state machines - state, AUDxON, AUDxIP, the length and period counters and latches, the
+volume, the data word and the output buffer, the pending DMA request and the master cycle of the next period event.
+The stop script of `arek bpstate` and of `arek trace run --capture-at` asks for it (`try`: a build without the patch
+prints nothing), cpu.json gets "audio", and `arek host state` writes `@audio` lines the host's Paula starts from. A
+capture in the middle of a game without them starts the host with silent channels and without their DMA slots -
+`arek host state` says so when a channel is playing at the capture. The patch adds a command and a dump, nothing in
+the emulation: the build with all ten patches is `VAHeadless-899da5d-kit-audio` (sha256 503a660424dfbc28...), and the
+six self-tests give the same numbers as with the nine.
+
 **Which build do I have?** Both commits print `vAmiga Headless v5.0b2`; only
 the build date in the banner differs. Measure it instead: break right after
 the game's own loader returns (`arek bpstate --address <return>`) and compare

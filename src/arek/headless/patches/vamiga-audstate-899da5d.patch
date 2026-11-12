@@ -1,0 +1,68 @@
+diff --git a/Core/Components/Agnus/Agnus.h b/Core/Components/Agnus/Agnus.h
+index 13d1452..43d3015 100644
+--- a/Core/Components/Agnus/Agnus.h
++++ b/Core/Components/Agnus/Agnus.h
+@@ -590,6 +590,9 @@ public:
+ 
+     // Transmits a DMA request from Agnus to Paula
+     template <int channel> void setAudxDR() { audxDR[channel] = true; }
++    // kit (vamiga-audstate): the audio DMA request flags, for the state dump
++    bool vahlAudxDR(isize channel) const { return audxDR[channel]; }
++    bool vahlAudxDSR(isize channel) const { return audxDSR[channel]; }
+     template <int channel> void setAudxDSR() { audxDSR[channel] = true; }
+ 
+     // Getter and setter for the BLS signal (Blitter slow down)
+diff --git a/Core/Components/Paula/Audio/StateMachine.cpp b/Core/Components/Paula/Audio/StateMachine.cpp
+index d4165b6..01d5379 100644
+--- a/Core/Components/Paula/Audio/StateMachine.cpp
++++ b/Core/Components/Paula/Audio/StateMachine.cpp
+@@ -32,6 +32,24 @@ StateMachine<nr>::_dump(Category category, std::ostream &os) const
+         os << tab("State") << dec(state) << std::endl;
+         os << tab("AUDxIP") << bol(AUDxIP()) << std::endl;
+         os << tab("AUDxON") << bol(AUDxON()) << std::endl;
++
++        // kit (vamiga-audstate): everything a rebuild's Paula needs to go on from a capture
++        const EventSlot slot = nr == 0 ? SLOT_CH0 : nr == 1 ? SLOT_CH1 : nr == 2 ? SLOT_CH2 : SLOT_CH3;
++        os << tab("audlenLatch") << dec(audlenLatch) << std::endl;
++        os << tab("audlen") << dec(audlen) << std::endl;
++        os << tab("audperLatch") << dec(audperLatch) << std::endl;
++        os << tab("audper") << dec(audper) << std::endl;
++        os << tab("audvolLatch") << dec(audvolLatch) << std::endl;
++        os << tab("audvol") << dec(audvol) << std::endl;
++        os << tab("auddat") << dec(auddat) << std::endl;
++        os << tab("buffer") << dec(buffer) << std::endl;
++        os << tab("intreq2") << bol(intreq2) << std::endl;
++        os << tab("enablePenhi") << bol(enablePenhi) << std::endl;
++        os << tab("enablePenlo") << bol(enablePenlo) << std::endl;
++        os << tab("audxDR") << bol(agnus.vahlAudxDR(nr)) << std::endl;
++        os << tab("audxDSR") << bol(agnus.vahlAudxDSR(nr)) << std::endl;
++        os << tab("perfin") << (agnus.trigger[slot] == NEVER ? std::string("never") : std::to_string(agnus.trigger[slot])) << std::endl;
++        os << tab("clock") << std::to_string(agnus.clock) << std::endl;
+     }
+ }
+ 
+diff --git a/Core/Misc/RetroShell/DebuggerConsole.cpp b/Core/Misc/RetroShell/DebuggerConsole.cpp
+index 69e21fe..8c342b9 100644
+--- a/Core/Misc/RetroShell/DebuggerConsole.cpp
++++ b/Core/Misc/RetroShell/DebuggerConsole.cpp
+@@ -1070,6 +1070,20 @@ Console::initDebuggerCommands(RSCommand &root)
+         }
+     });
+     
++    root.add({
++
++        // kit (vamiga-audstate): the four audio state machines
++        .tokens = { "?", "paula", "channels" },
++        .chelp  = { "Inspect the audio state machines" },
++        .func   = [this] (std::ostream &os, const Arguments &args, const std::vector<isize> &values) {
++
++            dump(os, paula.channel0, Category::State );
++            dump(os, paula.channel1, Category::State );
++            dump(os, paula.channel2, Category::State );
++            dump(os, paula.channel3, Category::State );
++        }
++    });
++
+     root.add({
+         
+         .tokens = { "?", "paula", "audio", "filter" },

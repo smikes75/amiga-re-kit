@@ -15,6 +15,7 @@ two against each other and ``arek selftest display --c`` holds the C one against
 """
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -148,7 +149,49 @@ def state(capture, out, trace=None):
         dr = meta.get('drive') or {}
         if 'cylinder' in dr and 'offset' in dr:          # 1.0.53: the drive for a host with HOST_FLOPPY - cylinder, byte under the head, colour clocks to the next byte, motor, PRB
             f.write('@drive %d %d %d %d %x\n' % (dr['cylinder'], dr['offset'] // 8, dr.get('dsk_due', 55), 1 if dr.get('motor') else 0, dr.get('prb', 0xff)))
+        for line in audio_lines(meta):                   # 1.0.60: Paula's four channels where the original's stood
+            f.write(line + '\n')
+    playing = audio_playing(meta)
+    if playing and not meta.get('audio'):
+        import sys
+        print('arek host state: channel %s is playing at the capture and the capture has no audio state - the host starts '
+              'with silent channels and without their DMA slots (capture with a build that has vamiga-audstate-899da5d.patch)'
+              % ', '.join(str(c) for c in playing), file=sys.stderr)
     return {'sr': sr, 'frame': meta['beam']['frame'], 'time': v * 227 + h, 'pc': meta['pc'], 'dir': os.path.abspath(out)}
+
+
+def audio_playing(meta):
+    """The channels with a period event pending at the capture (``? agnus events``: CH0-CH3)."""
+    text = ((meta.get('drive') or {}).get('text') or {}).get('agnus events', '')
+    return [int(m.group(1)) for m in re.finditer(r'^CH([0-3])\s+CHX_', text, re.M)]
+
+
+def audio_lines(meta):
+    """state.txt's ``@audio`` lines from a capture's ``audio`` (bpstate.parse_audio; a build with
+    vamiga-audstate-899da5d.patch): per channel ``@audio CH ON ST IP REQ PERFIN LC PTR LEN AUDLEN PER VOL VOLLATCH DAT OUT
+    ENHI ENLO INTREQ2`` - REQ and PERFIN in absolute colour clocks (-1 = none; frame x 71 051 + line x 227 + slot), the
+    numbers from LC on in hex. REQ is the model's request time: the slot that serves a pending request, one line back
+    (the emulator serves it in the channel's next slot $0D + 2 x CH). None without the audio state in the capture."""
+    audio = meta.get('audio') or []
+    if len(audio) != 4:
+        return []
+    ag = (meta.get('chips') or {}).get('agnus', {})
+    frame, (v, h) = meta['beam']['frame'], meta['beam']['position']
+    out = []
+    for a in sorted(audio, key=lambda x: x['channel']):
+        ch = a['channel']
+        req = -1
+        if a.get('audxDR'):
+            slot = 0x0d + 2 * ch
+            req = frame * 71051 + (v if h < slot else v + 1) * 227 + slot - 227
+        perfin = -1 if a.get('perfin') is None else a['perfin'] // 8
+        num = lambda key: ag.get(key, 0) if isinstance(ag.get(key, 0), int) else 0
+        out.append('@audio %d %d %d %d %d %d %x %x %x %x %x %x %x %x %x %d %d %d' % (
+            ch, 1 if a.get('AUDxON') else 0, a.get('State', 0), 1 if a.get('AUDxIP') else 0, req, perfin,
+            num('AUD%dLC' % ch), num('AUD%dPT' % ch), a.get('audlenLatch', 0), a.get('audlen', 0), a.get('audperLatch', 0),
+            a.get('audvol', 0), a.get('audvolLatch', 0), a.get('auddat', 0), a.get('buffer', 0),
+            1 if a.get('enablePenhi') else 0, 1 if a.get('enablePenlo') else 0, 1 if a.get('intreq2') else 0))
+    return out
 
 
 def pack(state_dir, out):
