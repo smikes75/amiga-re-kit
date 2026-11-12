@@ -268,6 +268,9 @@ test builds both (`tests/test_host_engine.py`, emcc and node when installed).
   (`engine_key`) wait in a ring of 32 and reach the game one per frame.
 - 1.0.40: VPOSR / VHPOSR read past the frame's end inside an instruction (the frame rolls at the instruction's
   boundary) give line 0 on of the next field, not line 313.
+- 1.0.64, with the timing model: Paula's events run at instruction boundaries, and before every CPU access whose slot
+  lies behind a pending audio fetch (`AREK_GLUE_ACCESS_CB` of `arek_bus_glue.h`): a word is read before a store that
+  comes in a later slot of the same instruction (a wave table rewritten while it plays). Not behind the frame's end.
 - 1.0.63, with the timing model: a display or DMA register written past the frame's end inside an instruction is
   the next frame's write - the bus model starts that frame from the old value and takes the write at its clock
   (`docs/BUS.md`), the picture gets it after the new frame's Copper has started and the field's length is decided
@@ -339,7 +342,9 @@ taken one.
 `arek host state CAPTURE OUT` writes, after the registers and the frame number: the CIAs' timers (1.0.49; a running
 timer goes on from the emulator's counter), `@drive` for a host with the floppy model (1.0.53), and `@audio` (1.0.60) -
 one line per Paula channel: on, state, AUDxIP, the pending request and the next period event in absolute colour
-clocks, the pointers, the length / period / volume latches and counters, the data word and the output word. The audio
+clocks, the pointers, the length / period / volume latches and counters, the data word and the output word, and
+(1.0.64) a second request - one raised in the capture's line while the first still waits for its slot; a request
+that is only in Paula yet (`audDR`, raised in the capture's line) is written as the pending request. The audio
 lines need a capture made with an emulator build that has `vamiga-audstate-899da5d.patch` (docs/HEADLESS.md); without
 them a channel that is in the middle of a sample at the capture is silent in the host and takes no DMA slots until the
 game starts it again - the bus is then freer than the original's and instruction times drift within the first frame.

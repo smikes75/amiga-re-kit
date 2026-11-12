@@ -244,7 +244,8 @@ def parse_drive(out):
 def parse_audio(out):
     """``? paula channels`` of the stop script (a build with vamiga-audstate-899da5d.patch): Paula's four audio state
     machines as a list of dicts - state, AUDxIP, AUDxON, audlenLatch, audlen, audperLatch, audper, audvolLatch, audvol,
-    auddat, buffer, intreq2, enablePenhi, enablePenlo, audxDR, audxDSR (the DMA request flags), perfin (the master
+    auddat, buffer, intreq2, enablePenhi, enablePenlo, audxDR, audxDSR (Agnus's DMA request flags), audDR (1.0.64: Paula's
+    own - a request raised in the capture's line, handed to Agnus at the line's end), perfin (the master
     cycle of the next period event, None = none) and clock. Empty with a build that does not print them: a rebuild
     started from such a capture has silent channels until the game starts them again."""
     chans, cur, on = [], None, False

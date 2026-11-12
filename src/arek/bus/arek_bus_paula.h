@@ -5,7 +5,10 @@
  * no vAmiga code), checked by `arek selftest audio` against VAHL_BUSLOG / VAHL_AUDLOG and the self-test program's
  * record of the interrupt requests (docs/BUS.md "Audio DMA"):
  *   DMA on in state 000: the length counter loads AUDxLEN, a request (001). A request raised in line v is served in the
- *   channel's slot of line v + 1, even if DMA was switched off meanwhile. The first word (001 -> 101) is discarded: the
+ *   channel's slot of line v + 1, even if DMA was switched off meanwhile. The request waits in two stages (1.0.64):
+ *   Paula's until the line ends, then Agnus's until the slot - so a request raised in line v + 1 before that slot is a
+ *   second one, served in line v + 2 (a period below 114: more than one word a line is asked for, every line has a
+ *   slot); a request in the same line as a waiting one is the same request. The first word (001 -> 101) is discarded: the
  *   pointer goes back to AUDxLC, the counter counts it (unless it is 1), the interrupt request is raised and the next
  *   word requested. The second word (101 -> 010) starts the output: byte 0 = its high byte, the volume latched, a
  *   byte every AUDxPER CCK (010 -> 011 the low byte, 011 -> 010 the high byte of the next word, which also requests
@@ -43,6 +46,7 @@ enum { AREK_PAULA_000 = 0, AREK_PAULA_001 = 1, AREK_PAULA_101 = 5, AREK_PAULA_01
 typedef struct {
     int on, st, ip;                /* AUDxON (DMACON), the state, AUDxIP (the INTREQ bit as the model sees it) */
     double req;                    /* time of the pending DMA request, AREK_PAULA_NONE = none */
+    double req2;                   /* 1.0.64: a request raised in a later line while req still waits for its slot */
     double perfin;                 /* time of the next period event (the next output byte), AREK_PAULA_NONE = none */
     long bcount;                   /* bytes output since the channel started (statistics) */
     uint32_t lc, ptr;
@@ -81,7 +85,14 @@ static inline void arek_paula_mark_at(ArekPaula *p, int ch, double req) {   /* t
     double rel = arek_paula_slot(p, ch, req) - p->frame_base;
     if (rel >= 0 && rel < (double)arek_paula_rows(p)) arek_bus_mark(p->bus, (uint32_t)rel, (uint8_t)(AREK_BUS_AUDIO + ch));
 }
-static inline void arek_paula_request(ArekPaula *p, ArekPaulaChan *c, int ch, double t) { if (!AREK_PAULA_HAS(c->req)) { c->req = t; arek_paula_mark_at(p, ch, t); } }
+/* 1.0.64 (SWIV, landscape 3: AUD0PER $6E, a word every 220 colour clocks): the emulator keeps a request in Paula until
+ * the line's end (audDR), then in Agnus until the channel's slot (audxDR). A request raised after the line's end and
+ * before that slot is a new one in Paula - served one line later. The model had one stage and dropped it: one line in
+ * 32 without the channel's slot, a blit beside it took the slot and ended early */
+static inline void arek_paula_request(ArekPaula *p, ArekPaulaChan *c, int ch, double t) {
+    if (!AREK_PAULA_HAS(c->req)) { c->req = t; arek_paula_mark_at(p, ch, t); }
+    else if (!AREK_PAULA_HAS(c->req2) && floor(t / p->bus->hpos) > floor(c->req / p->bus->hpos)) { c->req2 = t; arek_paula_mark_at(p, ch, t); }
+}
 static inline void arek_paula_irq(ArekPaula *p, ArekPaulaChan *c, int ch, double t, int quiet) {
     c->ip = 1;
     if (quiet) return;
@@ -127,7 +138,7 @@ static inline void arek_paula_step(ArekPaula *p, ArekPaulaChan *c, int ch, doubl
         double nx = tf < tb ? tf : tb;
         if (nx > t) break;
         if (tf <= tb) {                                       /* the DMA word (AUDxDAT) */
-            c->req = AREK_PAULA_NONE;
+            c->req = c->req2; c->req2 = AREK_PAULA_NONE;
             if (quiet) { arek_paula_mark_at(p, ch, tf - p->bus->hpos); }
             uint16_t w = quiet ? c->dat : p->bus->rd16(p->bus->ctx, c->ptr & p->bus->chipmask);
             if (!quiet) p->fetches++;
@@ -156,11 +167,12 @@ static inline void arek_paula_predict(ArekPaula *p, int ch, double from) {
     for (long k = k0; k < arek_paula_rows(p); k++) if (b->own[k] == code) b->own[k] = 0;
     ArekPaulaChan c = p->ch[ch];
     if (AREK_PAULA_HAS(c.req)) arek_paula_mark_at(p, ch, c.req);
+    if (AREK_PAULA_HAS(c.req2)) arek_paula_mark_at(p, ch, c.req2);
     arek_paula_step(p, &c, ch, fend - 1e-9, 1);
 }
 
 static inline void arek_paula_init(ArekPaula *p, ArekBus *b, arek_paula_sample_fn cb, void *ctx) {
-    for (int ch = 0; ch < 4; ch++) { ArekPaulaChan *c = &p->ch[ch]; c->on = c->st = c->ip = 0; c->req = c->perfin = AREK_PAULA_NONE; c->bcount = 0;
+    for (int ch = 0; ch < 4; ch++) { ArekPaulaChan *c = &p->ch[ch]; c->on = c->st = c->ip = 0; c->req = c->req2 = c->perfin = AREK_PAULA_NONE; c->bcount = 0;
         c->lc = c->ptr = 0; c->len = c->audlen = c->per = c->vol = c->vol_latch = 0; c->dat = c->out = c->first = 0; c->sample = 0;
         c->en_hi = c->en_lo = 0; c->intreq2 = 0; }
     p->bus = b; p->frame_base = 0; p->fetches = 0; p->sample_cb = cb; p->ctx = ctx; p->irq_cb = 0; p->state_cb = 0; p->irqs = 0;

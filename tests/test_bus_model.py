@@ -456,6 +456,55 @@ def test_paula_model_rules(tmp_path):
     assert out[-1].startswith('fetches ')
 
 
+PAULA_FAST = r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "arek_bus.h"
+#include "arek_bus_paula.h"
+static uint8_t RAM[0x10000];
+static uint16_t rd16(void *c, uint32_t a) { (void)c; a &= 0xfffe; return (uint16_t)((RAM[a] << 8) | RAM[a + 1]); }
+static void sample(void *c, int ch, double t, int v) { (void)c; (void)ch; (void)t; (void)v; }
+int main(int argc, char **argv) {
+    static uint8_t own[313 * 227]; static uint16_t regs[0x100];
+    ArekBus B; arek_bus_init(&B, 227, 313, 313, own, regs, rd16, 0);
+    ArekPaula P; arek_paula_init(&P, &B, sample, 0);
+    for (int i = 0; i < 0x400; i++) RAM[0x1000 + i] = (uint8_t)i;
+    arek_bus_frame(&B, 313); arek_paula_frame(&P, 0);
+    arek_paula_write(&P, 0, 0xa0, 0); arek_paula_write(&P, 0, 0xa2, 0x1000); arek_paula_write(&P, 0, 0xa4, 0x200);
+    arek_paula_write(&P, 0, 0xa6, (uint16_t)atoi(argv[1])); arek_paula_write(&P, 0, 0xa8, 64);
+    arek_paula_write(&P, 2320, 0x96, 0x8001);                       /* DMA on at line 10, slot 50 */
+    int planned = 0; for (int v = 11; v < 200; v++) planned += own[v * 227 + 13] == 4;   /* marked ahead, before anything ran */
+    arek_paula_run(&P, 200 * 227);
+    printf("planned %d fetches %ld without", planned, P.fetches);
+    for (int v = 11; v < 200; v++) if (own[v * 227 + 13] != 4) printf(" %d", v);
+    printf("\n");
+    return 0;
+}
+"""
+
+
+@pytest.mark.parametrize('per, gaps', [(110, 0), (108, 0), (113, 0), (114, 1), (120, 10)])
+def test_paula_asks_for_more_than_one_word_a_line(tmp_path, per, gaps):
+    """1.0.64 (SWIV, landscape 3: AUD0PER $6E and AUD1PER $6C for a frame and a half): with a period below 114 a word
+    lasts less than a line. The emulator holds a channel's request in Paula until the line's end and then in Agnus
+    until the channel's slot; a request raised after the line's end and before that slot is a new one, served a line
+    later - every line has the channel's slot. The model had one stage and dropped that request: one line in 32
+    (period 110) had no slot, a blit beside it took the free slot and ended early, the level 6 interrupt came 3 colour
+    clocks late and the game's seed (VHPOSR) went another way; the output played a word twice. Periods of 114 and
+    more ask for less than a word a line: lines without a slot, as before."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    (tmp_path / 'p.c').write_text(PAULA_FAST)
+    subprocess.run([cc, '-O1', '-I', HERE, '-o', str(tmp_path / 'p'), str(tmp_path / 'p.c'), os.path.join(HERE, 'arek_bus.c'),
+                    os.path.join(HERE, 'arek_bus_vamiga.c'), '-lm'], check=True)
+    out = subprocess.run([str(tmp_path / 'p'), str(per)], capture_output=True, text=True, check=True).stdout.split()
+    missing = [int(x) for x in out[5:]]
+    assert int(out[1]) == 189 - len(missing) and int(out[3]) == 189 - len(missing), out   # every slot was planned ahead and fetched
+    assert (len(missing) == 0) if gaps == 0 else (abs(len(missing) - gaps) <= 1), out
+
+
 def test_selftest_audio_disk_and_conversions():
     from arek import adf
     from arek.headless import selftest

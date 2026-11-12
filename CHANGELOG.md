@@ -3,6 +3,28 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.64 (2026-11-12)
+
+- Paula model, audio DMA requests in two stages as the emulator holds them: in Paula from the moment a request is
+  raised to the end of that line, then in Agnus until the channel's slot. A request raised after the line's end and
+  before that slot is a second one, served a line later; the model had one stage and dropped it. With a period below
+  114 (a word shorter than a line) one line in about 32 had no slot for the channel, a blit beside it took the slot and
+  ended early, and the channel played a word twice. SWIV, landscape 3 (AUD0PER $6E, AUD1PER $6C from frame 19642 on:
+  the level 6 interrupt 3 colour clocks late in frame 19643, the game's seed another way from 19644)
+- captures of a playing channel (**rebuild the emulator with the current `vamiga-audstate-899da5d.patch`**: the build
+  `VAHeadless-899da5d-kit-audio` is now sha256 151ee455...): the audio state dump prints Paula's own request latch
+  (`audDR`) too; `arek host state` writes a request that is only in Paula yet, and a second request as the `@audio`
+  line's 19th field (the host reads lines with 18 fields as before). A capture between a request and its line's end
+  lost the request: SWIV at the VBL routine of frame 15003, channel 0 one word late for 1 721 samples
+- host with the timing model: before every CPU access Paula fetches the audio words whose slots lie before it
+  (`AREK_GLUE_ACCESS_CB`, new in `arek_bus_glue.h`) - a word is read before a store that comes later in the same
+  instruction. SWIV rewrites a wave table while a channel loops over it: two samples wrong at some 60 places in 4.4
+  million
+- measured on SWIV (the trainer translation, frames 790-19706, records at the VBL routine): all six landscapes equal
+  in registers and both memory hashes (18 931, 18 931, 18 929, 18 924, 18 924, 18 932 records); landscape 3's output,
+  4.45 million samples of the four channels, equal in time and value but for three samples of channel 1 (frames 1200
+  and 18597, open); from a state captured in the game (frame 15003) 1 256 records and 196 840 samples equal
+
 ## 1.0.63 (2026-11-12)
 
 - host with the timing model and bus model: a CPU write to a DMA or display register that lands behind the frame's end

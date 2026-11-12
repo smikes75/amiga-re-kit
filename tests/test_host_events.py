@@ -538,7 +538,7 @@ def _own_slots(path, owner, lines=313):
     return out
 
 
-def _audio_host(tmp_path, code, t0, audio, dmacon):
+def _audio_host(tmp_path, code, t0, audio, dmacon, chip=None):
     cc = bus.compiler()
     if not cc:
         pytest.skip('no C compiler')
@@ -565,8 +565,14 @@ def _audio_host(tmp_path, code, t0, audio, dmacon):
     creg[0x96:0x98] = struct.pack('>H', dmacon)
     (st / 'creg.bin').write_bytes(creg)
     (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 %d 0 1000\nfe 0 0 0 0 5500\n100\n' % t0 + audio)
-    r = subprocess.run([str(exe), str(st), str(d / 'o.vtr'), '1', '--own', str(d / 'own.bin')], capture_output=True, text=True, timeout=60)
+    for at, hx in (chip or {}).items():
+        ram[at:at + len(hx) // 2] = bytes.fromhex(hx)
+    (st / 'chip.bin').write_bytes(ram)
+    r = subprocess.run([str(exe), str(st), str(d / 'o.vtr'), '1', '--own', str(d / 'own.bin'), '--audlog', str(d / 'aud.bin')], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr
+    if chip is not None:                                             # channel 1's output: (line, slot, byte * volume)
+        from arek.headless import trace
+        return [(v, h, val) for f, v, h, val, ch in trace.read_audlog(str(d / 'aud.bin')) if ch == 1]
     return _own_slots(str(d / 'own.bin'), 5)[0]                      # channel 1's slots (owner 4 + channel) in the first frame
 
 
@@ -586,6 +592,41 @@ def test_a_captured_playing_channel_goes_on_fetching(tmp_path):
     lines = [v for v, s in slots]
     assert all(s == 15 for v, s in slots) and 3 <= lines[1] - lines[0] <= 4 and len(slots) > 60, slots[:5]   # a word every 800 colour clocks (3.5 lines)
     assert _audio_host(tmp_path, '60fe', t0 + 1, '', 0x8202) == []      # no lines: no audio DMA
+
+
+def test_paula_fetches_before_a_later_store_of_the_same_instruction(tmp_path):
+    """1.0.64 (SWIV: a wave table the game rewrites while a channel loops over one word of it): the host ran Paula at
+    instruction boundaries, so a word whose slot lies inside an instruction was read after all of that instruction's
+    stores - also one that comes in a later slot. `move.w #$7f7f,$2000.w` begins at slot 13 of line 60; channel 1
+    fetches the word at $2000 in slot 15, the store follows. The original plays the old word ($1122) once more, the
+    host played $7f7f a period early (SWIV: two samples wrong at some 60 places in 4.4 million)."""
+    t0 = 60 * 227 + 13
+    base = 100 * 313 * 227
+    audio = ''.join('@audio %d 0 0 1 -1 -1 0 0 3 2 7ef8 8 0 0 0 1 0 0\n' % c for c in (0, 2, 3))
+    audio += '@audio 1 1 2 1 %d %d 2000 2000 1 1 190 40 40 3344 3344 1 1 0 -1\n' % (base + 59 * 227 + 15, base + t0 + 300)
+    out = _audio_host(tmp_path, '31fc7f7f2000' '60fe', t0, audio, 0x8202, chip={0x2000: '1122'})
+    vals = [val for v, h, val in out][:6]
+    assert vals[:5] == [0x44 * 64, 0x11 * 64, 0x22 * 64, 0x7f * 64, 0x7f * 64], out[:8]   # the low byte of the word that played, the old word, then the new one
+
+
+def test_a_captured_request_waits_in_paula_or_in_agnus(tmp_path):
+    """1.0.64: the emulator holds an audio DMA request in Paula (audDR) from the moment it is raised to the end of that
+    line, then in Agnus (audxDR) until the channel's slot. The capture carried Agnus's flag only: a state taken between
+    the request and the line's end lost it, the channel played a word twice and its next slot was missing (SWIV's VBL
+    routine is entered at slot 110 of line 0: a channel that asked earlier in that line). REQ in the capture's line
+    (Paula's) is served in the next line; REQ one line back (Agnus's) in this line; with both (the 19th field, a
+    period below 114) in this line and the next. Channel 1 at line 60, slot 5; period 400, the next period event far."""
+    t0 = 60 * 227 + 5
+    base = 100 * 313 * 227
+    other = ''.join('@audio %d 0 0 1 -1 -1 0 0 3 2 7ef8 8 0 0 0 1 0 0\n' % c for c in (0, 2, 3))
+    one = lambda req, req2: other + '@audio 1 1 2 1 %d %d 0 2000 1 3e 190 40 40 6fd 80a 1 0 0%s\n' % (
+        req, base + t0 + 3000, '' if req2 is None else ' %d' % req2)
+    paula, agnus = base + 60 * 227, base + 59 * 227 + 15
+    first = lambda audio, k: [v for v, s in _audio_host(tmp_path, '60fe', t0 + k, audio, 0x8202) if v < 70]
+    assert first(one(paula, -1), 0) == [61]                             # Paula's: the next line
+    assert first(one(agnus, None), 1) == [60]                           # Agnus's (a state.txt of 1.0.60-1.0.63: 18 fields): this line
+    assert first(one(agnus, paula), 2) == [60, 61]                      # both
+    assert first(one(-1, -1), 3) == []
 
 
 @pytest.mark.parametrize('h0, line', [(216, 61), (218, 62)])

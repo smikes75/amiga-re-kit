@@ -191,12 +191,12 @@ def test_the_capture_reads_the_audio_channels_and_the_state_carries_them():
     prints nothing: no "audio", no lines."""
     from arek import host
     from arek.headless import bpstate
-    block = lambda n, st, on, per, perfin, dr: (
+    block = lambda n, st, on, per, perfin, dr, pdr=None: (
         '   State machine : %d\n           State : %d\n          AUDxIP : yes\n          AUDxON : %s\n     audlenLatch : 1\n'
         '          audlen : 62\n     audperLatch : %d\n          audper : 0\n     audvolLatch : 64\n          audvol : 64\n'
         '          auddat : 1789\n          buffer : 2058\n         intreq2 : no\n     enablePenhi : yes\n     enablePenlo : no\n'
-        '          audxDR : %s\n         audxDSR : no\n          perfin : %s\n           clock : 8526121216\n'
-        % (n, st, 'yes' if on else 'no', per, 'yes' if dr else 'no', perfin))
+        '          audxDR : %s\n         audxDSR : no\n%s          perfin : %s\n           clock : 8526121216\n'
+        % (n, st, 'yes' if on else 'no', per, 'yes' if dr else 'no', '' if pdr is None else '           audDR : %s\n' % ('yes' if pdr else 'no'), perfin))
     out = ('try ? agnus events\nSlot Event\ntry ? paula channels\n' + block(0, 0, False, 32504, 'never', False)
            + block(1, 3, True, 1032, '8526126808', True) + block(2, 0, False, 32504, 'never', False) + block(3, 0, False, 32504, 'never', False)
            + 'commander\nmem save bin x 0 1\n')
@@ -209,7 +209,20 @@ def test_the_capture_reads_the_audio_channels_and_the_state_carries_them():
     # channel 1: on, state 011, the period event at master cycle 8526126808 = colour clock 1065765851; the pending
     # request is served in slot $0F of the NEXT line (the beam is past slot 15 of line 0): the model's request time is
     # that slot one line back
-    assert lines[1] == '@audio 1 1 3 1 %d 1065765851 0 4ebe2 1 3e 408 40 40 6fd 80a 1 0 0' % (15000 * 71051 + 1 * 227 + 15 - 227)
+    assert lines[1] == '@audio 1 1 3 1 %d 1065765851 0 4ebe2 1 3e 408 40 40 6fd 80a 1 0 0 -1' % (15000 * 71051 + 1 * 227 + 15 - 227)
+    # 1.0.64: Paula's own latch (audDR) - a request raised in the capture's line waits there until the line's end; the
+    # build did not print it and a capture between the request and the line's end lost the request
+    def req(dr, pdr, v, h):
+        out = ('try ? paula channels\n' + block(0, 0, False, 32504, 'never', False, False) + block(1, 3, True, 1032, '8526126808', dr, pdr)
+               + block(2, 0, False, 32504, 'never', False, False) + block(3, 0, False, 32504, 'never', False, False) + 'commander\n')
+        a = bpstate.parse_audio(out)
+        assert a[1]['audDR'] is pdr and a[1]['audxDR'] is dr
+        f = host.audio_lines(dict(meta, audio=a, beam={'frame': 15000, 'position': [v, h]}))[1].split()
+        return int(f[5]) - 15000 * 71051, int(f[19]) - 15000 * 71051 if f[19] != '-1' else -1
+    assert req(False, True, 5, 100) == (5 * 227, -1)                       # Paula's alone: raised in line 5, served in line 6
+    assert req(True, False, 5, 8) == (4 * 227 + 15, -1)                    # Agnus's alone: this line's slot
+    assert req(True, True, 5, 8) == (4 * 227 + 15, 5 * 227)                # both (a word shorter than a line): this line's slot and the next
+    assert req(False, False, 5, 100) == (-1 - 15000 * 71051, -1)
     assert lines[0].startswith('@audio 0 0 0 1 -1 -1 82d8 82d8 ') and host.audio_lines({'beam': meta['beam']}) == []
     assert os.path.exists(os.path.join(os.path.dirname(trace.__file__), 'patches', 'vamiga-audstate-899da5d.patch'))
     events = {'drive': {'text': {'agnus events': 'Slot Event\nCH0       none\nCH1       CHX_PERFIN    (3,170)   due in 699 DMA cycles\n'}}}

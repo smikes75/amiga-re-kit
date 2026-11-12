@@ -13,10 +13,10 @@ index 13d1452..43d3015 100644
  
      // Getter and setter for the BLS signal (Blitter slow down)
 diff --git a/Core/Components/Paula/Audio/StateMachine.cpp b/Core/Components/Paula/Audio/StateMachine.cpp
-index d4165b6..01d5379 100644
+index d4165b6..0c6292e 100644
 --- a/Core/Components/Paula/Audio/StateMachine.cpp
 +++ b/Core/Components/Paula/Audio/StateMachine.cpp
-@@ -32,6 +32,24 @@ StateMachine<nr>::_dump(Category category, std::ostream &os) const
+@@ -32,6 +32,25 @@ StateMachine<nr>::_dump(Category category, std::ostream &os) const
          os << tab("State") << dec(state) << std::endl;
          os << tab("AUDxIP") << bol(AUDxIP()) << std::endl;
          os << tab("AUDxON") << bol(AUDxON()) << std::endl;
@@ -36,6 +36,7 @@ index d4165b6..01d5379 100644
 +        os << tab("enablePenlo") << bol(enablePenlo) << std::endl;
 +        os << tab("audxDR") << bol(agnus.vahlAudxDR(nr)) << std::endl;
 +        os << tab("audxDSR") << bol(agnus.vahlAudxDSR(nr)) << std::endl;
++        os << tab("audDR") << bol(audDR) << std::endl;   // Paula's own latch: a request raised in this line, handed to Agnus at the line's end
 +        os << tab("perfin") << (agnus.trigger[slot] == NEVER ? std::string("never") : std::to_string(agnus.trigger[slot])) << std::endl;
 +        os << tab("clock") << std::to_string(agnus.clock) << std::endl;
      }

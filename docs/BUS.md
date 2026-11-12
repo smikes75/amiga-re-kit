@@ -138,7 +138,10 @@ period and volume change while playing; since 0.7.1 the program polls INTREQR, r
 position and clears it, so the interrupt times are measured too):
 
 - DMA on in state 000 loads the length counter and raises a request; a request raised in line v is served in the
-  channel's slot of line v + 1, even if DMA was switched off meanwhile. The first word (001 -> 101) is discarded:
+  channel's slot of line v + 1, even if DMA was switched off meanwhile. The request waits in Paula until line v
+  ends and then in Agnus until the slot (1.0.64): one raised in line v + 1 before that slot is a second request,
+  served in line v + 2 - with a period below 114 (a word shorter than a line) every line has the channel's slot.
+  A request raised in the same line as a waiting one is the same request. The first word (001 -> 101) is discarded:
   the pointer goes back to AUDxLC, the counter counts it (unless it is 1), the interrupt request is raised and the
   next word requested. The second word (101 -> 010) starts the output: byte 0 = its high byte, the volume latched;
   then a byte every AUDxPER CCK (0 = 65536): 010 -> 011 the low byte, 011 -> 010 the high byte of the next word,

@@ -175,6 +175,17 @@ static int h_cia_reg(uint32_t a, int *i) {           /* the CIA and register of 
 static void h_sample(void *ctx, int ch, double t, int value) { (void)ctx; ara_event(ch, t, value); if (h_sample_cb) h_sample_cb(ch, t, value); }
 static void h_audio_irq(void *ctx, int ch, double t) { (void)ctx; (void)t; H_INTREQ |= (uint16_t)(0x80 << ch); }   /* AUDx: level 4 (HOST_L4) */
 
+/* 1.0.64 (SWIV: a wave table the game rewrites while a channel loops over it): Paula's events were run at instruction
+ * boundaries, so a word whose slot lies inside an instruction was fetched after that instruction's stores - also the
+ * store that comes in a later slot than the fetch. The channel played the new word one period early (two samples of
+ * some 70 000). With the timing model every CPU access first lets Paula fetch what its slot lies before */
+static void h_access_cb(void) {
+    double ta = h_acc_abs();
+    if (ta >= H_PAULA.frame_base + (double)H_LINES * HOST_HPOS) return;   /* behind the frame's end (an access carried over): the frame rolls first - its audio slots are planned from Paula's state at the roll */
+    for (int ch = 0; ch < 4; ch++) { const ArekPaulaChan *c = &H_PAULA.ch[ch];
+        if (AREK_PAULA_HAS(c->req) && arek_paula_slot(&H_PAULA, ch, c->req) < ta) { arek_paula_run(&H_PAULA, ta); break; } }
+}
+
 static void host_reset(void);
 /* the host starts: t0 = beam time of the first instruction (line * 227 + slot); the environment can recalibrate */
 static void host_init(double t0) {
@@ -202,6 +213,7 @@ static void host_init(double t0) {
       H_COP_IDX = 0; while (H_COP_IDX < b->cop_irq_n && b->cop_irq[H_COP_IDX].t <= t0) H_COP_IDX++; }   /* 1.0.5: a start past the copper's INTREQ write of this frame (the state carries that COPER) - no second one (Turrican II KIT-GAPS 2) */
     arek_paula_init(&H_PAULA, arek_glue_bus(), h_sample, 0);
     H_PAULA.irq_cb = h_audio_irq;
+    AREK_GLUE_ACCESS_CB = H_CIA_SYNC ? h_access_cb : 0;
     arek_paula_frame(&H_PAULA, (double)H_FRAME0 * H_LINES * HOST_HPOS);
     ara_reset();
 }
@@ -526,19 +538,21 @@ static void host_drive_state(const char *line) {
     (void)line;
 #endif
 }
-/* 1.0.60: state.txt's "@audio CH ON ST IP REQ PERFIN LC PTR LEN AUDLEN PER VOL VOLLATCH DAT OUT ENHI ENLO INTREQ2" lines
+/* 1.0.60: state.txt's "@audio CH ON ST IP REQ PERFIN LC PTR LEN AUDLEN PER VOL VOLLATCH DAT OUT ENHI ENLO INTREQ2 [REQ2]" lines
  * (arek host state, from a capture made with a build that has vamiga-audstate-899da5d.patch): Paula's four channels where
  * the original's stood - a channel in the middle of a sample goes on fetching in its slots. REQ / PERFIN: absolute colour
- * clocks, -1 = none. After host_init. Without the lines the channels are idle until the game starts them (SWIV, a
+ * clocks, -1 = none; REQ2 (1.0.64, may be missing): a second request, raised in the capture's line while REQ waits for
+ * its slot. After host_init. Without the lines the channels are idle until the game starts them (SWIV, a
  * capture in the desert: 34 audio slots a frame in the original, none in the host, the first difference 33 lines on). */
 static void host_audio_state(const char *text) {
     int any = 0;
     for (const char *p = text; p && (p = strstr(p, "@audio")) != 0; p += 6) {
-        int ch, on, st, ip, enhi, enlo, i2; double req, perfin; unsigned lc, ptr, len, audlen, per, vol, voll, dat, out;
-        if (sscanf(p, "@audio %d %d %d %d %lf %lf %x %x %x %x %x %x %x %x %x %d %d %d", &ch, &on, &st, &ip, &req, &perfin, &lc, &ptr, &len, &audlen,
-                   &per, &vol, &voll, &dat, &out, &enhi, &enlo, &i2) != 18 || ch < 0 || ch > 3) continue;
+        int ch, on, st, ip, enhi, enlo, i2, used = 0; double req, perfin, req2 = -1; unsigned lc, ptr, len, audlen, per, vol, voll, dat, out;
+        if (sscanf(p, "@audio %d %d %d %d %lf %lf %x %x %x %x %x %x %x %x %x %d %d %d%n", &ch, &on, &st, &ip, &req, &perfin, &lc, &ptr, &len, &audlen,
+                   &per, &vol, &voll, &dat, &out, &enhi, &enlo, &i2, &used) != 18 || ch < 0 || ch > 3) continue;
+        if (used) { const char *q = p + used; while (*q == ' ' || *q == '\t') q++; if (*q == '-' || (*q >= '0' && *q <= '9')) sscanf(q, "%lf", &req2); }   /* on the same line only */
         ArekPaulaChan *c = &H_PAULA.ch[ch];
-        c->on = on; c->st = st; c->ip = ip; c->req = req < 0 ? AREK_PAULA_NONE : req; c->perfin = perfin < 0 ? AREK_PAULA_NONE : perfin;
+        c->on = on; c->st = st; c->ip = ip; c->req = req < 0 ? AREK_PAULA_NONE : req; c->req2 = req2 < 0 ? AREK_PAULA_NONE : req2; c->perfin = perfin < 0 ? AREK_PAULA_NONE : perfin;
         c->lc = lc; c->ptr = ptr; c->len = (uint16_t)len; c->audlen = (uint16_t)audlen; c->per = (uint16_t)per;
         c->vol = (uint16_t)vol; c->vol_latch = (uint16_t)voll; c->dat = (uint16_t)dat; c->out = (uint16_t)out;
         c->en_hi = enhi; c->en_lo = enlo; c->intreq2 = i2; c->bcount = 0;

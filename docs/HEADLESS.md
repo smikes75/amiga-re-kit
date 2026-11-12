@@ -64,8 +64,15 @@ The stop script of `arek bpstate` and of `arek trace run --capture-at` asks for 
 prints nothing), cpu.json gets "audio", and `arek host state` writes `@audio` lines the host's Paula starts from. A
 capture in the middle of a game without them starts the host with silent channels and without their DMA slots -
 `arek host state` says so when a channel is playing at the capture. The patch adds a command and a dump, nothing in
-the emulation: the build with all ten patches is `VAHeadless-899da5d-kit-audio` (sha256 503a660424dfbc28...), and the
+the emulation: the build with all ten patches is `VAHeadless-899da5d-kit-audio` (sha256 151ee455b05c8f60...), and the
 six self-tests give the same numbers as with the nine.
+
+1.0.64: the dump also prints `audDR` - Paula's own request latch. The emulator holds an audio DMA request in Paula
+from the moment it is raised to the end of that line and only then in Agnus (`audxDR`) until the channel's slot; the
+first version of the patch (the build with sha256 503a6604...) printed Agnus's flag alone, and a capture taken between
+the request and the line's end lost the request: the host's channel played one word twice and its next DMA slot was
+missing (SWIV, a capture at the VBL routine of frame 15003: channel 0's samples one word late for 1 721 samples).
+Rebuild with the current patch; `arek host state` writes the second request as the `@audio` line's 19th field.
 
 **Which build do I have?** Both commits print `vAmiga Headless v5.0b2`; only
 the build date in the banner differs. Measure it instead: break right after

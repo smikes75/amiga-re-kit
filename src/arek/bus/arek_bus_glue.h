@@ -98,9 +98,13 @@ static inline void arek_glue_insn(uint32_t pc, uint32_t clocks) {
 void tick_hook(M68 *m, uint32_t pc, uint32_t clocks) { (void)m; arek_glue_insn(pc, clocks); }
 #endif
 
+/* 1.0.64: called after a CPU access has taken its slot and before the runtime reads or stores - the host brings what
+ * reads memory by DMA up to that slot (Paula's audio words), so a store in a later slot of the same instruction does
+ * not reach a word that was fetched before it */
+static void (*AREK_GLUE_ACCESS_CB)(void) = 0;
 void bus_access_hook(uint32_t a) {
     (void)a;
-    if (AREK_GLUE.ready) AREK_GLUE.t = arek_bus_data(&AREK_GLUE.bus, AREK_GLUE.t);
+    if (AREK_GLUE.ready) { AREK_GLUE.t = arek_bus_data(&AREK_GLUE.bus, AREK_GLUE.t); if (AREK_GLUE_ACCESS_CB) AREK_GLUE_ACCESS_CB(); }
 }
 
 void bus_blit_hook(uint16_t con0, uint16_t con1, uint16_t size) {
