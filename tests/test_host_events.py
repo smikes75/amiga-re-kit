@@ -594,6 +594,74 @@ def test_a_captured_playing_channel_goes_on_fetching(tmp_path):
     assert _audio_host(tmp_path, '60fe', t0 + 1, '', 0x8202) == []      # no lines: no audio DMA
 
 
+def test_raw_keys_of_the_input_lines_reach_the_game_through_the_keyboards_serial_port(tmp_path):
+    """1.0.65 (SWIV, the second player's keys): host_trace's input lines take K<hh> / k<hh> (a raw key pressed / released,
+    two lower-case hex digits) and S (space held), as the emulator's lines do with vamiga-keys-899da5d.patch, and send
+    them through the host's keyboard: the code rotated and inverted in CIA-A's SDR 1610 colour clocks after the event
+    (eight bits of 210) plus the CIA's cycles, ICR's SP bit, and the next code only after the game's handshake (CRA bit 6
+    set and cleared). The game here polls ICR, stores SDR and the beam, and shakes hands. Line 1: left shift down; line
+    2: shift up and cursor up down - the second waits for the handshake of the first; lines 5-6: space."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    from arek.headless import trace
+    HOST, BUS = os.path.dirname(host.__file__), os.path.dirname(bus.__file__)
+    img = bytearray(0x2000)
+    code = bytes.fromhex('43f900003000'            # 1000 lea $3000,a1
+                         '103900bfed01'            # 1006 move.b $bfed01,d0     ICR
+                         '08000003'                # 100c btst #3,d0
+                         '67f4'                    # 1010 beq.s $1006
+                         '7200'                    # 1012 moveq #0,d1
+                         '123900bfec01'            # 1014 move.b $bfec01,d1     SDR
+                         '32c1'                    # 101a move.w d1,(a1)+
+                         '32f900dff004'            # 101c move.w $dff004,(a1)+  VPOSR
+                         '32f900dff006'            # 1022 move.w $dff006,(a1)+  VHPOSR
+                         '08f9000600bfee01'        # 1028 bset #6,$bfee01       the handshake: SP low
+                         '08b9000600bfee01'        # 1030 bclr #6,$bfee01       ... and high again
+                         '4e71'                    # 1038 nop                   (the record)
+                         '60ca')                   # 103a bra.s $1006
+    img[0x1000:0x1000 + len(code)] = code
+    img[0x1100:0x1102] = bytes.fromhex('4e73')
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[0x1000, 0x1100], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1038u', '-DHOST_IPL_MODEL=1',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'),
+                    os.path.join(BUS, 'arek_bus_vamiga.c'), '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    (st / 'creg.bin').write_bytes(bytes(512))
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
+    (tmp_path / 'in.txt').write_text('\nK60\nk60K4c\n\n\nS\n\n\n\n')
+    assert trace.check_inputs(str(tmp_path / 'in.txt')) == 9 and trace.inputs_use_keys(str(tmp_path / 'in.txt'))
+    r = subprocess.run([str(exe), str(st), str(tmp_path / 'o.vtr'), '9', str(tmp_path / 'in.txt'), '--full'], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    recs = list(trace.records(str(tmp_path / 'o.vtr')))
+    last = recs[-1]
+    got = [(trace.read(last, 0x3000 + 6 * k), trace.read(last, 0x3002 + 6 * k) & 1, trace.read(last, 0x3004 + 6 * k) >> 8) for k in range(len(recs))]
+    inv = lambda c: (~((c << 1) | (c >> 7))) & 0xff
+    assert [g[0] for g in got] == [inv(0x60), inv(0xe0), inv(0x4c), inv(0x40), inv(0xc0)], got       # $3f $3e $67 $7f $7e
+    assert [r_['frame'] for r_ in recs] == [101, 102, 102, 105, 106]
+    assert [g[2] for g in got] == [7, 7, 15, 7, 7], got          # 1610 colour clocks and the CIA's cycles: line 7; the queued code as long again after the handshake
+    # without the handshake the keyboard waits (143 ms, then it resyncs bit by bit): no second code in these frames
+    img[0x1028:0x1038] = bytes.fromhex('4e71' * 8)
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[0x1000, 0x1100], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1038u', '-DHOST_IPL_MODEL=1',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'),
+                    os.path.join(BUS, 'arek_bus_vamiga.c'), '-lm', '-o', str(exe)], check=True)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    r = subprocess.run([str(exe), str(st), str(tmp_path / 'o2.vtr'), '9', str(tmp_path / 'in.txt'), '--full'], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    recs = list(trace.records(str(tmp_path / 'o2.vtr')))
+    assert [r_['frame'] for r_ in recs] == [101] and trace.read(recs[0], 0x3000) == inv(0x60)
+
+
 def test_paula_fetches_before_a_later_store_of_the_same_instruction(tmp_path):
     """1.0.64 (SWIV: a wave table the game rewrites while a channel loops over one word of it): the host ran Paula at
     instruction boundaries, so a word whose slot lies inside an instruction was read after all of that instruction's

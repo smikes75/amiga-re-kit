@@ -167,6 +167,85 @@ static void h_cia_poll(void) {
     if (H_CIA_SYNC) { H_EVT_T = due + H_CIA_IRQ_LAT; h_irq_mark(); }   /* 1.0.52: the request comes an E cycle after the model's underflow (vAmiga raises it in the cycle its counter reaches 0) */
     h_cia_due();
 }
+/* 1.0.65 (SWIV, the second player's keys): the keyboard as vAmiga's (Keyboard.cpp, KBD_ACCURACY) sends raw key events
+ * to CIA-A's serial port. host_key(code, down, t): a press of a key that is down and a release of one that is up are
+ * dropped, the others wait in a queue of 10. An idle keyboard sends at once: the code rotated and inverted
+ * (~(code << 1 | code >> 7)), a bit every 210 colour clocks (60 us), CNT rising 140 after the bit - the eighth edge 1610
+ * colour clocks after the event. The CIA (serial port as input: CRA bit 6 clear) shifts the bits in; with the eighth
+ * it sets ICR's SP bit two E cycles after the first E tick behind the edge and loads SDR one cycle later, PORTS when
+ * the mask has SP. The keyboard then waits for the handshake - SP low for at least 1 us: CRA bit 6 set and cleared
+ * again (any change of the bit also restarts the CIA's bit count) - and sends the next code at once. Without one for
+ * 143 ms it loses sync: a 1 bit every 143 ms until a handshake comes, then $FD and $FE (each wants its handshake) and
+ * the queue again. All times in absolute colour clocks; the E cycle of the ICR bit is from the emulator's source, not
+ * measured (a game that polls once a frame is 7 lines away from it). A captured state starts with an idle keyboard. */
+#define HKB_Q 10
+enum { HKB_SEND = 0, HKB_SYNC = 1, HKB_STRM_ON = 2, HKB_STRM_OFF = 3 };
+static struct { uint8_t q[HKB_Q]; int qn; uint8_t down[128]; int state, busy, ev, bit; double ev_t; uint8_t sr, ssr; int cnt;   /* ev: 0 none, 1 a byte's bits from ev_t, 2 the timeout at ev_t, 3 a sync pulse from ev_t */
+                double sp_lo, sp_hi; double cia_icr, cia_sdr; uint8_t cia_val; int spmode; } H_KB;
+#define HKB_NONE (-1e300)
+#define HKB_TIMEOUT_CCK 500500.0                  /* 143 ms */
+static void hkb_send(uint8_t code, double t) {     /* a byte goes out from t on: the event is the edge that completes the CIA's byte */
+    H_KB.sr = (uint8_t)~((code << 1) | (code >> 7)); H_KB.busy = 1;
+    H_KB.ev = 1; H_KB.ev_t = t; H_KB.bit = 0;
+}
+static void hkb_execute(double t) {
+    switch (H_KB.state) {
+    case HKB_SYNC: H_KB.busy = 1; H_KB.ev = 3; H_KB.ev_t = t; break;                       /* a sync pulse */
+    case HKB_STRM_ON: hkb_send(0xfd, t); break;
+    case HKB_STRM_OFF: hkb_send(0xfe, t); break;
+    default:
+        if (H_KB.qn) { uint8_t c = H_KB.q[0]; memmove(H_KB.q, H_KB.q + 1, (size_t)--H_KB.qn); hkb_send(c, t); }
+        else { H_KB.busy = 0; H_KB.ev = 0; }
+    }
+}
+static void hkb_cia_bit(int bit, double edge) {    /* CNT rises with `bit` on SP */
+    if (H_KB.spmode) return;                       /* the port is an output: nothing is shifted in */
+    if (H_KB.cnt == 0) H_KB.cnt = 8;
+    H_KB.ssr = (uint8_t)((H_KB.ssr << 1) | (bit & 1));
+    if (--H_KB.cnt == 0) { double e = (floor(edge / 5.0) + 1) * 5.0; H_KB.cia_val = H_KB.ssr; H_KB.cia_icr = e + 10.0; H_KB.cia_sdr = e + 15.0; }
+}
+static double hkb_due(void) {                      /* the next moment something happens, HKB_NONE = nothing */
+    double d = 1e300;
+    if (H_KB.ev) { double t = H_KB.ev == 1 ? H_KB.ev_t + 210.0 * H_KB.bit + 140.0 : H_KB.ev == 3 ? H_KB.ev_t + 140.0 : H_KB.ev_t; if (t < d) d = t; }
+    if (H_KB.cia_icr > -1e299 && H_KB.cia_icr < d) d = H_KB.cia_icr;
+    if (H_KB.cia_sdr > -1e299 && H_KB.cia_sdr < d) d = H_KB.cia_sdr;
+    return d > 1e299 ? HKB_NONE : d;
+}
+static void hkb_run(double t) {
+    for (;;) {
+        double d = hkb_due(); if (d < -1e299 || d > t) return;
+        if (H_KB.cia_icr > -1e299 && H_KB.cia_icr <= d) {                                  /* the CIA's SP bit */
+            double at = H_KB.cia_icr; H_KB.cia_icr = HKB_NONE;
+            h_irq_mark(); H_CIAA_ICR |= 0x08; h_cia_raise(0); H_EVT_T = at + (H_CIA_SYNC ? H_CIA_IRQ_LAT : 0); h_irq_mark(); continue; }
+        if (H_KB.cia_sdr > -1e299 && H_KB.cia_sdr <= d) { H_KB.cia_sdr = HKB_NONE; H_CIAA_SDR = H_KB.cia_val; continue; }
+        if (H_KB.ev == 1) {                                                                /* a byte: the next of its eight edges */
+            hkb_cia_bit((H_KB.sr >> (7 - H_KB.bit)) & 1, d);
+            if (++H_KB.bit == 8) { H_KB.ev = 2; H_KB.ev_t += 1680.0 + HKB_TIMEOUT_CCK; }      /* SP back to 1; the watchdog for the handshake */
+            continue; }
+        if (H_KB.ev == 2) { H_KB.state = HKB_SYNC; hkb_execute(H_KB.ev_t); continue; }      /* no handshake: out of sync */
+        if (H_KB.ev == 3) { hkb_cia_bit(0, H_KB.ev_t + 140.0); H_KB.ev = 2; H_KB.ev_t += 210.0 + HKB_TIMEOUT_CCK; continue; }
+        return;
+    }
+}
+static void hkb_spline(int high, double t) {       /* CRA bit 6 changed: the SP line as the keyboard sees it, and the CIA's bit count */
+    hkb_run(t);
+    H_KB.spmode = !high; H_KB.cnt = 0; H_KB.cia_sdr = HKB_NONE;
+    if (high) { if (H_KB.sp_hi <= H_KB.sp_lo) H_KB.sp_hi = t; } else { if (H_KB.sp_lo <= H_KB.sp_hi) H_KB.sp_lo = t; }
+    if ((H_KB.sp_hi - H_KB.sp_lo) * 8.0 / 28.0 >= 1.0) {                                    /* low for 1 us or more: a handshake */
+        switch (H_KB.state) { case HKB_SYNC: H_KB.state = HKB_STRM_ON; break; case HKB_STRM_ON: H_KB.state = HKB_STRM_OFF; break;
+                              case HKB_STRM_OFF: H_KB.state = HKB_SEND; break; default: break; }
+        hkb_execute(t);
+    }
+}
+static void host_key(int code, int down, double t) {
+    code &= 0x7f; hkb_run(t);
+    if (down ? H_KB.down[code] : !H_KB.down[code]) return;
+    if (H_KB.qn >= HKB_Q) return;
+    H_KB.down[code] = (uint8_t)(down != 0); H_KB.q[H_KB.qn++] = (uint8_t)(code | (down ? 0 : 0x80));
+    if (!H_KB.busy) { H_KB.state = HKB_SEND; hkb_execute(t); }
+}
+static void hkb_reset(void) { memset(&H_KB, 0, sizeof H_KB); H_KB.cia_icr = H_KB.cia_sdr = HKB_NONE; H_KB.sp_lo = H_KB.sp_hi = -1e300; }
+
 static int h_cia_reg(uint32_t a, int *i) {           /* the CIA and register of an address, or -1 */
     if ((a & 0xbfe001) == 0xbfe001 && (a & 0xfff0ff) == 0xbfe001) { *i = 0; return (int)((a >> 8) & 15); }
     if ((a & 0xfff0ff) == 0xbfd000) { *i = 1; return (int)((a >> 8) & 15); }
@@ -323,6 +402,7 @@ uint8_t cia_read_hook(uint32_t a) {
     { uint8_t hv; if (HOST_CIA_READ(a, &hv)) return hv; }
 #endif
     int i, reg = h_cia_reg(a, &i);
+    if (i == 0 && reg >= 0) hkb_run(h_abs());
     if (reg >= 4 && reg <= 7) { h_cia_run(i, (reg - 4) >> 1); h_cia_due(); HCiaTimer *t = &H_CIA[i].t[(reg - 4) >> 1]; return (uint8_t)((reg & 1) ? t->cnt >> 8 : t->cnt); }
     if (reg == 13) { h_cia_run(i, 0); h_cia_run(i, 1); h_cia_due(); uint8_t *icr = h_cia_icr(i), r = (uint8_t)(*icr | ((*icr & H_CIA[i].mask) ? 0x80 : 0)); *icr = 0; return r; }
     if (reg == 14 || reg == 15) { int k = reg - 14; h_cia_run(i, k); h_cia_due(); return H_CIA[i].t[k].cr; }
@@ -355,6 +435,7 @@ void cia_write_hook(uint32_t a, uint8_t v) {
         int k = reg - 14; HCiaTimer *t = &H_CIA[i].t[k]; h_cia_run(i, k);
         if (v & 0x10) { t->cnt = t->latch; if (H_CIA_SYNC && (t->cr & 1)) t->e0 = h_eticks() + 1; }   /* a forced load skips a count */
         if ((v & 1) && !(t->cr & 1)) t->e0 = h_eticks() + H_CIA_START + ((v & 0x10) ? H_CIA_SYNC : 0);
+        if (i == 0 && k == 0 && ((v ^ t->cr) & 0x40)) hkb_spline(!(v & 0x40), h_abs());   /* 1.0.65: the serial port's direction - the keyboard's handshake */
         t->cr = (uint8_t)(v & 0xef);
     }
     if (reg >= 4 && reg <= 15) h_cia_due();           /* a latch, the mask or a control register changed what is due */
@@ -423,6 +504,7 @@ static void host_events(void) {
 #endif
     arek_glue_bus()->ahead_to = (uint32_t)h_now() + 96;
     h_cia_poll();
+    { double kd = hkb_due(); if (kd > -1e299 && kd <= h_abs()) hkb_run(h_abs()); }   /* 1.0.65: the keyboard's bytes reach the CIA when they are due */
     ArekBus *b = arek_glue_bus();
     if (!H_COP_DONE && b->cop_int >= 0 && h_now() >= b->cop_int) { H_INTREQ |= 0x0010; H_COP_DONE = 1; }
     while (H_COP_IDX < b->cop_irq_n && h_now() >= b->cop_irq[H_COP_IDX].t) { H_INTREQ |= b->cop_irq[H_COP_IDX].bits; H_COP_IDX++; }   /* 1.0.6: the Copper's other INTREQ bits (e.g. RBF: level 5) at their times*/
@@ -438,7 +520,7 @@ static void host_reset(void) {
     static const HCia cia0 = { { { 0xffff, 0xffff, 0, 0 }, { 0xffff, 0xffff, 0, 0 } }, 0 };
     H_LINES = 313; H_LOF = 1; H_LINES_FORCED = 0;
     H_FRAME = 0; H_COP_DONE = 0; H_COP_IDX = 0; H_BLIT_PEND = 0; H_LATE_N = 0; H_IRQ_DEPTH = 0; H_VERTB_PEND = 0; H_NEXTMAP = 0;
-    H_CIA[0] = cia0; H_CIA[1] = cia0; H_CIAB_ICR = 0; H_CIAA_DDRA = 0x03; H_CIA_DUE = 0;
+    H_CIA[0] = cia0; H_CIA[1] = cia0; H_CIAB_ICR = 0; H_CIAA_DDRA = 0x03; H_CIA_DUE = 0; hkb_reset();
     H_IO_UNKNOWN = 0; H_IO_LAST = 0; H_IRQS = 0; H_PC = 0;
     RET_PC = NO_RET;
     H_JDEPTH = 0;

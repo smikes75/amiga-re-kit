@@ -214,27 +214,36 @@ def ranges_arg(ranges):
 
 INPUT_KEYS = set('RLUDFSBC')
 INPUT_MOUSE = re.compile(r'm(-?\d+):(-?\d+)')   # 1.0.22: the mouse of port 1 moves by dx, dy counter steps in the frame
+INPUT_KEY = re.compile(r'[Kk][0-7][0-9a-f]')    # 1.0.65: a raw key pressed (K) or released (k) in the frame, code in two lower-case hex digits
 
 
 def check_inputs(path):
     """An input file: one line per frame, the letters R L U D F S (joystick 2 and space) and, since 1.0.22, B / C (the
     left / right button of the mouse on port 1 held) and one ``m<dx>:<dy>`` (its counters move by dx, dy steps in that
-    frame) in any order; empty = nothing held. Returns the number of frames."""
+    frame) in any order; empty = nothing held. 1.0.65: raw key events ``K<hh>`` (pressed) and ``k<hh>`` (released), hh =
+    the key's raw code in two LOWER-CASE hex digits (``K60`` left shift down, ``k4c`` cursor up released) - an event of
+    that frame, not a held state; several in a line reach the keyboard in their order. Returns the number of frames."""
     n = 0
     with open(path) as f:
         for n, line in enumerate(f, 1):
-            rest = INPUT_MOUSE.sub('', line.strip(), count=1)
+            rest = INPUT_MOUSE.sub('', INPUT_KEY.sub('', line.strip()), count=1)
             bad = set(rest) - INPUT_KEYS
             if bad:
-                raise TraceError('%s line %d: %r - only R L U D F S B C and one m<dx>:<dy> (one line per frame)'
+                raise TraceError('%s line %d: %r - only R L U D F S B C, one m<dx>:<dy> and K<hh> / k<hh> (one line per frame)'
                                  % (path, n, ''.join(sorted(bad))))
     return n
+
+
+def inputs_use_keys(path):
+    """Does the input file have raw key events (needs vamiga-keys-899da5d.patch in the build)?"""
+    with open(path) as f:
+        return any(INPUT_KEY.search(line) for line in f)
 
 
 def inputs_use_mouse(path):
     """Does the input file move the mouse or hold its buttons (needs vamiga-mouse-899da5d.patch in the build)?"""
     with open(path) as f:
-        return any(INPUT_MOUSE.search(line) or 'B' in line or 'C' in line for line in f)
+        return any(INPUT_MOUSE.search(INPUT_KEY.sub('', line)) or 'B' in line or 'C' in line for line in f)
 
 
 def env(path, ranges=None, length=None, inputs=None, reglog=None, audlog=None, skip=None,
@@ -484,7 +493,7 @@ PATCH_OF = {'VAHL_TRACE': 'vamiga-trace*.patch', 'VAHL_TRACE_RANGES': 'vamiga-tr
             'VAHL_BUSLOG': 'vamiga-buslog-899da5d.patch', 'VAHL_BUSLOG_FRAMES': 'vamiga-buslog-899da5d.patch',
             'VAHL_REGLOG_REGS': 'vamiga-shots-regset-899da5d.patch', 'VAHL_SHOTS': 'vamiga-shots-regset-899da5d.patch',
             'VAHL_SHOTS_FRAMES': 'vamiga-shots-regset-899da5d.patch', 'VAHL_POKE': 'vamiga-poke-899da5d.patch',
-            'VAHL_MOUSE_OFF': 'vamiga-mouse-899da5d.patch',
+            'VAHL_MOUSE_OFF': 'vamiga-mouse-899da5d.patch', 'VAHL_KEYS_OFF': 'vamiga-keys-899da5d.patch',
             'VAHL_INPUTS_V': 'vamiga-frames-899da5d.patch', 'VAHL_SHOTS_LIST': 'vamiga-frames-899da5d.patch',
             'VAHL_STOP_FRAME': 'vamiga-stop-899da5d.patch'}   # 1.0.36   # 1.0.22: the mouse in VAHL_INPUTS and `mouse1 move` (the env switches it off)
 
@@ -544,6 +553,8 @@ def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None,
         needed.append('VAHL_TRACE_SKIP')            # hashed ranges came with the inputs/reglog patch
     if inputs and inputs_use_mouse(inputs):
         needed.append('VAHL_MOUSE_OFF')             # 1.0.22: mouse tokens need the mouse patch, else they are silently ignored
+    if inputs and inputs_use_keys(inputs):
+        needed.append('VAHL_KEYS_OFF')              # 1.0.65: raw key tokens need the keys patch
     if conf.get('VAHL') and os.path.isfile(conf['VAHL']):
         require_patch(conf['VAHL'], needed)
     from . import config

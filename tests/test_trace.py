@@ -1,3 +1,4 @@
+import os
 import struct
 from pathlib import Path
 
@@ -150,6 +151,18 @@ def test_input_file_check_and_env(tmp_path):
         bad.write_text(text)
         with pytest.raises(trace.TraceError, match='line 1'):
             trace.check_inputs(bad)
+    # 1.0.65: raw key events - K<hh> pressed, k<hh> released, two lower-case hex digits up to 7f (vamiga-keys-899da5d.patch)
+    keys = tmp_path / 'keys.txt'
+    keys.write_text('\nK60\nRFk60K4c\nK4bm-1:2\nk7f\n')
+    assert trace.check_inputs(keys) == 5 and trace.inputs_use_keys(keys) and trace.inputs_use_mouse(keys)
+    keys.write_text('K60\nk4c\n')
+    assert not trace.inputs_use_mouse(keys) and not trace.inputs_use_keys(plain)   # the c of a code is not the mouse's C
+    for text in ('K4F\n', 'K80\n', 'K6\n', 'k\n'):                              # upper-case hex, a code past $7f, too short
+        bad.write_text(text)
+        with pytest.raises(trace.TraceError, match='line 1'):
+            trace.check_inputs(bad)
+    assert trace.PATCH_OF['VAHL_KEYS_OFF'] == 'vamiga-keys-899da5d.patch'
+    assert os.path.exists(os.path.join(os.path.dirname(trace.__file__), 'patches', 'vamiga-keys-899da5d.patch'))
     e = trace.env('/t.vtr', inputs=good, reglog='r.bin', audlog='a.bin', skip=5, from_frame=0)
     assert e['VAHL_INPUTS'] == str(good) and e['VAHL_TRACE_SKIP'] == '5' and e['VAHL_TRACE_FROM_FRAME'] == '0'
     assert e['VAHL_REGLOG'].endswith('r.bin') and e['VAHL_AUDLOG'].endswith('a.bin')

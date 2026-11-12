@@ -128,6 +128,17 @@ static void apply_row(long k) {
     H_CIAA_PRA = (uint8_t)((H_CIAA_PRA & 0x7f) | (f ? 0 : 0x80));
     if (strchr(s, 'M')) H_CIAA_PRA &= (uint8_t)~0x40;        /* 1.0.54: port 0's button (the left mouse button) - M pressed, m released, neither: as it was (the state's) */
     else if (strchr(s, 'm')) H_CIAA_PRA |= 0x40;
+    /* 1.0.65: raw key events as the emulator's VAHL_INPUTS takes them (vamiga-keys-899da5d.patch) - K<hh> pressed, k<hh>
+     * released, hh = the raw code in two lower-case hex digits; S = space ($40) held, as the emulator's lines have it.
+     * They go through the host's keyboard (host_key: the serial port, the handshake), at the moment the line is taken */
+    { static int sp_prev = 0; int sp = !!strchr(s, 'S');
+      if (sp != sp_prev) { host_key(0x40, sp, h_abs()); sp_prev = sp; } }
+    for (const char *q = s; q[0] && q[1] && q[2]; q++) {
+        if (*q != 'K' && *q != 'k') continue;
+        int hi = q[1] >= '0' && q[1] <= '7' ? q[1] - '0' : -1, lo = q[2] >= '0' && q[2] <= '9' ? q[2] - '0' : q[2] >= 'a' && q[2] <= 'f' ? q[2] - 'a' + 10 : -1;
+        if (hi < 0 || lo < 0) continue;
+        host_key(hi * 16 + lo, *q == 'K', h_abs()); q += 2;
+    }
 }
 static void apply_input(long k) {
     if (INP_VLO >= 0) return;                                 /* --inputs-v: the lines go by the tick's hits (on_pc) */

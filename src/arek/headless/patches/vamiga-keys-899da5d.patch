@@ -1,0 +1,21 @@
+diff --git a/Core/Components/CPU/CPU.cpp b/Core/Components/CPU/CPU.cpp
+index dc40c67..313d25e 100644
+--- a/Core/Components/CPU/CPU.cpp
++++ b/Core/Components/CPU/CPU.cpp
+@@ -343,6 +343,16 @@ static void vahl_apply_inputs(Amiga &amiga, u16 vpos)
+     if (f != fPrev) j.trigger(f ? GamePadAction::PRESS_FIRE : GamePadAction::RELEASE_FIRE);
+     if (sp && !spPrev) amiga.keyboard.press(KeyCode(0x40));
+     if (!sp && spPrev) amiga.keyboard.release(KeyCode(0x40));
++    // amiga-re-kit (vamiga-keys): raw keys - K<hh> presses, k<hh> releases the key with raw code hh (two lower-case hex digits,
++    // e.g. K60 = left shift down, k60 = up), an event in this frame; several in one line go to the keyboard in their order
++    static int keysOff = -1; if (keysOff < 0) keysOff = getenv("VAHL_KEYS_OFF") != nullptr;   // the kit finds this name in the binary: the build has the keys patch
++    if (!keysOff) for (size_t i = 0; i + 2 < k.size(); i++) {
++        if (k[i] != 'K' && k[i] != 'k') continue;
++        auto hx = [](char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1; };
++        int hi = hx(k[i + 1]), lo = hx(k[i + 2]); if (hi < 0 || lo < 0 || hi > 7) continue;
++        if (k[i] == 'K') amiga.keyboard.press(KeyCode(hi * 16 + lo)); else amiga.keyboard.release(KeyCode(hi * 16 + lo));
++        i += 2;
++    }
+     // the mouse on port 1: m<dx>:<dy> = the counters move by dx, dy steps in this frame; B / C = the left / right button held
+     static int mouseOff = -1; if (mouseOff < 0) mouseOff = getenv("VAHL_MOUSE_OFF") != nullptr;   // the kit finds this name in the binary: the build has the mouse patch
+     if (!mouseOff) { auto &mo = amiga.controlPort1.mouse; size_t mp = k.find('m');

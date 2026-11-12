@@ -74,6 +74,14 @@ the request and the line's end lost the request: the host's channel played one w
 missing (SWIV, a capture at the VBL routine of frame 15003: channel 0's samples one word late for 1 721 samples).
 Rebuild with the current patch; `arek host state` writes the second request as the `@audio` line's 19th field.
 
+**1.0.65: `vamiga-keys-899da5d.patch`** (apply last, the eleventh): raw key events in the lines of `VAHL_INPUTS` -
+`K<hh>` presses and `k<hh>` releases the key with raw code hh (two lower-case hex digits, `K60` = left shift down),
+in the frame whose line they stand in, through the emulator's keyboard (its serial timing and handshake). Several in
+a line go in their order. `arek trace run --inputs` checks the lines and asks for the patch when a file has such
+tokens (the binary holds the name `VAHL_KEYS_OFF`; setting it switches them off). The build with all eleven is
+`VAHeadless-899da5d-kit-keys` (sha256 3d4480fc4a24bec3...); the six self-tests give the same numbers. The host's side:
+docs/HOST.md "Input lines".
+
 **Which build do I have?** Both commits print `vAmiga Headless v5.0b2`; only
 the build date in the banner differs. Measure it instead: break right after
 the game's own loader returns (`arek bpstate --address <return>`) and compare

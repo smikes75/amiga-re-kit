@@ -337,6 +337,20 @@ a line in such a frame and stay one behind: give the host the same rule with `ho
 the tick's pc is the breakpoint). With `--inputs-first F` the count starts as if every frame from F to the state's had
 taken one.
 
+Raw keys (1.0.65): a line may hold key events - `K<hh>` a key pressed, `k<hh>` released, hh = its raw code in two
+lower-case hex digits (`K60` left shift down, `k4c` cursor up released; `K4eK60` two in one line, in that order) - and
+`S` for space held, in the emulator's lines (a build with `vamiga-keys-899da5d.patch`) and in `host_trace`'s alike.
+They are events of the frame whose line they stand in, not held states. In the host they go through its keyboard
+(`host_key(code, down, t)` in `arek_host.h`), written after vAmiga's: an idle keyboard sends at once, the code rotated
+and inverted reaches CIA-A's SDR 1610 colour clocks later (eight bits of 210) plus the CIA's cycles and sets ICR's SP
+bit (PORTS with the mask bit); the next event waits for the game's handshake - CRA bit 6 set and cleared - and without
+one for 143 ms the keyboard resyncs as the real one does ($FD, $FE after the handshake). A press of a key that is down
+and a release of one that is up are dropped; ten events wait at most. Measured on SWIV, whose VBL routine polls ICR
+once a frame and holds the handshake for a frame: 5 619 records of 5 619 equal with shift, cursor keys, two events in
+a line and a press and release in neighbouring frames. Not measured: the E cycle in which the SP bit appears (taken
+from the emulator's source) and PORTS as an interrupt. A captured state starts with an idle keyboard and no key down.
+The engine's `engine_key` keeps its simpler path (one event a frame, SDR at once).
+
 ## A capture in the middle of a game: what state.txt carries
 
 `arek host state CAPTURE OUT` writes, after the registers and the frame number: the CIAs' timers (1.0.49; a running

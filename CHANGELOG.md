@@ -3,6 +3,20 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.65 (2026-11-12)
+
+- raw keys in the input lines, the same on both sides: `K<hh>` a key pressed, `k<hh>` released (the raw code in two
+  lower-case hex digits; an event of that frame, several in a line in their order)
+  - the original: `vamiga-keys-899da5d.patch`, the eleventh (**a new emulator build**, `VAHeadless-899da5d-kit-keys`);
+    `arek trace run --inputs` accepts the tokens and asks for the patch
+  - the rebuild: `host_trace`'s lines take them (and `S`, space held) and send them through a keyboard in
+    `arek_host.h` written after vAmiga's - the code in CIA-A's SDR 1610 colour clocks after the event plus the CIA's
+    cycles, ICR's SP bit, PORTS with the mask, the next code after the game's handshake (CRA bit 6), the resync after
+    143 ms without one; `host_key(code, down, t)` for a host of its own
+  - SWIV (the second player joins with left shift and steers with the cursor keys; its VBL routine polls the CIA once
+    a frame): the original and the host with the same lines, 5 619 records of 5 619 equal in registers and both
+    memory hashes; the host without the keys differs from the frame after the first one
+
 ## 1.0.64 (2026-11-12)
 
 - Paula model, audio DMA requests in two stages as the emulator holds them: in Paula from the moment a request is
