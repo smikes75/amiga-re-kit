@@ -140,6 +140,15 @@ int main(int argc, char **argv) {
         arek_bus_frame(&B, 312);
         int v = atoi(argv[3]); uint8_t *L = own + v * 227;
         printf("line %d:", v); for (int h = 0; h < 227; h++) printf(" %d", L[h]); printf("\n");
+    } else if (!strcmp(mode, "spr2")) {                       /* sprite 0: a list of two sprites, the second's VSTART from argv[3]; prints the lines with its slots */
+        /* first: lines $50-$57 (POS $5080, CTL $5800), 8 lines of data = 32 bytes; second: VSTART argv[3], VSTOP $60 */
+        int vs2 = (int)strtoul(argv[3], 0, 16);
+        RAM[0x2000] = 0x50; RAM[0x2001] = 0x80; RAM[0x2002] = 0x58; RAM[0x2003] = 0x00;
+        RAM[0x2024] = (uint8_t)vs2; RAM[0x2025] = 0x80; RAM[0x2026] = 0x60; RAM[0x2027] = 0x00;
+        regs[(0x120 >> 1)] = 0; regs[(0x122 >> 1)] = 0x2000;
+        for (int n = 1; n < 8; n++) { regs[(0x120 >> 1) + 2 * n] = 0; regs[(0x122 >> 1) + 2 * n] = 0x3000; }   /* the others: an empty list */
+        arek_bus_frame(&B, 312);
+        printf("lines:"); for (int v = 0; v < 312; v++) if (own[v * 227 + 0x15] == 16) printf(" %d", v); printf("\n");
     } else if (!strcmp(mode, "pri")) {
         double t = 1000;
         t = arek_bus_blit(&B, t, 0x09f0, 0, 0x0814);
@@ -188,6 +197,18 @@ def test_frame_map_fixed_dma(harness):
     assert all(h % 2 == 0 for h, x in enumerate(line0) if x == 24)
     off = harness('0000', 'map', 100)               # DMA off: only refresh
     assert {int(a): int(b) for a, b in (l.split()[1:] for l in off.splitlines() if l.startswith('owner')) if int(a)} == {2: 312 * 4}
+
+
+def test_a_sprite_list_whose_second_sprite_starts_at_or_before_the_firsts_end(harness):
+    """1.0.62 (SWIV, landscape 5), after vAmiga's sprite DMA: the control words are fetched in the line of VSTOP whatever
+    the sprite did, and a VSTART equal to the line of that fetch starts the data in the next line. Sprite 0: lines
+    $50-$57, then a second sprite to line $60. The slots were the blitter's and a blit beside them ended two slots
+    early."""
+    lines = lambda vs2: [int(x) for x in harness('83e0', 'spr2', vs2).split(':')[1].split()]
+    first = [25] + list(range(0x50, 0x58)) + [0x58]            # line 25, eight data lines, the control words at VSTOP
+    assert lines('5c') == first + list(range(0x5c, 0x60)) + [0x60]       # the usual case: a gap, then data and its VSTOP
+    assert lines('58') == first + list(range(0x59, 0x60)) + [0x60]       # VSTART = the line of the fetch: data from the next line
+    assert lines('57') == first + [0x60]                                # VSTART already passed: no data, but its control words at VSTOP
 
 
 def test_sprite_slots_yield_to_bitplanes(harness):

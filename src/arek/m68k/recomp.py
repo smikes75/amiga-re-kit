@@ -686,7 +686,11 @@ static void task_jump(M68 *m, uint32_t pc) {
     longjmp(TASK_JB, 1);
 }
 /* first: the call that starts the run; a plain return from it ends the run, as without --resume. on_switch: what the
-   host does when C frames are dropped (one may have been an interrupt's). A target that changed nothing is an empty routine. */
+   host does when C frames are dropped (one may have been an interrupt's). A target that changed nothing is an empty routine.
+   1.0.62: "changed nothing" is not "the stack is where it was" - a routine resumed here may push a target and end in an rts
+   that pops it (pea X(pc) ... rts: a7 as before, the run goes on at X). The last plain rts says so (RET_PC at this stack
+   height). SWIV, landscapes 2-4: such a routine, resumed after an interrupt had dropped the C frames, was taken for an
+   empty one, its continuation skipped, and the next long on the stack ($00640001, data) called. */
 #define TASK_RUN(m, first, on_switch) do { \
     uint32_t sp_ = (m)->a[7]; \
     TASK_ON = 1; \
@@ -694,8 +698,9 @@ static void task_jump(M68 *m, uint32_t pc) {
     else { on_switch; call_addr((m), TASK_PC); } \
     for (;;) { \
         uint32_t b_ = (m)->a[7]; \
+        RET_PC = NO_RET; \
         call_addr((m), RD32_RAW(b_ - 4)); \
-        if ((m)->a[7] == b_) (m)->a[7] += 4; \
+        if ((m)->a[7] == b_ && !(RET_PC != NO_RET && RET_SP == b_)) (m)->a[7] += 4; \
     } \
 } while (0)
 #define RTE_PLAIN(sp, e0, pc, p0) ((sp) == (e0) && (pc) == (p0))

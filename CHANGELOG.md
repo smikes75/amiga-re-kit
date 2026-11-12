@@ -3,6 +3,22 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.62 (2026-11-12)
+
+- `recomp --resume` runtime (**regenerate the translation**): TASK_RUN took a routine it had resumed from the stack for
+  an empty one whenever the stack stood where it was afterwards - also when the routine had pushed a continuation
+  (pea X(pc)), jumped on through a register and the rts there popped X. The continuation was skipped and the next long
+  on the stack called. Now the last plain rts decides (RET_PC at that stack height): the run goes on at X. SWIV,
+  landscapes 2-4: "unknown routine 640001" in the frame in which an interrupt had dropped the C frames inside such a
+  routine; with the fix all three run on with the original's VBL times to their next unknown root (17 390, 5 953 and
+  5 560 frames)
+- bus model, sprite DMA after vAmiga's Agnus: a sprite's control words are fetched in the line of its VSTOP whatever
+  the sprite did - also when its VSTART had passed before they came - and a VSTART equal to the line of that fetch
+  starts the data in the next line. A list whose second sprite starts on (or before) the first one's last line had
+  no slots for it; a blit beside them took the slots and ended two early. SWIV, landscape 5 (frames 12621 and 18482,
+  first seen as a random seed two off): the VBL routine's time equal in 18 727 frames of 18 727; the desert and the
+  final landscape unchanged at 18 734 and 18 735
+
 ## 1.0.61 (2026-11-12)
 
 - bus model, accesses carried over a frame's end beside a blit (1.0.56 / 1.0.58), three more things the game's

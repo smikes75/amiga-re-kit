@@ -628,6 +628,22 @@ def test_resume_pushed_target_and_profile_refused(tmp_path):
         recomp.generate(bytes.fromhex('4e75'), BASE, auto=[BASE], profile=True, resume=True)
 
 
+def test_a_resumed_routine_that_ends_in_an_rts_to_a_pushed_target_goes_on_there(tmp_path):
+    """1.0.62 (SWIV, landscapes 2-4: "unknown routine 640001"): after C frames were dropped (here an rts to a pushed
+    target; in the game an interrupt), the run goes on from the 68000's stack - TASK_RUN calls the address the last rts
+    popped. A routine resumed that way pushes a continuation (pea), jumps to a routine through a register and that one's
+    rts pops the continuation: the stack is where it was, and the loop took that for "the target did nothing", skipped
+    the continuation and called the next long on the stack.
+    1000 bsr 1020 ; 1004 pea 1010(pc) ; 1008 lea 1014(pc),a1 ; 100c jmp (a1) ; 100e nop
+    1010 moveq #7,d2 ; 1012 nop (exit) ; 1014 moveq #1,d1 ; 1016 rts
+    1020 move.l #$1030,-(a7) ; 1026 rts (a jump: the C frames go) ; 1030 moveq #3,d3 ; 1032 rts (back to 1004, from the stack)"""
+    code = ('6100001e' '487a000a' '43fa000a' '4ed1' '4e71' '7407' '4e71' '7201' '4e75' + '4e71' * 4
+            + '2f3c00001030' '4e75' + '4e71' * 4 + '7603' '4e75')
+    d, a, _, _ = run(tmp_path, code, {}, auto=(BASE, 0x1004, 0x1010, 0x1014, 0x1030), resume=True,
+                     flow=Flow(exits=[0x1012], dynamic=[0x100c]))
+    assert (d[1], d[2], d[3]) == (1, 7, 3) and a[7] == 0x80000 - 0x100
+
+
 def test_resume_module_and_cli(tmp_path):
     src, _, _ = recomp.generate(bytes.fromhex('7001 4e71 4e75'.replace(' ', '')), 0x8000, auto=[0x8000], resume=True,
                                 flow=Flow(lib=True, prefix=('m_', 0x8000, 0x8006), module=(0x8000, 6)))

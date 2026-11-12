@@ -49,14 +49,15 @@ void arek_bus_frame_map(ArekBus *b) {
         if (den && (dma & 0x20) && v >= 25 && v < NL - 1) for (int n = 0; n < 8; n++) {
             BSpr *p = &S[n]; int fetch = 0, s1 = 0x15 + 4 * n, s2 = 0x17 + 4 * n;
             if (v == 25) fetch = 1;
-            else if (p->st == 2 && (int)v == p->ve) fetch = 1;
+            else if (p->st != 0 && p->ve >= 0 && (int)v == p->ve) fetch = 1;   /* 1.0.62: at VSTOP whatever the sprite did (vAmiga executeFirstSpriteCycle) - also one whose VSTART had passed when its control words came (SWIV, landscape 5: a second sprite in the list with VSTART below the first one's VSTOP; its two slots were the blitter's) */
             else if ((p->st == 1 || p->st == 2) && (int)v >= p->vs && (int)v < p->ve) {
                 p->st = 2; if (s1 < sp_lim) { L[s1] = 16 + n; p->ptr += 2; } if (s2 < sp_lim) { L[s2] = 16 + n; p->ptr += 2; } continue; }
             if (fetch) {
                 uint32_t pos = b->rd16(b->ctx, p->ptr), ctl = b->rd16(b->ctx, p->ptr + 2); p->ptr += 4;
                 if (s1 < sp_lim) L[s1] = 16 + n; if (s2 < sp_lim) L[s2] = 16 + n;
                 p->vs = (pos >> 8) | ((ctl & 4) << 6); p->ve = (ctl >> 8) | ((ctl & 2) << 7); p->st = (pos | ctl) ? 1 : 3;
-                if (p->st == 1 && p->vs <= (int)v) p->st = 3;
+                if (p->st == 1 && p->vs < (int)v) p->st = 3;        /* VSTART has passed: no data this frame (the control words at VSTOP still come) */
+                else if (p->st == 1 && p->vs == (int)v) p->st = 2;   /* 1.0.62: VSTART is this very line - the DMA is on from the next one (vAmiga setSPRxPOS / setSPRxCTL compare at once); SWIV, landscape 5: the list's second sprite starts on the first one's VSTOP */
             }
         }
         int bdone = 0;
