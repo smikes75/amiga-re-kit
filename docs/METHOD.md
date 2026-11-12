@@ -81,7 +81,9 @@ really drive Agnus, Denise and Paula.
 a register struct, logging every write. The decoder raises on anything it
 does not model (`chk`, `movep`, `tas`, …) instead of skipping it. What the translation does NOT notice
 by itself: a write over bytes that were translated (self-modifying code: name the place in the flow
-options), a word access at an odd address, and whatever `arek difftest` has not covered - every opcode
+options - `--indirect` for a `jmp` whose operand is rewritten, `--smc ADDR=WORDS[,WORDS]` (1.0.66) for an instruction
+that is replaced: the translation holds each content, takes the one whose words are in RAM when the place runs, with its
+own clocks and bus row, and stops on words nobody named), a word access at an odd address, and whatever `arek difftest` has not covered - every opcode
 is compared with Moira, since 1.0.40 also with directed encodings (movem with its base register in the
 list, every form of the index word, displacements with the sign bit, bit numbers past the operand). Jump tables and library calls become named stubs
 (`--stub a6:-198:OpenLibrary`) you implement.

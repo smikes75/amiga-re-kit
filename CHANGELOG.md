@@ -3,6 +3,36 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.66 (2026-11-12)
+
+- bus model, sprite DMA: the switch as Agnus has it (vAmiga `updateSpriteDMA`) - on in the line that EQUALS VSTART,
+  off in the line that equals VSTOP. The map asked for VSTART <= line < VSTOP: control words with VSTOP above VSTART
+  (data words read as control words behind a sprite of the list whose VSTART had passed) got no slot, in the original
+  the DMA ran from VSTART to the frame's last line and the CPU waited for its slots. A Copper write to SPRxPOS / CTL
+  compares at once too
+  - SWIV, sci-fi landscape with the trainer's spread and five missiles (sprite 7 on lines 224-311 from frame 6200):
+    the first differing register write was in frame 6201 (the VBL's 126 colour clocks early); now 5 960 records of
+    5 960 equal in both memory hashes and every CPU register write up to frame 6748, where the run ended
+- `arek recomp --smc ADDR=WORDS[,WORDS]` (Flow.smc): an instruction the program REWRITES (a crack's trainer turns an
+  `add` into a `tst`, a `divu` into a `bra.s`). The translation holds every content - the words given are decoded with
+  the image's bytes behind them, several instructions if they hold several - and takes the one whose words are in RAM
+  when the place runs, each with its own clocks and bus-table row (bit 7 of the image row's flags sends `bus_tab_row`
+  to `bus_smc_row`); words nobody named are `unknown_call`. A call or a jump as the other content is refused. Without
+  the option the output is byte for byte as before
+  - SWIV (three places, the options F1 F2 F3): 9 000 frames of random play - with the options on the trace equals the
+    translation of the patched image byte for byte, with them off the unpatched one's; the two differ from each other
+- the page engine, colours: `engine_dac(1)` gives `engine_rgb` the Amiga's converter (a component * 17, half-bright
+  on the 4 bits; `ard_pal_dac`) instead of vAmiga's monitor, which stays the default for comparisons with screenshots
+  ($FFF 236, $888 106: darker by 25 of 255 on average). Node: `open(dir, { dac: true })`, `eng.dac()`
+  - SWIV, 13 frames up to 3000: byte for byte the picture its own rewrite of the table gave, the same hashes
+- the page engine, raw keys: `engine_keyboard(1)` (natively `--keyboard`, Node `{ keyboard: true }`) sends
+  `engine_key`'s events through the host's keyboard of 1.0.65 (the serial port, the handshake), all that wait at the
+  frame's start; the default stays one event a frame straight into SDR
+- wb-takt 1.6: a modifier key the map names is the game's (`ControlLeft` = fire) - its own keydown carries its flag
+  and was dropped as the browser's since 1.0.41, so fire by Ctrl never went down; the mapped keys pressed while it is
+  held are the game's too
+- wb.css: no frame around the game canvas (the 1 px box-shadow; SWIV, Xenon 2 and Turrican II each switched it off)
+
 ## 1.0.65 (2026-11-12)
 
 - raw keys in the input lines, the same on both sides: `K<hh>` a key pressed, `k<hh>` released (the raw code in two

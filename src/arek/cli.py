@@ -318,7 +318,7 @@ def cmd_recomp(a):
     funcs = [recomp.parse_func_spec(s) for s in a.func or []]
     flow = recomp.flow_from_specs(data, a.base, a.jtab or [], a.indirect or [], a.stop or [],
                                   a.exitat or [], a.extern or [], a.ret or [], a.prefix, a.lib,
-                                  a.inline or [], a.overlay or [], a.dynamic or [], a.overlay_module)
+                                  a.inline or [], a.overlay or [], a.dynamic or [], a.overlay_module, a.smc or [])
     impl = None
     if a.stub_impl:
         impl = 'notes' if a.stub_impl == 'notes' else Path(a.stub_impl).read_text()
@@ -1099,6 +1099,9 @@ def build_parser():
                         'an = An known only at run time (slot = (An - TABLE + Dn) / STRIDE)')
     s.add_argument('--indirect', nargs='*', metavar='SITE=T1,T2',
                    help='possible targets of jsr/jmp (An), or of a jmp abs the program rewrites')
+    s.add_argument('--smc', nargs='*', action='extend', metavar='ADDR=WORDS[,WORDS]',
+                   help='the instruction at ADDR is rewritten by the program (a trainer): its other contents as hex words from ADDR '
+                        '(the opcode word will do); the translation holds each and takes the one in RAM when the place runs; repeatable')
     s.add_argument('--stop', nargs='*', metavar='ADDR', help='never translate (a branch into data)')
     s.add_argument('--exitat', nargs='*', metavar='ADDR', help='calling it ends the run (exit_point)')
     s.add_argument('--extern', nargs='*', action='extend', metavar='ADDR=NAME', help='replace a routine by C NAME(M68 *m); repeatable')

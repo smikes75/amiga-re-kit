@@ -26,6 +26,16 @@ document.getElementById('about-open').onclick = () => shell.openDialog('about-sh
 </script></body></html>"""
 
 
+def test_no_frame_around_the_game_canvas():
+    """1.0.66 (SWIV, Xenon 2, Turrican II switched it off each): wb.css draws no frame around the game canvas - no
+    border (it resized the picture, 1.0.41) and no box-shadow; the CRT's vignette on .game::after stays."""
+    import re
+    css = (WEB / 'wb.css').read_text()
+    rule = re.search(r'\.game canvas\{([^}]*)\}', css).group(1)
+    assert 'box-shadow' not in rule and 'border' not in rule and 'outline:0' in rule and 'background:#000' in rule
+    assert re.search(r'\.game::after\{[^}]*box-shadow:inset', css)
+
+
 def test_shipped_and_copied(tmp_path, capsys):
     assert 'wb-menu.js' in web.FILES and 'wb.css' in web.FILES and web.SHELL == ('wb-menu.js', 'wb.css')
     for name in web.SHELL:

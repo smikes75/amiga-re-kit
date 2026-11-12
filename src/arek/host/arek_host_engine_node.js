@@ -115,6 +115,9 @@ class Engine {
     /** the last frame's picture as RGB24, { w, h, data } (a copy; vAmiga's 716 x 285 layout) */
     rgb() { const M = this.M, w = M._engine_rgb_w(), h = M._engine_rgb_h(); return { w, h, data: M.HEAPU8.slice(M._engine_rgb(), M._engine_rgb() + w * h * 3) }; }
     frameNo(n) { return this.M._engine_fr_frame(n === undefined ? this.done() - 1 : n); }
+    /** 1.0.66: rgb()'s colours from the next finished frame on - true = the Amiga's converter (component * 17, as the page shows
+     *  them after engine_dac(1)), false = vAmiga's monitor (the default); open(dir, { dac: true }) sets it before the first frame */
+    dac(on) { this.M._engine_dac(on === false ? 0 : 1); return this; }
 }
 
 async function open(dir, opts) {
@@ -124,6 +127,8 @@ async function open(dir, opts) {
     const M = await Factory({ wasmBinary: fs.readFileSync(path.resolve(dir, name + '.wasm')) });
     const eng = new Engine(M, opts);
     if (opts.hash) M._engine_hash_on(1);
+    if (opts.dac) M._engine_dac(1);
+    if (opts.keyboard) M._engine_keyboard(1);   // 1.0.66: key() through the host's keyboard (the serial port, the handshake)
     if (opts.state) eng.init(opts.state);
     if (opts.disks) opts.disks.forEach((f, i) => eng.disk(i, f));
     return eng;

@@ -163,6 +163,8 @@ int main(int argc, char **argv) {
         int vs2 = (int)strtoul(argv[3], 0, 16);
         RAM[0x2000] = 0x50; RAM[0x2001] = 0x80; RAM[0x2002] = 0x58; RAM[0x2003] = 0x00;
         RAM[0x2024] = (uint8_t)vs2; RAM[0x2025] = 0x80; RAM[0x2026] = 0x60; RAM[0x2027] = 0x00;
+        if (argc > 4) { unsigned long w = strtoul(argv[4], 0, 16);            /* the words behind the second's control words: when no data came, the next control words */
+            RAM[0x2028] = (uint8_t)(w >> 24); RAM[0x2029] = (uint8_t)(w >> 16); RAM[0x202a] = (uint8_t)(w >> 8); RAM[0x202b] = (uint8_t)w; }
         regs[(0x120 >> 1)] = 0; regs[(0x122 >> 1)] = 0x2000;
         for (int n = 1; n < 8; n++) { regs[(0x120 >> 1) + 2 * n] = 0; regs[(0x122 >> 1) + 2 * n] = 0x3000; }   /* the others: an empty list */
         arek_bus_frame(&B, 312);
@@ -227,6 +229,19 @@ def test_a_sprite_list_whose_second_sprite_starts_at_or_before_the_firsts_end(ha
     assert lines('5c') == first + list(range(0x5c, 0x60)) + [0x60]       # the usual case: a gap, then data and its VSTOP
     assert lines('58') == first + list(range(0x59, 0x60)) + [0x60]       # VSTART = the line of the fetch: data from the next line
     assert lines('57') == first + [0x60]                                # VSTART already passed: no data, but its control words at VSTOP
+
+
+def test_sprite_dma_runs_from_vstart_to_the_frames_end_when_vstop_is_behind_it(harness):
+    """1.0.66 (SWIV, the sci-fi landscape with the trainer's five missiles), after vAmiga's updateSpriteDMA: the DMA is
+    switched on in the line that EQUALS VSTART and off in the line that equals VSTOP. Control words with VSTOP above
+    VSTART - here the words behind a sprite that never started, read as the next control words - start the data at
+    VSTART and nothing stops it before the frame's last line. The map gave such a sprite no slot (it asked for
+    VSTART <= line < VSTOP); the original's CPU waited for those slots and its blits came later."""
+    lines = lambda *a: [int(x) for x in harness('83e0', 'spr2', *a).split(':')[1].split()]
+    first = [25] + list(range(0x50, 0x58)) + [0x58]
+    assert lines('57', '70804000') == first + [0x60] + list(range(0x70, 311))    # VSTART $70, VSTOP $40: to the end
+    assert lines('57', '70807800') == first + [0x60] + list(range(0x70, 0x78)) + [0x78]   # VSTOP $78: the usual sprite
+    assert lines('57', '50804000') == first + [0x60]                              # both passed: nothing more
 
 
 def test_sprite_slots_yield_to_bitplanes(harness):

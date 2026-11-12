@@ -38,6 +38,18 @@ def test_a_key_with_a_modifier_is_the_browsers():
     assert r == {'seen': [], 'prevented': [], 'bits': 0}                    # Cmd+R reloads: not taken, not prevented
 
 
+def test_a_modifier_the_map_names_is_the_games_key():
+    """wb-takt 1.6 (kit 1.0.66; SWIV, Xenon 2 and Turrican II map ControlLeft to fire): the keydown of Control itself
+    has ctrlKey set and was dropped with the browser's keys - fire by Ctrl never went down. A mapped modifier is the
+    game's, and so are the mapped keys pressed while it is held; an unmapped key with it stays the browser's."""
+    kb = KB.replace("{ ArrowRight: 1, KeyR: 2 }", "{ ArrowRight: 1, KeyR: 2, ControlLeft: 16, ControlRight: 16 }")
+    r = js('wb-takt.js', kb % ("H.keydown(ev('ControlLeft', { ctrlKey: true })); H.keydown(ev('ArrowRight', { ctrlKey: true })); H.keydown(ev('KeyW', { ctrlKey: true }));"
+                               "H.keyup(ev('ArrowRight', { ctrlKey: true })); H.keyup(ev('ControlLeft'));"))
+    assert r == {'seen': [16, 17, 16, 0], 'prevented': ['ControlLeft', 'ArrowRight'], 'bits': 0}
+    r = js('wb-takt.js', kb % "H.keydown(ev('ArrowRight', { metaKey: true })); H.keydown(ev('ArrowRight', { altKey: true }));")
+    assert r == {'seen': [], 'prevented': [], 'bits': 0}                    # Cmd and Alt are not in the map: still the browser's
+
+
 def test_no_key_stays_down_behind_the_pages_back():
     r = js('wb-takt.js', KB % "H.keydown(ev('ArrowRight')); H.keyup({ code: 'MetaLeft', key: 'Meta' });")       # macOS: no keyup while Cmd is held
     assert r['seen'] == [1, 0] and r['bits'] == 0

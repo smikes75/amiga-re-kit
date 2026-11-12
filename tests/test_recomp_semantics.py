@@ -181,7 +181,7 @@ def test_jsr_absolute_and_jmp_pc_relative_reach_translated_code(tmp_path):
     prog = ('4eb900001014' '4efa000a' '33fcdead00004002' '4e75'
             '33fcbeef00004000')
     src, stats, entries = recomp.generate(bytes.fromhex(prog + '4e75'), BASE, auto=[BASE], with_main=True)
-    assert 'unknown_call(0x1014u)' not in src
+    assert 'unknown_call(0x1012u)' not in src
     *_, mem = run(tmp_path, prog, {})
     assert mem[0x4000:0x4004] == bytes.fromhex('beef0000')
 
@@ -224,6 +224,89 @@ def test_jmp_whose_operand_the_program_rewrites(tmp_path):
     flow = Flow(indirect={0x100a: [0x1020, 0x1030]})
     d, *_ = run(tmp_path, code_at(entry), {}, flow=flow)
     assert d[1] == 0x2222
+
+
+# 1.0.66 (SWIV: the crack's trainer rewrites instructions of the game by the options chosen): --smc / Flow.smc
+#   1000 tst.w d0 ; 1002 beq.s 100a ; 1004 move.w d0,$1012.l (the program writes the opcode word it was given)
+#   100a move.w #5,$4000.l ; 1012 addq.w #1,$4000.l ; 1018 addq.w #1,$4002.l ; 101e addq.w #1,$4004.l ; 1024 rts
+SMC_PROG = '4a40' '6706' '33c000001012' '33fc000500004000' '527900004000' '527900004002' '527900004004'
+
+
+def test_a_rewritten_instruction_runs_as_what_ram_holds(tmp_path):
+    """One translation holds the instruction of the image and the ones the program may write there; the words in RAM
+    choose when the place runs. Before, the image's instruction ran whatever the program wrote."""
+    flow = Flow(smc={0x1012: [bytes.fromhex('4a79'), bytes.fromhex('600a')]})   # tst.w $4000.l / bra.s $101e
+    got = []
+    for d0 in (0, 0x4a79, 0x600a):
+        *_, mem = run(tmp_path, SMC_PROG, {'d0': d0}, flow=flow)
+        got.append(mem[0x4000:0x4006].hex())
+    assert got == ['000600010001',                           # as the image: 5 + 1, both others counted
+                   '000500010001',                           # tst.w: nothing added (its extension words are the image's)
+                   '000500000001']                           # bra.s over the first two
+    *_, mem = run(tmp_path, SMC_PROG, {'d0': 0x4a79})
+    assert mem[0x4000:0x4002].hex() == '0006'               # without the option the translation does not notice
+
+
+def test_a_rewritten_instruction_with_words_nobody_named_stops(tmp_path):
+    flow = Flow(smc={0x1012: [bytes.fromhex('4a79')]})
+    with pytest.raises(subprocess.CalledProcessError) as e:
+        run(tmp_path, SMC_PROG, {'d0': 0x4e71}, flow=flow)   # a nop there: not the image's, not a named one
+    assert e.value.returncode == 4
+
+
+def test_rewritten_two_nops_over_a_call_and_an_rts(tmp_path):
+    """The other content may be several instructions (two nop over a bsr.w) or end the routine (rts)."""
+    # 1000 tst.w d0 ; 1002 beq.s 100a ; 1004 move.l d0,$100a.l ; 100a bsr.w $1016 ; 100e addq.w #1,$4002.l ; 1014 rts
+    # 1016 addq.w #1,$4000.l ; 101c rts
+    prog = '4a40' '6706' '23c00000100a' '6100000a' '527900004002' '4e75' '527900004000'
+    flow = Flow(smc={0x100a: [bytes.fromhex('4e714e71'), bytes.fromhex('4e75')]})
+    got = []
+    for d0 in (0, 0x4e714e71, 0x4e75000a):
+        *_, mem = run(tmp_path, prog, {'d0': d0}, flow=flow)
+        got.append(mem[0x4000:0x4004].hex())
+    assert got == ['00010001', '00000001', '00000000']
+
+
+def test_rewritten_instruction_clocks_and_bus_rows(tmp_path):
+    """With --timing every content counts its own clocks, and the bus table gives its own row while it is in RAM
+    (bit 7 of the image row's flags sends the lookup to bus_smc_row)."""
+    flow = Flow(smc={0x1012: [bytes.fromhex('4a79'), bytes.fromhex('600a')]})
+    cyc = []
+    for d0 in (0, 0x4a79, 0x600a):
+        logs = []
+        run(tmp_path, SMC_PROG, {'d0': d0}, flow=flow, timing=True, logs=logs)
+        cyc.append(int(logs[0].split('cycles ')[1].split()[0]))
+    # tst.w d0 4, beq 10 taken / 8 not + move.w d0,abs.l 16, move.w #,abs.l 20, addq.w #1,abs.l 20 each, rts 16
+    assert cyc == [4 + 10 + 20 + 60 + 16, 4 + 8 + 16 + 20 + 16 + 40 + 16, 4 + 8 + 16 + 20 + 10 + 20 + 16], cyc
+    src, _, _ = recomp.generate(bytes.fromhex(SMC_PROG + '4e75'), BASE, auto=[BASE], flow=flow, timing=True, bus_table=True)
+    assert 'static const uint8_t BUS_SMC[2][6]' in src and '(r[2] & 0x80) ? bus_smc_row(pc, r) : r' in src
+    assert 'if (pc == 0x1012u && (rd16_raw(0x1012u) == 0x4a79u)) return BUS_SMC[0];' in src
+    # the row a host's tick_hook gets at the place: the image's, the tst's, the bra's
+    from arek.m68k.decoder import decode
+    from arek.m68k.timing import bus_table_entry
+    hook = '\nvoid tick_hook(M68 *m, uint32_t pc, uint32_t clocks) { (void)m; (void)clocks; if (pc == 0x1012u) { const uint8_t *r = bus_tab_row(pc); MEM[0x4010] = r[0]; MEM[0x4011] = r[1]; MEM[0x4012] = r[2]; } }\n'
+    prog, rows = bytes.fromhex(SMC_PROG + '4e75'), []
+    for d0 in (0, 0x4a79, 0x600a):
+        *_, mem = run(tmp_path, SMC_PROG, {'d0': d0}, flow=flow, timing=True, bus_table=True, pre_c='#define TICK_HOOK 1\n', extra_c=hook)
+        rows.append(tuple(mem[0x4010:0x4013]))
+    want = [bus_table_entry(decode(prog[:0x12] + alt + prog[0x12 + len(alt):], BASE, 0x1012)) for alt in (b'', b'\x4a\x79', b'\x60\x0a')]
+    assert rows == [want[0][:2] + (want[0][2] | 0x80,), want[1], want[2]] and want[0][0] == 3 and want[2][0] == 1, (rows, want)
+    plain, _, _ = recomp.generate(bytes.fromhex(SMC_PROG + '4e75'), BASE, auto=[BASE], timing=True, bus_table=True)
+    assert 'BUS_SMC' not in plain and 'bus_smc_row' not in plain and 'unknown_call(0x1012u)' not in plain
+
+
+def test_smc_refusals_and_the_command_line(tmp_path, capsys):
+    from arek.m68k.decoder import Unsupported
+    prog = bytes.fromhex(SMC_PROG + '4e75')
+    for alt, why in (('4eb9', 'a call or a jump'), ('5279', 'what the image holds'), ('4a', 'whole words')):
+        with pytest.raises(Unsupported, match=why):
+            recomp.generate(prog, BASE, auto=[BASE], flow=Flow(smc={0x1012: [bytes.fromhex(alt)]}))
+    f = tmp_path / 'p.bin'
+    f.write_bytes(prog)
+    assert cli.main(['recomp', str(f), '--base', '0x1000', '--auto', '0x1000', '--smc', '1012=4a79,600a', '-o', str(tmp_path / 'p.c')]) == 0
+    src = (tmp_path / 'p.c').read_text()
+    assert 'if ((rd16_raw(0x1012u) == 0x4a79u)) {   /* --smc: ' in src and '} else if ((rd16_raw(0x1012u) == 0x600au)) {' in src
+    assert '} else if ((rd16_raw(0x1012u) == 0x5279u)) {' in src and 'unknown_call(0x1012u); return; }' in src
 
 
 def test_external_routine_and_exit_point(tmp_path):

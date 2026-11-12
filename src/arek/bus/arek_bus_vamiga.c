@@ -10,7 +10,7 @@
 
 /* plan 1-6 ve skupine 8 taktu lores (vAmiga SequencerBpl) */
 static const uint8_t LORES_SLOT8[6] = { 7, 3, 5, 1, 6, 2 };
-typedef struct { uint32_t ptr; int vs, ve, st; } BSpr;   /* st: 0 ceka na POS/CTL (radek 25), 1 ceka na vstart, 2 data, 3 konec */
+typedef struct { uint32_t ptr; int vs, ve, st, on; } BSpr;   /* st: 0 no control words yet (line 25 brings them), 1 known; on: the data DMA is running */
 
 /* Pevne DMA snimku: obnova, sprity, bitplany, copper. Copper: kazdy krok ceka na volnou sbernici, FETCH/REQ jen v sudem taktu,
  * dalsi krok za 2 takty (vAmiga CopperEvents). Registry, ktere copper zapsal minuly snimek, plati na zacatku dalsiho (copr/copw). */
@@ -41,7 +41,7 @@ void arek_bus_frame_map(ArekBus *b) {
     uint32_t cp = ((uint32_t)R[0x080 >> 1] << 16 | R[0x082 >> 1]) & b->chipmask; if (!cp) cp = b->cop_default;   /* COP1LC jeste nezapsany (start ze stavu) */
     int cact = 0;                                            /* 1.0.52: the Copper has fetched in this frame */
     int cst = 1, cnext = 0; uint16_t c1 = 0, c2 = 0; uint32_t cwait = 0, cmask = 0;   /* copper: 1 FETCH, 2 MOVE, 3 WAIT_OR_SKIP, 4 WAIT1, 5 WAIT2, 6 cekani, 7 SKIP1, 8 SKIP2, 0 stop */
-    int vflop = 0; BSpr S[8]; for (int n = 0; n < 8; n++) { S[n].ptr = ((uint32_t)R[(0x120 >> 1) + 2 * n] << 16 | R[(0x122 >> 1) + 2 * n]) & b->chipmask; S[n].st = 0; S[n].vs = S[n].ve = -1; }
+    int vflop = 0; BSpr S[8]; for (int n = 0; n < 8; n++) { S[n].ptr = ((uint32_t)R[(0x120 >> 1) + 2 * n] << 16 | R[(0x122 >> 1) + 2 * n]) & b->chipmask; S[n].st = 0; S[n].on = 0; S[n].vs = S[n].ve = -1; }
     for (uint32_t v = 0; v < NL; v++) {
         uint8_t *L = b->own + v * H;
         L[1] = L[3] = L[5] = L[H - 1] = 2;   /* obnova: PAL 1/3/5/226 */
@@ -55,16 +55,23 @@ void arek_bus_frame_map(ArekBus *b) {
         if (den && (dma & 0x100) && vflop && ((R[0x100 >> 1] >> 12) & 7)) sp_lim = (R[0x092 >> 1] & 0xfc) - 1;
         if (den && (dma & 0x20) && v >= 25 && v < NL - 1) for (int n = 0; n < 8; n++) {
             BSpr *p = &S[n]; int fetch = 0, s1 = 0x15 + 4 * n, s2 = 0x17 + 4 * n;
+            /* 1.0.66: the DMA's switch as Agnus has it (vAmiga updateSpriteDMA, executeFirstSpriteCycle, setSPRxPOS / CTL) - set
+             * on the line that EQUALS VSTART, cleared on the line that equals VSTOP, where the next control words come.
+             * Before, data came on the lines VSTART <= v < VSTOP: control words with VSTOP above VSTART (data words read
+             * as control words, after a sprite in the list whose VSTART had passed) gave no data, the original's DMA ran
+             * from VSTART to the frame's end (SWIV, the sci-fi landscape with five missiles: sprite 7 on lines 224-311,
+             * a slot the CPU waited for on some lines - the blits behind came 67 colour clocks late by line 309) */
             if (v == 25) fetch = 1;
-            else if (p->st != 0 && p->ve >= 0 && (int)v == p->ve) fetch = 1;   /* 1.0.62: at VSTOP whatever the sprite did (vAmiga executeFirstSpriteCycle) - also one whose VSTART had passed when its control words came (SWIV, landscape 5: a second sprite in the list with VSTART below the first one's VSTOP; its two slots were the blitter's) */
-            else if ((p->st == 1 || p->st == 2) && (int)v >= p->vs && (int)v < p->ve) {
-                p->st = 2; if (s1 < sp_lim) { L[s1] = 16 + n; p->ptr += 2; } if (s2 < sp_lim) { L[s2] = 16 + n; p->ptr += 2; } continue; }
+            else {
+                if (p->st && (int)v == p->vs) p->on = 1;
+                if (p->st && (int)v == p->ve) { p->on = 0; fetch = 1; }   /* at VSTOP whatever the sprite did (1.0.62) */
+                else if (p->on) { if (s1 < sp_lim) { L[s1] = 16 + n; p->ptr += 2; } if (s2 < sp_lim) { L[s2] = 16 + n; p->ptr += 2; } continue; }
+            }
             if (fetch) {
                 uint32_t pos = b->rd16(b->ctx, p->ptr), ctl = b->rd16(b->ctx, p->ptr + 2); p->ptr += 4;
                 if (s1 < sp_lim) L[s1] = 16 + n; if (s2 < sp_lim) L[s2] = 16 + n;
-                p->vs = (pos >> 8) | ((ctl & 4) << 6); p->ve = (ctl >> 8) | ((ctl & 2) << 7); p->st = (pos | ctl) ? 1 : 3;
-                if (p->st == 1 && p->vs < (int)v) p->st = 3;        /* VSTART has passed: no data this frame (the control words at VSTOP still come) */
-                else if (p->st == 1 && p->vs == (int)v) p->st = 2;   /* 1.0.62: VSTART is this very line - the DMA is on from the next one (vAmiga setSPRxPOS / setSPRxCTL compare at once); SWIV, landscape 5: the list's second sprite starts on the first one's VSTOP */
+                p->vs = (pos >> 8) | ((ctl & 4) << 6); p->ve = (ctl >> 8) | ((ctl & 2) << 7); p->st = 1; p->on = 0;
+                if (v >= 26) { if (p->vs == (int)v) p->on = 1; if (p->ve == (int)v) p->on = 0; }   /* the registers compare at once (1.0.62): VSTART on this very line - data from the next one */
             }
         }
         int bdone = 0;
@@ -117,7 +124,8 @@ void arek_bus_frame_map(ArekBus *b) {
                   else if (reg >= 0x120 && reg < 0x140) { R[reg >> 1] = c2; int n = (reg - 0x120) >> 2; S[n].ptr = ((uint32_t)R[(0x120 >> 1) + 2 * n] << 16 | R[(0x122 >> 1) + 2 * n]) & b->chipmask; }
                   else if (reg >= 0x140 && reg < 0x180 && !(reg & 4)) {   /* SPRxPOS/SPRxCTL: Agnus z nich bere okno DMA spritu */
                       R[reg >> 1] = c2; int n = (reg - 0x140) >> 3; uint32_t pos = R[(0x140 >> 1) + 4 * n], ctl = R[(0x142 >> 1) + 4 * n];
-                      S[n].vs = (pos >> 8) | ((ctl & 4) << 6); S[n].ve = (ctl >> 8) | ((ctl & 2) << 7); S[n].st = 1; }
+                      S[n].vs = (pos >> 8) | ((ctl & 4) << 6); S[n].ve = (ctl >> 8) | ((ctl & 2) << 7); S[n].st = 1;
+                      { int vv = h < 0xe1 ? (int)v : (int)v + 1; if (vv >= 26) { if (S[n].vs == vv) S[n].on = 1; if (S[n].ve == vv) S[n].on = 0; } } }   /* 1.0.66: and compare at once, as the DMA's own fetch */
                   else R[reg >> 1] = c2;
                   if (reg < 0x200) { b->copr[reg >> 1] = R[reg >> 1]; b->copw[reg >> 1] = 1; } }
                 break;

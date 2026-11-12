@@ -761,6 +761,7 @@ class Gen:
         self.labels = {}                                 # entry -> [instruction addresses], with resume
         self.bus_table = bus_table and not flow.lib      # the table lives with the main runtime
         self.tab_insns = {}                              # pc -> Insn of every translated instruction
+        self.smc_rows = {}                               # (pc, bytes) -> (site, Insn): the other contents of rewritten places (Flow.smc)
         self.profile = profile and not flow.lib          # the profile lives in the main runtime
         self.cover = cover and not flow.lib              # so does the coverage bitmap
         self.cover_in_tick = cover_in_tick and timing    # the mark rides in TICK: no extra lines in the body
@@ -842,14 +843,24 @@ class Gen:
             return var_ix[key]
         n = max(1, len(self.data) // 2)
         rows = {}
+
+        def row_of(i, flag=0):
+            try:
+                v = var_of(i)
+                w, x, f = bus_table_entry(i)
+                return '%d,%d,%d' % (w, x, f | flag) + ',%d,%d,%d' % (bus_order(i) | bus_poll(i) << 2, v & 255, v >> 8)
+            except Unsupported:
+                return '%d,0,%d,0,0,0' % ((i.end - i.addr) // 2, flag)
+        smc_pcs = {pc for pc, _ in self.smc_rows}          # 1.0.66: bit 7 of the flags = a rewritten place, bus_smc_row decides
         for pc, i in self.tab_insns.items():
             k = (pc - self.base) // 2
             if 0 <= k < n:
-                try:
-                    v = var_of(i)
-                    rows[k] = '%d,%d,%d' % bus_table_entry(i) + ',%d,%d,%d' % (bus_order(i) | bus_poll(i) << 2, v & 255, v >> 8)
-                except Unsupported:
-                    rows[k] = '%d,0,0,0,0,0' % ((i.end - i.addr) // 2)
+                rows[k] = row_of(i, 0x80 if pc in smc_pcs else 0)
+        for pc in smc_pcs:                                  # an instruction only the other content has there
+            k = (pc - self.base) // 2
+            if 0 <= k < n and k not in rows:
+                rows[k] = '0,0,128,0,0,0'
+        smc_tab = [(pc, alt, site, row_of(x)) for (pc, alt), (site, x) in sorted(self.smc_rows.items())]
         segs = []
         for k in sorted(rows):
             if segs and k - segs[-1][1] <= 256:
@@ -876,8 +887,20 @@ class Gen:
         self.emit('static const uint32_t BUS_SEG_LO[BUS_SEGS_N] = {%s};' % ', '.join('0x%xu' % (self.base + 2 * a) for a, b in segs))
         self.emit('static const uint32_t BUS_SEG_HI[BUS_SEGS_N] = {%s};' % ', '.join('0x%xu' % (self.base + 2 * b + 2) for a, b in segs))
         self.emit('static const uint8_t (*const BUS_SEGS[BUS_SEGS_N])[6] = {%s};' % ', '.join('BUS_SEG%d' % j for j in range(len(segs))))
+        if smc_tab:
+            self.emit('/* --smc: the rows of the other contents of rewritten places, taken while their words are in RAM */')
+            self.emit('static const uint8_t BUS_SMC[%d][6] = {%s};' % (len(smc_tab), ','.join('{%s}' % r for _, _, _, r in smc_tab)))
+            self.emit('static const uint8_t *bus_smc_row(uint32_t pc, const uint8_t *r) {')
+            for j, (pc, alt, site, _) in enumerate(smc_tab):
+                self.emit('    if (pc == 0x%xu && %s) return BUS_SMC[%d];' % (pc, smc_cond(site, alt), j))
+            self.emit('    return r;')
+            self.emit('}')
         self.emit('static inline const uint8_t *bus_tab_row(uint32_t pc) {')
-        self.emit('    for (int k = 0; k < BUS_SEGS_N; k++) if (pc >= BUS_SEG_LO[k] && pc < BUS_SEG_HI[k]) return BUS_SEGS[k][(pc - BUS_SEG_LO[k]) >> 1];')
+        if smc_tab:
+            self.emit('    for (int k = 0; k < BUS_SEGS_N; k++) if (pc >= BUS_SEG_LO[k] && pc < BUS_SEG_HI[k]) {')
+            self.emit('        const uint8_t *r = BUS_SEGS[k][(pc - BUS_SEG_LO[k]) >> 1]; return (r[2] & 0x80) ? bus_smc_row(pc, r) : r; }')
+        else:
+            self.emit('    for (int k = 0; k < BUS_SEGS_N; k++) if (pc >= BUS_SEG_LO[k] && pc < BUS_SEG_HI[k]) return BUS_SEGS[k][(pc - BUS_SEG_LO[k]) >> 1];')
         self.emit('    return 0;')
         self.emit('}')
         self.emit()
@@ -984,6 +1007,9 @@ class Gen:
     def routine_head(self, entry, insns):
         """The values rts and rte compare the stack with, and with --resume the way in at any instruction."""
         kinds = {i.kind for i in insns}
+        for i in insns:                                    # 1.0.66: an rts / rte a rewritten place may hold
+            for _, seq in self.flow.smc_alts(self.data, self.base, i.addr):
+                kinds |= {x.kind for x in seq}
         if 'rts' in kinds:
             self.emit('    uint32_t e0 = m->a[7], r0 = RD32_RAW(e0);   /* 1.0.24: rts checks the stack against these */')
         if 'rte' in kinds:
@@ -1026,9 +1052,7 @@ class Gen:
                 self.cov_pcs.setdefault(entry, []).append(a)
                 if not self.cover_in_tick or self.tick(i) is None:
                     self.emit('    COV_MARK(0x%xu);' % a)
-            if self.timing and self.tick(i):
-                self.emit('    ' + self.tick(i))
-            for line in self.body(i, None, None, ins):
+            for line in self.insn(i, None, None, ins):
                 self.emit('    ' + line)
             nxt = [] if self.inline_target(i) is not None else successors(i)
             if i.end in nxt and (k + 1 >= len(order) or order[k + 1] != i.end):
@@ -1065,14 +1089,38 @@ class Gen:
                 self.cov_pcs.setdefault(entry, []).append(addr)
                 if not self.cover_in_tick or self.tick(ins) is None:
                     self.emit('    COV_MARK(0x%xu);' % addr)
-            if self.timing and self.tick(ins):
-                self.emit('    ' + self.tick(ins))
-            for line in self.body(ins, start, end):
+            for line in self.insn(ins, start, end):
                 self.emit('    ' + line)
             addr = ins.end
         self.emit('    return;')
         self.emit('}')
         self.emit()
+
+    def insn(self, i, start, end, ins=None):
+        """The lines of instruction i: its TICK and its body - at a rewritten place (Flow.smc) one block per content,
+        chosen by the words in RAM when the place runs; a content nobody named is unknown_call."""
+        own = ([self.tick(i)] if self.timing and self.tick(i) else []) + self.body(i, start, end, ins)
+        alts = self.flow.smc_alts(self.data, self.base, i.addr)
+        if not alts:
+            return own
+        L, kw = [], ''
+        for alt, seq in alts:
+            L.append('%sif (%s) {   /* --smc: %s */' % (kw, smc_cond(i.addr, alt), '; '.join(x.text for x in seq)))
+            for x in seq:
+                if (x.addr, alt) not in self.smc_rows:
+                    self.smc_rows[(x.addr, alt)] = (i.addr, x)
+                if self.timing and self.tick(x):
+                    L.append('    ' + self.tick(x))
+                L.extend('    ' + ln for ln in self.body(x, start, end, ins))
+            if seq[-1].end in successors(seq[-1]):       # it goes on behind itself: never into the other content's lines
+                L.append('    ' + self.br(seq[-1].end, start, end, ins))
+            kw = '} else '
+        o = i.addr - self.base
+        n = max(len(alt) for alt, _ in alts)
+        L.append('} else if (%s) {' % smc_cond(i.addr, bytes(self.data[o:o + n])))
+        L.extend('    ' + ln for ln in own)
+        L.append('} else { unknown_call(0x%xu); return; }   /* --smc: words nobody named */' % i.addr)
+        return L
 
     def br(self, target, start, end, ins=None):
         fl = self.flow
@@ -1631,6 +1679,12 @@ int main(int argc, char **argv) {
 '''
 
 
+def smc_cond(addr, words):
+    """C: the words at ``addr`` in RAM are ``words`` (bytes) - read raw, as a prefetch (no bus access of its own)."""
+    return '(' + ' && '.join('rd16_raw(0x%xu) == 0x%04xu' % (addr + k, int.from_bytes(words[k:k + 2], 'big'))
+                             for k in range(0, len(words), 2)) + ')'
+
+
 def parse_func_spec(spec):
     """'START:END[:ENTRY]' (hex) -> (start, end, entry)."""
     p = spec.split(':')
@@ -1649,7 +1703,7 @@ def _hex(x):
 
 
 def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern=(), ret=(),
-                    prefix=None, lib=False, inline=(), overlay=(), dynamic=(), module=None):
+                    prefix=None, lib=False, inline=(), overlay=(), dynamic=(), module=None, smc=()):
     """Build a decoder.Flow from the command-line spellings (all addresses hex):
 
     jtab     'SITE[,SITE..]:TABLE:COUNT:STRIDE:bra|ptr[:AN|an]' - jsr/jmp (d8,An,Dn) into a table;
@@ -1662,6 +1716,8 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
     overlay  'BASE:SIZE[:KEY]' - an area code is loaded into at run time (KEY bytes hashed, 256)
     dynamic  'SITE' - jsr/jmp (An) resolved at run time by address (call_addr)
     module   'BASE[:KEY]' - this translation is an overlay module (with lib and prefix)
+    smc      'ADDR=WORDS[,WORDS..]' - the instruction at ADDR is rewritten by the program: the other contents, each as
+             hex words from ADDR (the opcode word will do when the extension words stay)
     """
     jtabs = {}
     for spec in jtab:
@@ -1699,9 +1755,13 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
     if module:
         p = module.split(':')
         mod = (_hex(p[0]), int(p[1]) if len(p) > 1 else 256)
+    rew = {}
+    for spec in smc:
+        a, _, alts = spec.partition('=')
+        rew.setdefault(_hex(a), []).extend(bytes.fromhex(x) for x in alts.split(',') if x)
     return Flow(stops=map(_hex, stop), rets=map(_hex, ret), exits=map(_hex, exitat), externs=ext,
                 jtabs=jtabs, indirect=ind, prefix=pf, lib=lib, inline=inl, overlays=ovl,
-                dynamic=map(_hex, dynamic), module=mod)
+                dynamic=map(_hex, dynamic), module=mod, smc=rew)
 
 
 def _ranges(pcs):

@@ -524,11 +524,16 @@ class Flow:
               every translated entry and the overlay areas)
     module    (base, key) - this translation is an overlay module: it registers itself
               under the fingerprint of its first ``key`` bytes at ``base``
+    smc       {address: [bytes, ...]} - an instruction the program REWRITES (a trainer that turns a ``subq`` into a
+              ``tst``): the other bytes it may hold. The translation holds every variant and takes the one whose
+              words are in RAM when the place runs (``smc_alts``)
     """
 
     def __init__(self, stops=(), rets=(), exits=(), externs=None, jtabs=None, indirect=None,
-                 prefix=None, lib=False, inline=None, overlays=(), dynamic=(), module=None):
+                 prefix=None, lib=False, inline=None, overlays=(), dynamic=(), module=None, smc=None):
         self.stops, self.rets, self.exits = set(stops), set(rets), set(exits)
+        self.smc = {a: [bytes(b) for b in alts] for a, alts in (smc or {}).items()}
+        self._smc = {}
         self.externs = dict(externs or {})
         self.jtabs = dict(jtabs or {})
         self.indirect = {a: list(t) for a, t in (indirect or {}).items()}
@@ -538,6 +543,35 @@ class Flow:
         self.overlays = [tuple(o) for o in overlays]
         self.dynamic = set(dynamic)
         self.module = module
+
+    def smc_alts(self, data, base, addr):
+        """1.0.66 (SWIV: a crack's trainer rewrites three instructions of the game): ``[(bytes, [Insn, ...])]`` - the
+        other contents of the rewritten place at ``addr``, decoded. The bytes are whole words from ``addr``; they
+        are decoded as instructions one after another (two ``nop`` over a ``bsr.w``) with the image's bytes behind
+        them (only the opcode word given: the extension words are the image's). A call or a jump among them is
+        refused: its targets and its return are not in the bytes."""
+        if addr not in self.smc:
+            return ()
+        if addr not in self._smc:
+            o, out = addr - base, []
+            for alt in self.smc[addr]:
+                if not alt or len(alt) % 2 or o < 0 or o + len(alt) > len(data):
+                    raise Unsupported('--smc $%x: whole words inside the image, got %d byte(s)' % (addr, len(alt)))
+                if alt == bytes(data[o:o + len(alt)]):
+                    raise Unsupported('--smc $%x: %s is what the image holds there' % (addr, alt.hex()))
+                win = alt + bytes(data[o + len(alt):o + len(alt) + 16])
+                seq, pc = [], addr
+                while pc < addr + len(alt):
+                    x = decode(win, addr, pc)
+                    if x.kind in ('bsr', 'jsr', 'jmp'):
+                        raise Unsupported('--smc $%x: %s is a call or a jump (not translated as a rewritten instruction)' % (addr, x.text))
+                    seq.append(x)
+                    pc = x.end
+                    if x.end not in successors(x):
+                        break
+                out.append((alt, seq))
+            self._smc[addr] = out
+        return self._smc[addr]
 
     def overlay_of(self, addr):
         """The overlay area (base, size, key) that contains ``addr``, or None."""
@@ -735,6 +769,9 @@ def walk(data, base, start, lo, hi, flow=NOFLOW, cache=None):
             bad.append((a, str(e).split(' @')[0]))
             continue
         ins[a] = i
+        for _, seq in flow.smc_alts(data, base, a):       # 1.0.66: where the rewritten instruction goes on
+            for x in seq:
+                work.extend(t for t in successors(x) if not (t == x.end and x is not seq[-1]))
         mode = getattr(getattr(i, 'ea', None), 'mode', None)
         if i.kind == 'bsr' or (i.kind == 'jsr' and mode in FLOW_MODES):
             t = i.target if i.kind == 'bsr' else i.ea.absval

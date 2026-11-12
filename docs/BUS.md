@@ -198,7 +198,7 @@ the end of the frame; `sample_cb` gets every byte * volume with its absolute tim
 |---|---|---|
 | refresh | slots 1, 3, 5, hpos - 1 | vAmiga, bus log |
 | audio | slot 0x0D + 2n of the line after the request; first word discarded; a request per high byte | Alien Breed II, `arek selftest audio` (0.7.0) |
-| sprites | DMA from line 25, slots 0x15 + 4n and 0x17 + 4n; POS/CTL on line 25 always; on a line with bitplane DMA no sprite slot from DDFSTRT - 1 on (DDFSTRT $24: sprite 3 one word, sprites 4-7 none) | vAmiga, bus log; Alien Breed II against the bus log (0.7.0) |
+| sprites | DMA from line 25, slots 0x15 + 4n and 0x17 + 4n; POS/CTL on line 25 always; data from the line that equals VSTART until the line that equals VSTOP (its slots bring the next POS/CTL) - a VSTOP that never comes leaves the DMA on to the frame's last line (1.0.66); on a line with bitplane DMA no sprite slot from DDFSTRT - 1 on (DDFSTRT $24: sprite 3 one word, sprites 4-7 none) | vAmiga, bus log; Alien Breed II against the bus log (0.7.0); SWIV (1.0.62, 1.0.66) |
 | -(An) writes | no 2-cycle wait before `move ..,-(An)` and `movem regs,-(An)`; reads through -(An) and every d8(An,Xn) keep it | MC68000 UM table 8; Alien Breed II per instruction against the original (0.7.0) |
 | bitplanes lores | planes in the 8-slot group at 7/3/5/1/6/2, DDFSTRT to DDFSTOP | vAmiga SequencerBpl, bus log |
 | bitplanes hires | 4/2/3/1 twice per group | vAmiga |

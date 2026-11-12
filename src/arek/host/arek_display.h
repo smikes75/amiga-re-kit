@@ -84,6 +84,16 @@ static void ard_pal_init(void) {                       /* vAmiga's monitor: YUV 
     }
     ARD_READY = 1;
 }
+/* 1.0.66: the Amiga's own converter instead of the monitor - a component has 4 bits, the level is n * 17 ($FFF = 255,
+ * $888 = 136; the monitor's table gives 236 and 106); half-bright shifts the 4 bits right first. For a page that shows
+ * ard_to_rgb()'s picture; comparisons with the emulator's screenshots keep ard_pal_init(). */
+static void ard_pal_dac(void) {
+    for (int c = 0; c < 0x2000; c++) for (int o = 0; o < 3; o++) {
+        int n = (c >> (8 - 4 * o)) & 15; if (c & ARD_HALF) n >>= 1;
+        ARD_PAL[c][o] = (uint8_t)(n * 17);
+    }
+    ARD_READY = 1;
+}
 static inline uint16_t ard_rd(uint32_t a) {
     a &= 0x1ffffe;
     if (ARD_OVL_ON && a >= ARD_OVL_LO && a + 1 < ARD_OVL_HI) return (uint16_t)((ARD_OVL[a - ARD_OVL_LO] << 8) | ARD_OVL[a - ARD_OVL_LO + 1]);

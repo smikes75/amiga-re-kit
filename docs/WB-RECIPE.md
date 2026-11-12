@@ -15,7 +15,7 @@ game writes. The contract is frozen at kit 1.0: wb-takt 1.4, wb-obraz 1.6, wb-sc
 const takt = WBTAKT.create({ fps: 50.08, ahead: 2, latC: 20 /* 30 with a coroutine engine */, latO: 40, lock: 'auto', allow: (n) => engine_allow(n) });
 // the presenter: ONE canvas (<canvas id="screen"> before <canvas class="crt-layer"> in .game), WebGL2 or 2D, the CRT above it;
 // no border on the canvas (the presenter sets its CSS size; a 1 px border with border-box resamples the picture by 2 px)
-// (wb.css of kit 1.0.41 draws the frame as a box-shadow; `arek web test` checks the canvas's content box against its backing)
+// (wb.css draws no frame around it since kit 1.0.66; `arek web test` checks the canvas's content box against its backing)
 const pr = new WBOBRAZ.Presenter(document.getElementById('screen'), { gl: 'auto' });
 const screen = new WBOBRAZ.Screen(document.querySelector('.game'), pr.canvas);
 // the scene: one record per game frame in, the composition out - into the presenter's framebuffer, nowhere else
@@ -33,6 +33,8 @@ pr.present({ draw: scene.drawer(ts, view) });                // view = { W, H, S
 //   the top HUD's rows x S (an odd window width stays odd: extX whole); the presenter sized W x (H + HUD rows) at S
 //   without WebGL2 the page composes at S = 1 and gives present({pixels}) the W x H reference (the presenter scales);
 //   the Original mode may instead show the game's exact picture through present({pixels}) - the scene is for the wider view
+//   (`engine_rgb` after `engine_dac(1)`, once after the engine loads: the colours as the Amiga's converter gives them, the same as
+//   the scene's x17 - without it the picture is vAmiga's monitor, darker by 25 of 255 on average; a Node tool that compares hashes: open(dir, { dac: true }))
 //   view.hudY = [top, bottom] (device px of each HUD row's top-left) when a transition cuts the view out fractionally
 ```
 
@@ -91,6 +93,8 @@ geometry, the CRT, one canvas under the CRT layer).
   `out.flush()`, as after any restart.
 - **Keys**: `WBTAKT.keyboard()` leaves a key pressed with Cmd / Ctrl / Alt to the browser and releases every key when
   Meta goes up, the window loses the focus or the page is hidden. A page with its own key code needs the same three.
+  A modifier the map names (`ControlLeft: 16` for fire) is the game's key and so are the mapped keys pressed with it
+  (wb-takt 1.6, kit 1.0.66; before, the keydown of Control carried its own flag and never went down).
 - **Sound, messages mode**: `out.push(view)` keeps the caller's buffer unless the view is the whole of a plain
   ArrayBuffer - a view into the engine's memory can be pushed as it is.
 - **The modules in the game's folder**: `arek web copy DIR` writes `wb-kit.json`; `arek web copy DIR --check` says per

@@ -78,7 +78,7 @@ static volatile int G_DONE = 0, G_ALLOW = 0, G_END = 0, G_WAIT = 0; static volat
 static volatile int32_t G_AWT = 0, G_ARD = -1, G_ALOW = 0; static int G_HASHON = 0;
 static void g_hash_now(void);   /* samples written (stereo frames), read by the worklet (-1 = none), the low mark */
 static M68 E_M; static uint32_t E_ENTRY = 0;
-static int E_KEYS = 0, E_KEYS2 = -1, E_KEYMODE = 0;
+static int E_KEYS = 0, E_KEYS2 = -1, E_KEYMODE = 0, E_KBD = 0;   /* E_KBD (1.0.66): raw keys through the host's keyboard */
 /* 1.0.43: raw keys wait in a ring, one is given to the game per frame (the keyboard handshake needs that pace). The
  * single slot before lost the first of two events inside one game frame - a press and its release within 20 ms left
  * only the release, a lost release was a key held for good. The page writes (E_KQ_W), the game's side reads (E_KQ_R). */
@@ -152,15 +152,23 @@ static void e_apply_keys(void) {
         H_CIAA_PRA = (uint8_t)((H_CIAA_PRA & 0xbf) | (f ? 0 : 0x40));
     }
     unsigned kr = E_KQ_R;
+    if (E_KBD) {                                   /* 1.0.66: every waiting event to the keyboard (host_key: the serial port, the handshake, its queue) */
+        while (kr != __atomic_load_n(&E_KQ_W, __ATOMIC_SEQ_CST)) {
+            int v = E_KQ[kr % E_KEYQ]; __atomic_store_n(&E_KQ_R, ++kr, __ATOMIC_SEQ_CST);
+            host_key(v & 0x7f, (v & 0x100) != 0, h_abs());
+        }
+        return;
+    }
     if (kr != __atomic_load_n(&E_KQ_W, __ATOMIC_SEQ_CST)) {
         int v = E_KQ[kr % E_KEYQ], c = v & 0x7f; __atomic_store_n(&E_KQ_R, kr + 1, __ATOMIC_SEQ_CST);
         H_CIAA_SDR = (uint8_t)~((c << 1) | ((v & 0x100) ? 0 : 1)); H_CIAA_ICR |= 0x08; h_cia_raise(0); }   /* 1.0.12: SP in ICR raises PORTS when the game enabled it (Turrican II KIT-GAPS 19) */
 }
-static volatile int E_CPU_PEND = 0;
+static volatile int E_CPU_PEND = 0, E_DAC_PEND = 0;        /* E_DAC_PEND: 1 = the Amiga's converter, 2 = the monitor */
 static void e_frame_start(void) { e_apply_keys(); if (E_CPU_PEND) { H_CPU_NUM = E_CPU_PEND; E_CPU_PEND = 0; } }
 /* the frame is drawn (ARD_PIX): its screenshot, its samples into the ring, its record; the page may now read them */
 static void e_frame_done(void) {
     int n = G_DONE; GFr *f = &G_FR[n % G_NFR];
+    if (E_DAC_PEND) { if (E_DAC_PEND == 1) ard_pal_dac(); else ard_pal_init(); E_DAC_PEND = 0; }   /* in the engine's thread, between two pictures */
     ard_to_rgb();
     ara_until(H_PAULA.frame_base + (double)H_LINES * HOST_HPOS);
     f->frame = H_FRAME0 + H_FRAME; f->led = H_LED_OFF < 0 ? -1 : !H_LED_OFF; f->aud0 = G_AW; f->naud = ARA_N;
@@ -285,6 +293,11 @@ API void engine_key(int code, int down) {
     if (w - __atomic_load_n(&E_KQ_R, __ATOMIC_SEQ_CST) >= E_KEYQ) return;      /* 32 events behind: the newest is dropped */
     E_KQ[w % E_KEYQ] = (code & 0x7f) | (down ? 0x100 : 0); __atomic_store_n(&E_KQ_W, w + 1, __ATOMIC_SEQ_CST);
 }
+/* 1.0.66 (SWIV, the second player on the keyboard): 1 = engine_key's events go through the host's keyboard as the
+ * lines of host_trace do since 1.0.65 (K<hh> / k<hh>) - all that wait at the frame's start, in their order: the code
+ * reaches SDR 1610 colour clocks later, the next one after the game's handshake. A recording of the page then replays
+ * in the original with the same lines. 0 (the default) = as before: one event a frame straight into SDR. */
+API void engine_keyboard(int on) { E_KBD = on; }
 API double engine_fr_frame(int n) { return n < 0 ? -1 : (double)G_FR[n % G_NFR].frame; }
 API int engine_fr_aud0(int n) { return G_FR[n % G_NFR].aud0; }
 API int engine_fr_naud(int n) { return G_FR[n % G_NFR].naud; }
@@ -292,6 +305,11 @@ API int engine_fr_led(int n) { return G_FR[n % G_NFR].led; }
 API int16_t *engine_aud_ring(void) { return G_AUD; }
 API int engine_aud_size(void) { return G_AUDN; }
 API uint8_t *engine_rgb(void) { return ARD_RGB; }           /* the last frame: 716 x 285 RGB24 */
+/* 1.0.66 (SWIV, Xenon 2): the colours of engine_rgb from the next finished frame on (the first too) - 1 = as the Amiga's converter gives
+ * them (a component * 17, what wb-scene's x17 draws in Enhanced), 0 = vAmiga's monitor (the default: what a screenshot
+ * of the emulator holds, darker by 25 of 255 on average). The picture is in the engine's hash: a tool that compares
+ * with the page sets the same. It stays over engine_init. */
+API void engine_dac(int on) { E_DAC_PEND = on ? 1 : 2; }
 API int engine_rgb_w(void) { return ARD_SHOT_W; }
 API int engine_rgb_h(void) { return ARD_SHOT_H; }
 API uint16_t *engine_pix(void) { return &ARD_PIX[0][0]; }   /* 12-bit colours, ARD_LINES x ARD_WIDTH */
@@ -347,6 +365,7 @@ int main(int argc, char **argv) {
     for (int i = 3; i < argc; i++) {
         if (!strcmp(argv[i], "--disk") && i + 2 < argc) { int n = atoi(argv[i + 1]); if (ahd_set_file(n, argv[i + 2])) { fprintf(stderr, "disk %s\n", argv[i + 2]); return 2; } i += 2; }
         else if (!strcmp(argv[i], "--keys") && i + 1 < argc) { E_KEYMODE = strcmp(argv[++i], "none") ? 1 : 0; }
+        else if (!strcmp(argv[i], "--keyboard")) E_KBD = 1;   /* 1.0.66: --key events through the host's keyboard */
         else if (!strcmp(argv[i], "--key") && i + 1 < argc) { int code = 0, down = 1; sscanf(argv[++i], "%x:%d", &code, &down); engine_key(code, down); }   /* 1.0.43: a raw key event before the run (repeat) */
         else if (!strcmp(argv[i], "--twice")) twice = 1;       /* 1.0.43: the run, then a restart from the same state and the run again: two lines, the same hash */
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];

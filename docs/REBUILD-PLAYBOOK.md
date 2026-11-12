@@ -70,6 +70,10 @@ The web page must start from the visitor's disks only: no captured RAM, no state
    cheats). The page's level choice goes through the same words, set by an event at an exact frame - not by poking the
    game's variables directly (Turrican II: its demo mode drew over the trainer's operands; the words moved to slow RAM
    past the game's memory block).
+   A trainer that REWRITES instructions of the game by its options (SWIV's crack: `add` and `addq` into `tst`, a `divu`
+   into `bra.s`): `arek recomp --smc ADDR=WORDS` for each place (1.0.66) - one translation for every choice of options,
+   not one per choice. Measured on SWIV: 9 000 frames of random play, the trace equal byte for byte to the translation
+   of the patched image with the options on and to the unpatched one's with them off.
 5. **The disk routine as an extern** (`--extern ADDR=game_read`, `engine_set_disk` images), the game's unpacker as a C
    port when it is self-modifying, and the **load times of the original** for every read and unpack (measured with
    `arek trace`, by arguments, not by a formula): `host_spend(m, cck, 0)` in the extern keeps the main program in the same

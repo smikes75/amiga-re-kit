@@ -285,6 +285,94 @@ const fs = require('fs'); const H = require(%s);
     assert (tmp_path / 'synth.bin').read_bytes() == (tmp_path / 'state.bin').read_bytes()
 
 
+def test_engine_dac_gives_the_amigas_colours(tmp_path):
+    """1.0.66 (SWIV, Xenon 2): engine_rgb holds vAmiga's monitor (what a screenshot of the emulator holds: darker);
+    engine_dac(1) gives the Amiga's converter from the next frame on - a component * 17, as wb-scene's x17 - and
+    engine_dac(0) the monitor again. The picture is in the hash, so the two differ there; the default did not change."""
+    if not (shutil.which('emcc') and shutil.which('node') and bus.compiler()):
+        pytest.skip('no emcc + node')
+    build_state(tmp_path)
+    creg = bytearray((tmp_path / 'state' / 'creg.bin').read_bytes())
+    creg[0x180:0x182] = struct.pack('>H', 0x08f1)                       # COLOR00: the whole picture, no bitplanes
+    (tmp_path / 'state' / 'creg.bin').write_bytes(creg)
+    host.pack(str(tmp_path / 'state'), str(tmp_path / 'state.bin'))
+    host.engine_build(str(tmp_path / 'wa'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', src=str(tmp_path / 'externs.c'),
+                      defines=['HOST_L4=f_001180'])
+    script = tmp_path / 'dac.js'
+    script.write_text("""
+const H = require(%s);
+(async () => {
+  const mid = (eng) => { const p = eng.rgb(), o = (140 * p.w + 360) * 3; return [p.data[o], p.data[o + 1], p.data[o + 2]]; };
+  const out = [];
+  const eng = await H.open(%s, { state: %s, disks: [%s] });
+  await eng.run(3); out.push(mid(eng), eng.hash());
+  eng.dac(); await eng.run(5); out.push(mid(eng), eng.hash());
+  eng.dac(false); await eng.run(7); out.push(mid(eng));
+  const two = await H.open(%s, { state: %s, disks: [%s], dac: true });
+  await two.run(1); out.push(mid(two));
+  console.log(JSON.stringify(out));
+})();
+""" % tuple(repr(str(x)) for x in (os.path.join(HOST, 'arek_host_engine_node.js'), tmp_path / 'wa', tmp_path / 'state.bin', tmp_path / 'disk.adf',
+                                   tmp_path / 'wa', tmp_path / 'state.bin', tmp_path / 'disk.adf')))
+    r = subprocess.run(['node', str(script)], capture_output=True, text=True, timeout=240)
+    assert r.returncode == 0, r.stderr
+    import json
+    mon, h0, dac, h1, back, first = json.loads(r.stdout)
+    assert dac == [8 * 17, 15 * 17, 1 * 17] and first == dac, (mon, dac, first)
+    assert mon != dac and mon[1] == 236 and back == mon and h0 != h1, (mon, back)   # the monitor's $F is 236
+
+
+def test_engine_keys_through_the_hosts_keyboard(tmp_path):
+    """1.0.66 (SWIV, the second player on the keyboard): with engine_keyboard(1) (natively --keyboard) engine_key's
+    events go through the host's keyboard, as host_trace's K / k tokens do since 1.0.65 - every waiting event at the
+    frame's start: the code is in SDR 1610 colour clocks later (line 7) and the next one comes after the game's
+    handshake, in the same frame. Without it (the default, as before) one event a frame goes straight into SDR."""
+    if not bus.compiler():
+        pytest.skip('no C compiler')
+    img = bytearray(0x2000)
+    code = bytes.fromhex('43f900003000'            # 1000 lea $3000,a1
+                         '103900bfed01'            # 1006 move.b $bfed01,d0     ICR
+                         '08000003'                # 100c btst #3,d0
+                         '67f4'                    # 1010 beq.s $1006
+                         '7200'                    # 1012 moveq #0,d1
+                         '123900bfec01'            # 1014 move.b $bfec01,d1     SDR
+                         '32c1'                    # 101a move.w d1,(a1)+
+                         '32f900dff004'            # 101c move.w $dff004,(a1)+  VPOSR
+                         '32f900dff006'            # 1022 move.w $dff006,(a1)+  VHPOSR
+                         '08f9000600bfee01'        # 1028 bset #6,$bfee01       the handshake: SP low
+                         '08b9000600bfee01'        # 1030 bclr #6,$bfee01       ... and high again
+                         '60cc')                   # 1038 bra.s $1006
+    img[0x1000:0x1000 + len(code)] = code
+    img[0x1100:0x1102] = bytes.fromhex('4e73')
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[0x1000, 0x1100], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'creg.bin').write_bytes(bytes(512))
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 0 0 1000\nfe 0 0 0 0 5500\n100\n')
+    host.pack(str(st), str(tmp_path / 'state.bin'))
+    out = tmp_path / 'native'
+    host.engine_build(str(out), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', native=True, thread=True, defines=['HOST_IPL_MODEL=1'])   # a thread: the game has no wait loop
+    keys = ['--keys', 'none', '--key', '60:1', '--key', '60:0', '--key', '4c:1']       # left shift down, up, cursor up down
+    inv = lambda c: (~((c << 1) | (c >> 7))) & 0xff
+    got = {}
+    for name, extra in (('keyboard', ['--keyboard']), ('direct', [])):
+        dump = tmp_path / (name + '.bin')
+        r = subprocess.run([str(out / 'arek_host_engine_mt'), str(tmp_path / 'state.bin'), '4', '--dump', str(dump)] + keys + extra,
+                           capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, r.stderr
+        chip = dump.read_bytes()
+        rec = [struct.unpack('>HHH', chip[0x3000 + 6 * k:0x3006 + 6 * k]) for k in range(4)]
+        got[name] = [(sdr, ((vposr & 1) << 8) | (vh >> 8)) for sdr, vposr, vh in rec if sdr]
+    assert [c for c, _ in got['keyboard']] == [inv(0x60), inv(0xe0), inv(0x4c)] == [c for c, _ in got['direct']], got
+    lines = [v for _, v in got['keyboard']]
+    assert lines[0] == 7 and lines[0] < lines[1] < lines[2] < 40, got       # all three in the first frame, a code's time apart
+    assert [v for _, v in got['direct']] == [0, 0, 0], got                  # one a frame, at the frame's start
+
+
 TASKS = {
     MAIN: '4df900dff000'          # lea $dff000,a6
           '3d7cc020009a'          # move.w #$c020,$9a(a6)    INTENA: master + VERTB

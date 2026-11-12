@@ -2,10 +2,11 @@
 rules both carry: the DDFSTRT delay of the first pixel and the sprite slots the bitplanes take."""
 import os
 import struct
+import subprocess
 
 import pytest
 
-from arek import display, host
+from arek import bus, display, host
 from arek.display import HALF
 
 COP = 0x1000
@@ -227,3 +228,30 @@ def test_an_illegal_move_stops_the_copper_in_python():
                                                                   0x6007, 0xfffe, 0x180, 0x0f0] + END, PLANES[:1])
     green = lambda **k: any(w[2] == 0x180 and w[3] == 0x0f0 for w in display.render(blit, COP, regs=regs, **k).writes)
     assert green() and green(cdang=True) and not green(cdang=False)                  # BLTDMOD: legal only with CDANG
+
+
+def test_the_dac_table_is_every_component_times_17(tmp_path):
+    """1.0.66: ard_pal_dac() - the Amiga's converter for all 0x2000 entries (a component * 17; half-bright shifts the 4
+    bits first); ard_pal_init() stays vAmiga's monitor ($FFF 236, $888 106 - measured on SWIV's screenshots)."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    (tmp_path / 't.c').write_text("""
+#include <stdio.h>
+#include <stdint.h>
+static uint8_t *MEM; static uint32_t MEMSZ; static uint16_t CREG[0x100];
+#include "arek_display.h"
+int main(void) {
+    int bad = 0;
+    ard_pal_init(); printf("%d %d %d ", ARD_PAL[0xfff][0], ARD_PAL[0x888][1], ARD_PAL[0][2]);
+    ard_pal_dac();
+    for (int c = 0; c < 0x2000; c++) for (int o = 0; o < 3; o++) {
+        int n = (c >> (8 - 4 * o)) & 15; if (c & 0x1000) n >>= 1;
+        if (ARD_PAL[c][o] != n * 17) bad++; }
+    printf("%d %d %d %d %d\\n", bad, ARD_PAL[0xfff][0], ARD_PAL[0x1fff][0], ARD_PAL[0x0f1][1], ARD_PAL[0x0f1][2]);
+    (void)MEM; (void)MEMSZ; (void)CREG; return 0; }
+""")
+    exe = tmp_path / 't'
+    subprocess.run([cc, '-O1', '-I', os.path.dirname(os.path.abspath(host.__file__)), '-o', str(exe), str(tmp_path / 't.c'), '-lm'], check=True)
+    out = subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout.split()
+    assert out == ['236', '106', '0', '0', '255', '119', '255', '17'], out

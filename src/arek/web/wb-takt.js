@@ -25,7 +25,7 @@
 //   engine in a worker stamps its scene packet inside allow(g), before the page calls stamp(n)); no side effect.
 'use strict';
 const WBTAKT = (() => {
-    const VERSION = '1.5';
+    const VERSION = '1.6';
     const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
     /** The display's rate from the last intervals: the median (Hz), 0 before 60 samples. */
     function medianHz(dts) {
@@ -145,11 +145,16 @@ const WBTAKT = (() => {
      *  1.5: no key stays down behind the page's back - a key pressed with Cmd / Ctrl / Alt is the browser's (it is neither
      *  taken nor prevented: Cmd+R reloads), and every key is released when Meta goes up (macOS sends no keyup for a key
      *  let go while Cmd is held), when the window loses the focus (blur does not bubble: the window is listened to as
-     *  well as the target) and when the page is hidden. */
+     *  well as the target) and when the page is hidden.
+     *  1.6 (kit 1.0.66): a modifier the map itself names is the game's key (ControlLeft = fire in SWIV, Xenon 2 and
+     *  Turrican II): its own keydown carries its flag and was dropped as the browser's, so that key never went down;
+     *  and the keys pressed while it is held (the arrows under fire) are the game's too. */
     function keyboard(target, map, onchange) {
         let bits = 0;
+        const own = { ctrl: !!(map.ControlLeft || map.ControlRight), alt: !!(map.AltLeft || map.AltRight), meta: !!(map.MetaLeft || map.MetaRight) };
+        const browsers = (e) => (e.metaKey && !own.meta) || (e.ctrlKey && !own.ctrl) || (e.altKey && !own.alt);
         const release = () => { if (bits) { bits = 0; if (onchange) onchange(0); } };
-        const down = (e) => { const b = map[e.code]; if (!b || e.metaKey || e.ctrlKey || e.altKey) return; if (!(bits & b)) { bits |= b; if (onchange) onchange(bits); } e.preventDefault(); };
+        const down = (e) => { const b = map[e.code]; if (!b || browsers(e)) return; if (!(bits & b)) { bits |= b; if (onchange) onchange(bits); } e.preventDefault(); };
         const up = (e) => { if (e.key === 'Meta' || e.code === 'MetaLeft' || e.code === 'MetaRight') { release(); return; }
             const b = map[e.code]; if (!b) return; if (bits & b) { bits &= ~b; if (onchange) onchange(bits); } };
         const hidden = () => { if (typeof document !== 'undefined' && document.hidden) release(); };

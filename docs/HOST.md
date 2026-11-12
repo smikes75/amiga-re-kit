@@ -220,7 +220,10 @@ and format - is the project's (Alien Breed II has it in its engine).
 ## The engine of a web page (`arek_host_engine.c`)
 
 The translated game on the host, driven frame by frame by the page, which reads every frame's
-picture (`engine_rgb`, vAmiga's 716 x 285 screenshot layout; `engine_pix` the 12-bit colours)
+picture (`engine_rgb`, vAmiga's 716 x 285 screenshot layout; `engine_pix` the 12-bit colours;
+`engine_dac(1)` (1.0.66) gives `engine_rgb` the colours of the Amiga's converter - a component
+times 17, as wb-scene's `x17` - from the next frame on; the default is vAmiga's monitor, which a
+screenshot of the emulator holds and which is darker by 25 of 255 on average)
 and sound (`engine_aud_ring`, 48 kHz stereo, `engine_fr_aud0` / `engine_fr_naud` per frame)
 and gives the inputs (`engine_keys` bits R L U D F on port 1, `engine_keys2` port 0,
 `engine_key` a raw key code) and the disk images (`engine_set_disk`). Built with Emscripten
@@ -349,7 +352,12 @@ and a release of one that is up are dropped; ten events wait at most. Measured o
 once a frame and holds the handshake for a frame: 5 619 records of 5 619 equal with shift, cursor keys, two events in
 a line and a press and release in neighbouring frames. Not measured: the E cycle in which the SP bit appears (taken
 from the emulator's source) and PORTS as an interrupt. A captured state starts with an idle keyboard and no key down.
-The engine's `engine_key` keeps its simpler path (one event a frame, SDR at once).
+The engine's `engine_key` keeps its simpler path by default (one event a frame, SDR at once); `engine_keyboard(1)`
+(1.0.66; natively `--keyboard`, in Node `open(dir, { keyboard: true })`) sends its events through this keyboard instead -
+all that wait at the frame's start, in their order - so a recording of the page replays in the original with `K` / `k`
+tokens in the same frames. SWIV's engine: left shift and cursor up given in one frame are in the loader's key matrix a
+frame later than by the direct path and two frames after that (the game shakes hands once a frame), both releases
+likewise; nothing lost.
 
 ## A capture in the middle of a game: what state.txt carries
 
