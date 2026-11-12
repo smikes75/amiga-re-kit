@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.12' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.13' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -577,3 +577,62 @@ def test_cam_mean_does_not_run_on_after_a_stop():
     assert r['turn'][0] < 1e-9 and r['turn'][1] == 1, r       # the game's camera turns once (58 -> 42); the view never passes 58
     assert abs(r['step'][0]) < 1e-9 and r['step'][1] == 0, r      # one 16 px step out of a long rest: 2.11 passed it by 1-2 px
     assert r['stair'][0] <= 0.5 and r['stair'][1] <= 1, r          # a row every 3 frames: within the hold it cannot be told from moving on (half a row at most)
+
+
+RHYTHM = """(() => { const FM = 20, win = { w: 320, h: 200, idx: new Uint8Array(64000), pal: new Uint8Array(200 * 128) }, lim = { x0: 0, x1: 0, y0: 0, y1: 2000 };
+    // a game that computes a pass every 2 frames (the object 6 px on, the camera a row down) and swaps its buffers 2 or 1 frames later
+    const ps = []; for (let k = 0; k < 60; k++) ps.push({ k, tc: (2 * k + 0.25) * FM, fs: 2 * k + (k % 2 ? 1 : 2), x: 100 + 6 * k, cam: 100 + k });
+    const build = (mode) => { const frames = [];
+        for (let n = 0; n < 110; n++) { let shown = null, comp = null; for (const p of ps) { if (p.fs <= n) shown = p; if (p.tc <= (n + 1) * FM) comp = p; }
+            if (!shown) continue;
+            const ob = (p) => [{ id: 1, x: p.x, y: 50, w: 1, h: 1, idx: new Uint8Array(1) }, { id: 2, x: 30, y: p.cam + 20, w: 1, h: 1, idx: new Uint8Array(1) }, { id: 3, x: 7, y: 9, w: 1, h: 1, idx: new Uint8Array(1) }];
+            const rec = { n, t: (n + 1) * FM, cam: [0, shown.cam], limits: lim, window: win, objects: ob(shown), pass: mode === 'swap' ? (shown.fs + 1) * FM : shown.tc };
+            if (mode === 'next' && comp.k > shown.k) rec.next = { pass: comp.tc, cam: [0, comp.cam], objects: [{ id: 1, x: comp.x, y: 50 }, { id: 2, x: 30, y: comp.cam + 20 }, { id: 9, x: 1, y: 1 }] };
+            frames.push(rec); }
+        return frames; };
+    const run = (mode, lat, opts) => { const frames = build(mode), xs = [], scr = [], held = [];
+        for (let T = 600; T < 2000; T += 1000 / 60) { const c = S.compose(frames.filter((fr) => fr.t <= T), T - lat, { W: 320, H: 200, S: 1 }, Object.assign({ extrapolateObjects: 1 }, opts), null);
+            xs.push(c.objs[0].x); scr.push([c.objs[1].sy, c.objs[1].scr[1]]); held.push([c.objs[2].x, c.objs[2].y, c.objs.length]); }
+        const d = xs.slice(1).map((x, i) => +(x - xs[i]).toFixed(3));
+        return { min: Math.min(...d), max: Math.max(...d), scr, held }; };
+    return { run, build }; })()"""
+
+
+def test_passes_on_the_time_of_the_games_computation():
+    """2.13 (SWIV): a pass computed every 2 frames and shown after 3, 1, 3, 1 frames. Paired by the frame it was first shown
+    in, an object's even 6 px steps come out as steps between a jump back and a double one; with passTime (rec.pass = the
+    time of the computation) the steps are even once the latency covers the wait for the swap, and with rec.next (the pass
+    already computed, not shown yet) they are even at the usual 40 ms."""
+    r = js("(() => { const R = %s; const pick = (m, lat, o) => { const v = R.run(m, lat, o); return [v.min, v.max]; };"
+           " return { swap40: pick('swap', 40, {}), swap60: pick('swap', 60, {}), time40: pick('time', 40, { passTime: true }), time60: pick('time', 60, { passTime: true }),"
+           " next40: pick('next', 40, { passTime: true }), off: pick('next', 40, {}), plain: pick('time', 40, {}) }; })()" % RHYTHM)
+    assert r['swap40'][0] < 0 and r['swap40'][1] >= 4.9 and r['swap60'][1] >= 4.9            # today: back and a double step (the even step is 2.5)
+    assert r['time60'] == [2.5, 2.5] and r['time40'][1] > 4                              # the time axis alone needs the latency
+    assert r['next40'] == [2.5, 2.5]                                                     # the known next pass: even at 40 ms
+    assert r['off'] == r['plain']                                                        # without the option rec.next is not read
+
+
+def test_the_next_pass_keeps_pictures_anchors_and_unnamed_objects():
+    """2.13: the pass made of rec.next draws the last pass's objects - one that holds its place on the screen (its world y
+    follows the camera of its own pass) stays on the screen with next's camera, an object next does not name stands where
+    it is, a name without a picture draws nothing; a next that is not after the last pass is not used; the frames given to
+    compose() are not changed."""
+    r = js("(() => { const R = %s; const v = R.run('next', 40, { passTime: true }); const fr = R.build('next'), keys = fr.map((f) => f.t + ':' + f.pass + ':' + f.objects.length).join();"
+           " const c = S.compose(fr.slice(0, 40), fr[39].t - 40, { W: 320, H: 200, S: 1 }, { passTime: true, extrapolateObjects: 1 }, null);"
+           " const stale = fr.slice(0, 40).map((f) => Object.assign({}, f)); stale[39].next = { pass: stale[39].pass, cam: [0, 0], objects: [{ id: 1, x: 999, y: 50 }] };"
+           " const cs = S.compose(stale, fr[39].t - 40, { W: 320, H: 200, S: 1 }, { passTime: true, extrapolateObjects: 1 }, null);"
+           " return { scr: [...new Set(v.scr.map((x) => x.join()))], held: [...new Set(v.held.map((x) => x.join()))], same: keys === fr.map((f) => f.t + ':' + f.pass + ':' + f.objects.length).join(),"
+           " ob: c.OB.t > fr[39].pass, stale: cs.objs[0].x < 900, axis: S.passAxis(fr.slice(0, 40), [fr[38], fr[39]].filter((f, i, a) => i === 0 || f.pass !== a[0].pass)).map((p) => p.t) }; })()" % RHYTHM)
+    assert r['scr'] == ['true,20'] and r['held'] == ['7,9,3']
+    assert r['same'] and r['ob'] and r['stale']
+    assert r['axis'] == sorted(r['axis']) and len(r['axis']) >= 2
+
+
+def test_the_camera_stays_on_the_frames_under_pass_time():
+    """2.13: passTime moves the objects' passes only - the view's camera, the sprites' camera and the pair of frames are
+    what they are without the option (SWIV measured the camera on the passes' axis too: the same numbers, so it stayed)."""
+    r = js("(() => { const R = %s; const fr = R.build('next').slice(0, 40), V = { W: 320, H: 200, S: 1 }, at = fr[39].t - 40, o = { extrapolateObjects: 1, camMean: { tau: 39.936 } };"
+           " const c0 = S.compose(fr, at, V, o, null), cp = S.compose(fr, at, V, Object.assign({ passTime: true }, o), null);"
+           " return { cam: [c0.cam, cp.cam], sprite: [c0.spriteCam, cp.spriteCam], pair: [c0.A.n, c0.B.n, c0.f, cp.A.n, cp.B.n, cp.f], next: cp.OB.cam[1] - fr[39].cam[1], ob: [c0.OB.t, cp.OB.t] }; })()" % RHYTHM)
+    assert r['cam'][0] == r['cam'][1] and r['sprite'][0] == r['sprite'][1] and r['pair'][:3] == r['pair'][3:]
+    assert r['next'] == 1 and r['ob'][1] > r['ob'][0]                                    # the objects' newest pass is the one not shown yet, with its own camera

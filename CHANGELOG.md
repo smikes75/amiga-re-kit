@@ -3,6 +3,23 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.68 (2026-11-12)
+
+- wb-scene 2.13, `passTime` and `rec.next`: the objects' passes on the time the game COMPUTED them, and the pass it
+  has computed but not shown yet as one more pass (the last pass's pictures at next's positions). A game that
+  computes a pass every 2 frames and swaps its buffers after 3, 1, 3, 1 frames had its even steps drawn as a double
+  step and a stand; off unless the page sets it, the camera, the window and the sprites stay on `rec.t`
+  - SWIV (60 Hz, latency 40 ms; all objects / the player / one helicopter): frames 4100-4400 0.218 / 0.072 / 0.324
+    -> 0.176 / 0.087 / 0.215, frames 4200-5200 0.284 / 0.499 / 0.361 -> 0.270 / 0.484 / 0.323 with the pass times
+    30 ms after the loop's start (with 0 the scene guesses past the newest pass and the player is twice as shaky);
+    ground targets 0.000 px against the background throughout. `next` must be read where the logic is done: at the
+    end of the frame 1.9 % of the positions were the pass before
+- wb-nastaveni 1.3, `spec.omit = { sound: [...], display: [...] }`: rows a page leaves out (the Amiga's filters on a
+  machine that has none - the Atari 8-bit page's request). Such a row is not built, cannot be set, and its value is
+  fixed: the filters off whatever is stored, any other item the mode's default. `arek web test` section 6 asks for
+  the rows the menu says it has and fails on a row left out that is in the document
+- `arek web check`: `.xex .atr .atx .xfd .car .cas` are game data in a bundle too
+
 ## 1.0.67 (2026-11-12)
 
 - `arek recomp --live ADDR` (Flow.live): an instruction whose IMMEDIATE operand the program rewrites (a trainer

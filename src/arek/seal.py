@@ -148,7 +148,8 @@ def read_dir(folder):
     return manifest, {f['path']: (folder / (f['path'] + '.sealed')).read_bytes() for f in manifest['files']}
 
 
-GAME_DATA = ('.adf', '.adz', '.dms', '.ipf', '.rom')
+GAME_DATA = ('.adf', '.adz', '.dms', '.ipf', '.rom',
+             '.xex', '.atr', '.atx', '.xfd', '.car', '.cas')   # 1.0.68: an Atari 8-bit program, disk, cartridge and tape image
 BIG = 10 * 1024 * 1024
 
 

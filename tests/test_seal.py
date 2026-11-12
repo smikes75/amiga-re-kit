@@ -133,6 +133,11 @@ def test_bundle_check(tmp_path, capsys):
     assert any('game data' in x for x in p) and any('also present in the clear' in x for x in p)
     assert any('manifest size' in x for x in p) and any('not in the manifest' in x for x in p)
     assert cli.main(['web', 'check', str(b)]) == 1
+    # 1.0.68: an Atari 8-bit program, disk, cartridge and tape image are game data too
+    for ext in ('xex', 'atr', 'atx', 'xfd', 'car', 'cas', 'XEX'):
+        (b / ('game.' + ext)).write_bytes(b'\xff\xff')
+        assert any('game data in the bundle: game.%s' % ext in x for x in seal.check_bundle(b)['problems'])
+        (b / ('game.' + ext)).unlink()
 
 
 PAYLOAD = b'MAIN' + bytes(range(200)) * 3 + b'LEVEL1' + bytes(3000)      # what the rebuild reads, in a fixed order

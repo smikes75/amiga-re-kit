@@ -80,7 +80,8 @@ window.wbObrazTest = {
   gl: () => !!pr.gl,
 };
 // the shared menu (wb-nastaveni.js): its Display values drive this page's cfg, its Sound values the sound chain
-const menu = WBNASTAVENI.build(document.getElementById('menu'), { lang: 'en' });
+const OMIT = (new URLSearchParams(location.search).get('omit') || '').split(',').filter(Boolean);   // ?omit=filter-fixed,filter-led: a page without those rows (wb-nastaveni 1.3)
+const menu = WBNASTAVENI.build(document.getElementById('menu'), { lang: 'en', omit: { sound: OMIT, display: OMIT } });
 function fromMenu(st) {
   const d = st.display;
   state.cfg[st.mode] = { zoom: d.zoom, crt: d.crt, crtDetail: d['crt-detail'], crtShape: d['crt-shape'], blur: d.blur, par: d.par,

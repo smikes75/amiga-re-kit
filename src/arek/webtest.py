@@ -302,8 +302,16 @@ def check_menu_and_sound(page, fails):
     volume, filters against the reference `process`. Returns the number of checks."""
     n = 0
     ok = lambda cond, what: cond or fails.append('§6 %s' % what)
-    missing = page.evaluate('(ids) => ids.filter((i) => !document.getElementById(i))', MENU_IDS)
+    # 1.0.68: a page may leave rows out (wb-nastaveni 1.3 spec.omit - a machine without the Amiga's filters): the rows the
+    # menu says it has must be there, with the two defaults buttons; a check of a row left out is not made
+    own = page.evaluate('wbMenuTest.ids ? wbMenuTest.ids() : null')
+    want = MENU_IDS if own is None else [i for i in MENU_IDS if i in own or i.startswith('wb-defaults-')]
+    missing = page.evaluate('(ids) => ids.filter((i) => !document.getElementById(i))', want)
     ok(not missing, 'menu ids missing: %s' % missing); n += 1
+    extra = page.evaluate('(ids) => ids.filter((i) => document.getElementById(i))', [i for i in MENU_IDS if i not in want])
+    ok(not extra, 'menu rows the page left out are in the document: %s' % extra); n += 1
+    if not {'wb-stereo', 'wb-par', 'wb-volume'} <= set(want):
+        return n + _sound_contract(page, ok)
     page.evaluate("wbMenuTest.setMode('original'); wbMenuTest.reset(); wbMenuTest.setMode('enhanced'); wbMenuTest.reset()")
     page.evaluate("wbMenuTest.set('sound', 'stereo', 30); wbMenuTest.set('display', 'par', 1.07)")
     o = page.evaluate("wbMenuTest.getMode('original', 'sound')")
@@ -316,6 +324,11 @@ def check_menu_and_sound(page, fails):
     ok(page.evaluate("wbMenuTest.set('sound', 'volume', 250).volume") == 100 and page.evaluate("wbMenuTest.set('display', 'par', 0.5).par") == 1,
        'values not clamped'); n += 1
     page.evaluate("wbMenuTest.reset()")
+    return n + _sound_contract(page, ok)
+
+
+def _sound_contract(page, ok):
+    n = 0
     sig = page.evaluate('wbZvukTest.signal()')
     flat = page.evaluate('(s) => wbZvukTest.render(s, false)', FLAT)
     ok(_maxdiff(flat['l'], sig['l']) < 1e-5 and _maxdiff(flat['r'], sig['r']) < 1e-5, 'original at 100 %% without filters is not the input (diff %.2g)' % _maxdiff(flat['l'], sig['l'])); n += 1

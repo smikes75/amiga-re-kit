@@ -15,11 +15,13 @@
 //   wished value snaps to the nearest step; `menu.refreshZoom()` after a resize or a dpr change (`{keep: true}`: the slider
 //   shows the nearest step, the stored wish stays). Listeners get (state, what, {cause: 'set'|'reset'|'mode', id|section}).
 //   Values show with the item's unit in the menu's language (`20 %`, `1,04`).
+//   1.3: spec.omit = { sound: ['filter-fixed', 'filter-led'], display: [...] } leaves rows out (a machine that has no such
+//   thing): the row is not built, its value is fixed - the filters off, any other item at its default - and menu.set ignores it.
 //
 // The file is wb-nastaveni.js (not wb-menu.js: that name is the games' own Workbench bar). Every value is kept per mode (original / enhanced). Test hooks (arek web test §6): window.wbMenuTest = menu.testHooks().
 'use strict';
 const WBNASTAVENI = (() => {
-    const VERSION = '1.2';
+    const VERSION = '1.3';
     const MODES = ['original', 'enhanced'];
     const ITEMS = {
         display: [
@@ -40,9 +42,9 @@ const WBNASTAVENI = (() => {
         sound: [
             { id: 'sound', kind: 'check', def: true },
             { id: 'volume', kind: 'range', unit: '%', min: 0, max: 100, step: 1, def: 80 },
-            { id: 'filter-fixed', kind: 'check', def: true },
-            { id: 'filter-led', kind: 'select', options: ['auto', 'on', 'off'], def: 'auto' },
-            { id: 'filter-hp', kind: 'check', def: true },
+            { id: 'filter-fixed', kind: 'check', def: true, none: false },
+            { id: 'filter-led', kind: 'select', options: ['auto', 'on', 'off'], def: 'auto', none: 'off' },
+            { id: 'filter-hp', kind: 'check', def: true, none: false },
             { id: 'stereo', kind: 'range', unit: '%', min: 0, max: 100, step: 1, def: { original: 100, enhanced: 70 } },
         ],
     };
@@ -62,14 +64,18 @@ const WBNASTAVENI = (() => {
     };
 
     /** The default of an item for a mode: the game's override (spec.defaults[section][mode][id]) wins. */
-    function defaults(section, mode, over, snap) {
-        const out = {}, o = (over && over[section] && over[section][mode]) || {};
+    function defaults(section, mode, over, snap, omit) {
+        const out = {}, o = (over && over[section] && over[section][mode]) || {}, om = omitted(omit, section);
         for (const it of ITEMS[section]) {
             const d = it.def !== null && typeof it.def === 'object' ? it.def[mode] : it.def;
-            out[it.id] = it.id in o ? coerce(it, o[it.id], snap) : d;
+            out[it.id] = om.has(it.id) && 'none' in it ? it.none : it.id in o ? coerce(it, o[it.id], snap) : d;   // 1.3: a row the page left out has no effect
         }
         return out;
     }
+    /** 1.3: the rows a page leaves out (spec.omit = { display: [ids], sound: [ids] }) - a machine without the Amiga's filters
+     *  has no rows for them. A row left out is not built, takes no stored value and cannot be set; its value is the item's
+     *  `none` (the filters: off) or, where an item has none, the default of the mode (the page's override wins). */
+    function omitted(omit, section) { return new Set((omit && omit[section]) || []); }
     /** A value into the item's domain (range clamped and rounded to the step, options checked, booleans). With zoom
      *  snapping (snap = true) the zoom is any number 0..the largest option: the exact steps are the page's, snapZoom picks. */
     function coerce(it, v, snap) {
@@ -93,9 +99,9 @@ const WBNASTAVENI = (() => {
         return +(it.min + steps * it.step).toFixed(6);
     }
     /** Stored values (any shape) merged over the defaults: unknown ids dropped, every value coerced. */
-    function merge(section, mode, stored, over, snap) {
-        const out = defaults(section, mode, over, snap), s = (stored && stored[mode] && stored[mode][section]) || {};
-        for (const it of ITEMS[section]) if (it.id in s) out[it.id] = coerce(it, s[it.id], snap);
+    function merge(section, mode, stored, over, snap, omit) {
+        const out = defaults(section, mode, over, snap, omit), s = (stored && stored[mode] && stored[mode][section]) || {}, om = omitted(omit, section);
+        for (const it of ITEMS[section]) if (it.id in s && !om.has(it.id)) out[it.id] = coerce(it, s[it.id], snap);
         return out;
     }
 
@@ -111,7 +117,7 @@ const WBNASTAVENI = (() => {
             const stored = this.load();
             this.state = {};
             const snap = this.spec.zoom === 'snap';     // a stored exact zoom (e.g. 2 * 448 / 293) survives a reload; refreshZoom snaps it
-            for (const m of MODES) this.state[m] = { display: merge('display', m, stored, this.spec.defaults, snap), sound: merge('sound', m, stored, this.spec.defaults) };
+            for (const m of MODES) this.state[m] = { display: merge('display', m, stored, this.spec.defaults, snap, this.spec.omit), sound: merge('sound', m, stored, this.spec.defaults, false, this.spec.omit) };
             if (stored && MODES.includes(stored.mode) && !this.spec.mode) this.mode = stored.mode;
             this.controls = { display: {}, sound: {} }; this.extras = {};
             if (host) this.render();
@@ -127,7 +133,7 @@ const WBNASTAVENI = (() => {
             for (const section of ['display', 'sound']) {
                 const fs = d.createElement('fieldset'); fs.className = 'wb-nastaveni-' + section;
                 const lg = d.createElement('legend'); lg.textContent = this.texts[section]._; fs.appendChild(lg);
-                for (const it of ITEMS[section]) fs.appendChild(this.row(d, section, it));
+                for (const it of ITEMS[section]) if (!omitted(this.spec.omit, section).has(it.id)) fs.appendChild(this.row(d, section, it));
                 const ex = d.createElement('div'); ex.className = 'wb-nastaveni-extras'; fs.appendChild(ex); this.extras[section] = ex;
                 const btn = d.createElement('button'); btn.type = 'button'; btn.id = 'wb-defaults-' + section; btn.className = 'wb-nastaveni-defaults';
                 btn.textContent = this.texts[section].defaults; btn.addEventListener('click', () => this.reset(section)); fs.appendChild(btn);
@@ -192,6 +198,7 @@ const WBNASTAVENI = (() => {
             this.root.dataset.mode = this.mode;
             for (const section of ['display', 'sound']) for (const it of ITEMS[section]) {
                 const c = this.controls[section][it.id], v = this.state[this.mode][section][it.id];
+                if (!c) continue;                                                       // 1.3: a row left out
                 if (c.ctl.dataset.snap) {
                     const st = this.zoomSteps(); c.ctl.max = Math.max(0, st.length - 1);
                     const near = v > 0 ? this.snapZoom(v) : v, k = st.findIndex((z) => Math.abs(z.value - near) < 1e-9);   // off-step: nearest, value unchanged
@@ -210,12 +217,12 @@ const WBNASTAVENI = (() => {
         getMode(mode, section) { return Object.assign({}, this.state[mode][section]); }
         setMode(mode) { if (!MODES.includes(mode)) return; this.mode = mode; this.refresh(); this.save(); this.emit('mode', { cause: 'mode' }); }
         set(section, id, value) {
-            const it = ITEMS[section].find((x) => x.id === id); if (!it) return;
+            const it = ITEMS[section].find((x) => x.id === id); if (!it || omitted(this.spec.omit, section).has(id)) return;
             this.state[this.mode][section][id] = (id === 'zoom' && this.spec.zoom === 'snap') ? this.snapZoom(Number(value) || 0) : coerce(it, value);
             this.refresh(); this.save(); this.emit(section, { cause: 'set', id });
         }
         reset(section) {
-            for (const sec of section ? [section] : ['display', 'sound']) this.state[this.mode][sec] = defaults(sec, this.mode, this.spec.defaults, sec === 'display' && this.spec.zoom === 'snap');
+            for (const sec of section ? [section] : ['display', 'sound']) this.state[this.mode][sec] = defaults(sec, this.mode, this.spec.defaults, sec === 'display' && this.spec.zoom === 'snap', this.spec.omit);
             this.refresh(); this.save(); this.emit(section || 'all', { cause: 'reset', section: section || 'all' });
         }
         on(ev, fn) { this.listeners.push([ev, fn]); return this; }
@@ -223,12 +230,12 @@ const WBNASTAVENI = (() => {
         emit(what, info) { const st = this.get(); for (const [ev, fn] of this.listeners) if (ev === 'change' || ev === what) fn(st, what, info || {}); }
         /** window.wbMenuTest for arek web test. */
         testHooks() {
-            return { version: VERSION, ids: () => ['display', 'sound'].map((s) => ITEMS[s].map((it) => 'wb-' + it.id)).flat(),
+            return { version: VERSION, ids: () => ['display', 'sound'].map((s) => ITEMS[s].filter((it) => !omitted(this.spec.omit, s).has(it.id)).map((it) => 'wb-' + it.id)).flat(),
                      get: (section) => this.get(section), getMode: (m, s) => this.getMode(m, s), setMode: (m) => this.setMode(m),
                      set: (s, id, v) => { this.set(s, id, v); return this.get(s); }, reset: (s) => { this.reset(s); return this.get(s); } };
         }
     }
-    return { VERSION, MODES, ITEMS, TEXTS, defaults, coerce, merge, Menu, build: (host, spec) => new Menu(host, spec) };
+    return { VERSION, MODES, ITEMS, TEXTS, defaults, coerce, merge, omitted, Menu, build: (host, spec) => new Menu(host, spec) };
 })();
 if (typeof globalThis !== 'undefined') { globalThis.WBNASTAVENI = WBNASTAVENI; if (!globalThis.WBMENU) globalThis.WBMENU = WBNASTAVENI; }   // WBMENU: the 0.6.0 name
 if (typeof module !== 'undefined') module.exports = WBNASTAVENI;

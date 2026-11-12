@@ -501,6 +501,36 @@ GPU equality (0 of 114 688 and 458 752 pixels at S = 1 and 2, with and without t
 at S = 2 and 3) and `arek web smooth`
 over the page in Chromium (0 missing passes, camera and object jitter under the limit).
 
+**2.13 (kit 1.0.68): the passes on the time of the game's computation (`passTime`, `rec.next`).** SWIV computes a pass
+every 2 frames and swaps its buffers 1 to 4 frames later, in places after 3, 1, 3, 1 frames. The scene paired the
+objects' passes by the frame a pass was first shown in, so an even 6 px step came out at 60 Hz as steps from -2.3 to
+5 px a frame (a double step, a stand). Two things, both off unless the page asks:
+
+- `passTime: true`: `rec.pass` is the time of the computation (ms on `rec.t`'s clock) and the passes are paired on it.
+  The camera, the window, the sprites and the back layer stay on `rec.t` (the camera on the passes' axis was measured
+  too: the same numbers).
+- `rec.next = { pass, cam, objects: [{ id, x, y }] }`: the pass the game has computed and not shown yet. Its positions
+  are in the game's RAM before its picture exists; the scene makes it one more pass - the last pass's pictures at
+  next's positions - so the objects need not wait for the swap. Read it where the game's logic is done (a mark at the
+  pc where drawing begins), not at the frame's end: SWIV's RAM at the end of the frame of the computation had 124 of
+  6 562 positions of the pass before (the logic had not finished); from the start of drawing 0 of 14 285.
+
+The page adds one constant D to every pass time. A pass is known some ms after its time, and with D = 0 the scene runs
+past the newest pass by the last velocity for a part of every pass: right for a steady flight, an overshoot for
+whatever starts, stops or turns. Measured in SWIV (60 Hz, latency 40 ms, mean change of the step in px a frame; all
+objects / the player / one helicopter, frames 4100-4400 and 4200-5200):
+
+| | 4100-4400 | 4200-5200 |
+|---|---|---|
+| before | 0.218 / 0.072 / 0.324 | 0.284 / 0.499 / 0.361 |
+| passTime + next, D = 0 | 0.140 / 0.139 / 0.224 | 0.324 / 0.559 / 0.331 |
+| D = 30 ms | 0.176 / 0.087 / 0.215 | 0.270 / 0.484 / 0.323 |
+
+D = 30 ms was the smallest that put the long stretch under the numbers before for the objects and the player; objects
+on the ground stayed at 0.000 px against the background in every variant. `passTime` without `next` needs a latency
+that covers the wait for the swap and was worse than before. The synthetic rhythm in the tests (a pass every 2 frames,
+shown after 3, 1, 3, 1): before -2.33 .. 5.00 px a frame, `passTime` + `next` 2.50 flat.
+
 ## H. The display never touches the game (`arek web replay`, kit 0.9.6) - done
 
 A page replayed under a virtual clock: `requestAnimationFrame` and `performance.now` are replaced before the page's

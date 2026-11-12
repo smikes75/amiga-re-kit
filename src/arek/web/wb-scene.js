@@ -44,13 +44,22 @@
 // 2.12 kit 1.0.44 - camMean's carried-on window stops where a stopped camera stands (Turrican II KIT-GAP 33: 2.9's slope ran on
 // for a frame after the camera stopped or turned, 0.2-0.8 px forth and back); stopped = the newest value held as long as the one
 // before it, so a camera that moves every few frames is carried within its own cadence as before.
+// 2.13 kit 1.0.68 - passTime and rec.next (SWIV: a pass computed every 2 frames and shown after 3, 1, 3, 1 frames - an object's even
+// steps came out as a double step and a stand): the objects' passes on the axis of the game's computation, and the pass the game
+// has computed but not shown yet as one more pass, so the objects neither wait for the swap nor guess by the last velocity.
 // Extracted from the Alien Breed II page (tools/web/gl.js, tools/host/view.h) with Superfrog's measured options
 // (docs/POHYB-AUDIT.md, PLYNULOST-K4.md): one way to draw the wider, smoother view for every project.
 //
 // The project gives one RECORD per game frame (world coordinates in game pixels, the window = the original's playfield):
 //   { n, t, pass,                        frame number, its time (wb-takt stamp, ms), the time of the drawing pass the
 //                                        objects belong to (optional; frames of one pass share it - objects interpolate
-//                                        between passes, the camera and the sprites between frames)
+//                                        between passes, the camera and the sprites between frames); 2.13 with the
+//                                        option passTime: the TIME the game computed the pass at (ms on t's clock, the
+//                                        start of its main loop plus a constant the page measures - see passTime below)
+//     next: { pass, cam, objects: [{ id, x, y }] }   2.13, optional, read with passTime only: the pass the game has computed
+//                                        and not shown yet - its time, its camera and its objects' world positions by id (read
+//                                        where the game's logic is DONE, not at the frame's end: a half-moved RAM gave 1.9 %
+//                                        wrong positions in SWIV); in the records from then until the pass is shown
 //     cam: [x, y],                       the game's camera: world position of the window's top-left
 //     limits: { x0, x1, y0, y1},         the game's own camera range (the window never leaves it)
 //     window: { w, h, idx, pal, over },  the window's CLEAN picture (no moving objects): idx = Uint8Array(w*h) colour
@@ -129,6 +138,14 @@
 // the shifted picture by steady as in 1.6, the sprites by the pair);
 // palAnchor (2.3): 'window' (default) - a window row's palette row moves with frame B's picture; 'screen' - the palette
 // rows stay on the screen rows of the game's camera between the frames (a copper gradient fixed to the screen).
+// passTime (2.13, off unless set): the objects are paired on rec.pass as a time - the game's computation, which comes evenly
+// when the buffer swaps do not - and rec.next adds the pass not shown yet (the last pass's pictures at next's positions; an
+// object next does not name stays where it is, an id without a picture draws nothing). The camera, the window, the sprites
+// and the back layer stay on rec.t. The page adds one constant D to every pass time (rec.pass and next.pass = the loop's
+// start + D): a pass is known only some ms after its time, and with D = 0 the scene runs past the newest pass by the last
+// velocity for a part of every pass - right for a steady flight, an overshoot for whatever starts, stops or turns (SWIV:
+// the player twice as shaky at D = 0, D = 30 ms the smallest that brought it back; the objects are still on the picture
+// before the swap would show them).
 // One timebase: ts of the drawer and rec.t must come from the same clock (the page's requestAnimationFrame timestamps and
 // wb-takt's stamps are performance.now() based; a worker's absolute times must be converted) - the module warns once when
 // the newest frame is more than 500 ms behind ts.
@@ -139,7 +156,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '2.12';
+    const VERSION = '2.13';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -269,6 +286,7 @@ const WBSCENE = (() => {
         for (const fr of frames) { const ps = fr.pass === undefined ? fr.t : fr.pass; if (ps !== lastPass) { passes.push(fr); lastPass = ps; } }
         const passMax = o.passMax === undefined ? 100 : o.passMax;
         if (frames.length && passMax > 0 && frames[frames.length - 1].t - passes[passes.length - 1].t > passMax) passes = frames;   // 1.1: no new pass for a while: every frame is one
+        else if (o.passTime && passes.length) passes = passAxis(frames, passes);   // 2.13: the passes at the times the game computed them, and the pass it has computed but not shown yet
         const extC = o.extrapolate || 0, extO = o.extrapolateObjects !== undefined ? o.extrapolateObjects : extC;   // 1.7
         if (takt) { const v = takt.view(ts); tv = v.tv; tvO = v.tvO; }
         if (takt) { p = takt.pair(frames, tv, extC > 0 ? true : undefined); q = takt.pair(passes, tvO, extO > 0 ? true : undefined); }
@@ -350,6 +368,31 @@ const WBSCENE = (() => {
         if (!o.subpixel) return null;
         const d = [cam[0] * S, cam[1] * S], i = [Math.floor(d[0]), Math.floor(d[1])];
         return { cam: [i[0] / S, i[1] / S], d: i, w: [Math.round((d[0] - i[0]) * 256), Math.round((d[1] - i[1]) * 256)] };
+    }
+    /** 2.13 (SWIV): the passes on the axis of the game's own computation. A game that computes a pass every 2 frames but
+     *  swaps its buffers after 3, 1, 3, 1 frames shows even steps at uneven times; paired by the frame a pass was first
+     *  SHOWN in, an object crosses a whole step in one frame and stands the next. With passTime rec.pass is the TIME of the
+     *  computation (ms, rec.t's clock) and each pass stands at it. rec.next = { pass, cam, objects: [{ id, x, y }] } is the
+     *  pass already computed and not shown yet (its positions are in the game's RAM frames before its picture exists): it
+     *  becomes one more pass after the last - the last pass's objects (their pictures) at next's positions, an object next
+     *  does not name where it is - so the objects need not wait for the swap nor guess by the last velocity. The frames
+     *  themselves are not changed (the entries inherit from them); the camera, the window and the sprites stay on rec.t. */
+    const NEXT = new WeakMap();
+    function passAxis(frames, passes) {
+        const out = passes.map((fr) => (fr.pass === undefined || fr.pass === fr.t ? fr : Object.create(fr, { t: { value: fr.pass } })));
+        const last = passes[passes.length - 1], lt = out[out.length - 1].t;
+        let nx = null;
+        for (let i = frames.length - 1; i >= 0; i--) { const n = frames[i].next; if (n && n.pass > lt) { nx = n; break; } if (frames[i] === last) break; }
+        if (!nx) return out;
+        let v = NEXT.get(nx);
+        if (!v || v.of !== last) {
+            const at = new Map(); for (const p of nx.objects || []) at.set(p.id, p);
+            const objects = (last.objects || []).map((ob) => { const p = at.get(ob.id); return p && (p.x !== ob.x || p.y !== ob.y) ? Object.assign({}, ob, { x: p.x, y: p.y }) : ob; });
+            v = { of: last, pass: Object.create(last, { t: { value: nx.pass }, cam: { value: nx.cam || last.cam }, objects: { value: objects } }) };
+            NEXT.set(nx, v);
+        }
+        out.push(v.pass);
+        return out;
     }
     function frameCam(frames, item, fallback, key) { key = key || 'sprites'; for (const fr of frames) if (fr[key] && fr[key].indexOf(item) >= 0) return fr.cam; return fallback.cam; }
     /** The pair around time t without wb-takt: the two frames around t, f in [0, 1] (or > 1 past the newest). */
@@ -777,7 +820,7 @@ const WBSCENE = (() => {
             return { pixels: out, w, h, composition: c };
         }
     }
-    return { VERSION, lerp, clampCam, valueAt, windowMean, runOf, objDev, pairById, pairOf, fnv1a, x17, widenColumns, compose, reference, unexplained, quadOf, backIdx, Scene };
+    return { VERSION, lerp, clampCam, valueAt, windowMean, runOf, objDev, passAxis, pairById, pairOf, fnv1a, x17, widenColumns, compose, reference, unexplained, quadOf, backIdx, Scene };
 })();
 if (typeof globalThis !== 'undefined') globalThis.WBSCENE = WBSCENE;
 if (typeof module !== 'undefined') module.exports = WBSCENE;

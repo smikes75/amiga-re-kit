@@ -55,7 +55,7 @@ def test_filters_and_process():
 
 
 def test_menu_defaults_coerce_merge():
-    assert js('M.VERSION') == '1.2' and js('M.MODES') == ['original', 'enhanced']
+    assert js('M.VERSION') == '1.3' and js('M.MODES') == ['original', 'enhanced']
     d = js("M.defaults('display', 'enhanced')")
     assert d['par'] == 1.04 and d['smooth'] is True and d['zoom'] == 3 and d['crt-detail'] == 'fine'
     assert js("M.defaults('display', 'original').par") == 1 and js("M.defaults('display', 'original').smooth") is False
@@ -127,3 +127,46 @@ def test_menu_units_events_and_keep():
         m.set('display', 'zoom', 3); steps = [1.4, 2.8];                 // the window got smaller
         m.refreshZoom({keep: true}); const kept = m.get('display').zoom; m.refreshZoom(); return [kept, m.get('display').zoom]; })()""")
     assert keep == [3, 2.8]
+
+
+def test_rows_a_page_leaves_out():
+    """wb-nastaveni 1.3 (the Atari page's request): spec.omit leaves rows out - the Amiga's filters on a machine that has
+    none. Such a row has the item's `none` (the filters off) whatever is stored or given as a default, cannot be set, and
+    the test hooks list only the rows the menu has; an item without `none` keeps the mode's default."""
+    om = "{ sound: ['filter-fixed', 'filter-led'], display: ['crt-shape'] }"
+    d = js("M.defaults('sound', 'enhanced', { sound: { enhanced: { 'filter-fixed': true } } }, false, %s)" % om)
+    assert d['filter-fixed'] is False and d['filter-led'] == 'off' and d['filter-hp'] is True and d['stereo'] == 70
+    m = js("M.merge('sound', 'original', { original: { sound: { 'filter-fixed': true, 'filter-led': 'on', stereo: 40 } } }, null, false, %s)" % om)
+    assert m['filter-fixed'] is False and m['filter-led'] == 'off' and m['stereo'] == 40
+    assert js("M.defaults('display', 'original', null, false, %s)['crt-shape']" % om) == 'lines'      # no `none`: the default
+    r = js("(() => { const menu = M.build(null, { omit: %s }); menu.set('sound', 'filter-fixed', true); menu.set('sound', 'volume', 30); menu.reset('display');"
+           " const h = menu.testHooks(); return { s: menu.get('sound'), ids: h.ids(), all: M.build(null, {}).testHooks().ids().length }; })()" % om)
+    assert r['s']['filter-fixed'] is False and r['s']['filter-led'] == 'off' and r['s']['volume'] == 30
+    assert 'wb-filter-fixed' not in r['ids'] and 'wb-filter-led' not in r['ids'] and 'wb-crt-shape' not in r['ids'] and 'wb-filter-hp' in r['ids']
+    assert len(r['ids']) == r['all'] - 3 == 16
+    assert js("M.defaults('sound', 'enhanced')") == {'sound': True, 'volume': 80, 'filter-fixed': True, 'filter-led': 'auto', 'filter-hp': True, 'stereo': 70}
+
+
+@pytest.mark.parametrize('tail,rows', [('', 0), ('?omit=filter-fixed,filter-led', 2)])
+def test_the_page_test_follows_the_rows_the_menu_has(tail, rows):
+    """arek web test section 6 on the demo page: with every row as before; with the filters' rows left out the rows are
+    not in the document, the check does not ask for them and the sound contract is still checked."""
+    pytest.importorskip('playwright')
+    from playwright.sync_api import sync_playwright
+    import threading
+    from arek import web as webpkg
+    srv = webpkg.serve(str(WEB), 0, isolated=True)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            p = b.new_page(viewport={'width': 1280, 'height': 900})
+            p.goto('http://127.0.0.1:%d/demo.html%s' % (srv.server_address[1], tail))
+            p.wait_for_function('window.wbObrazTest && window.wbMenuTest && window.wbZvukTest')
+            fails = []
+            n = webtest.check_menu_and_sound(p, fails)
+            gone = p.evaluate("['wb-filter-fixed', 'wb-filter-led'].filter((i) => !document.getElementById(i)).length")
+            b.close()
+    finally:
+        srv.shutdown()
+    assert fails == [] and n == 13 and gone == rows
