@@ -391,6 +391,7 @@ static void host_events(void) {
         arek_glue_frame(H_LINES);
         arek_paula_frame(&H_PAULA, H_PAULA.frame_base + len);
         arek_glue_bus()->ahead_to = 0; arek_glue_frame_carry();     /* 1.0.56: an access that waited for a blit across the frame's end, after the audio slots are planned */
+        { ArekBus *bb = arek_glue_bus(); if (bb->poll_carried) { H_POLL_T = H_PAULA.frame_base + bb->pat_poll; bb->poll_carried = 0; } }   /* 1.0.61: the carried cycle sampled the interrupt level in the new frame */
         H_FRAME++; H_COP_DONE = 0; H_COP_IDX = 0; H_NEXTMAP = 0;
         if (H_VBL_LAT <= 0 && H_IRQ_POLL < 0) H_INTREQ |= 0x0020; else H_VERTB_PEND = 1;
         if (h_frame_cb) h_frame_cb();

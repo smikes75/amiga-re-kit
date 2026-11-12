@@ -14,6 +14,7 @@ void arek_bus_init(ArekBus *b, int hpos, int lines, int maxlines, uint8_t *own, 
 void arek_bus_frame(ArekBus *b, int lines) {
     uint32_t fend = (uint32_t)(b->lines * b->hpos);   /* konec predchoziho snimku */
     if (b->bl.on) { arek_bus_blt_advance(b, fend - 1); if (b->bl.on) b->bl.bt = b->bl.bt >= fend ? b->bl.bt - fend : 0; }
+    b->carry_fend = fend;
     b->lines = lines; b->cpu_n = b->wait_n = 0;
     arek_bus_frame_map(b);
 }
@@ -47,7 +48,10 @@ double arek_bus_access(ArekBus *b, double tt) {
         b->bls = 0; b->wait_n += delay; b->last_wait = delay;
     }
     if (t < cap) { b->own[t] = AREK_BUS_CPU; b->last_slot = (long)t; b->cpu_n++; }
-    else b->unserved++;                                      /* 1.0.56: no slot before the cap - arek_bus_frame_carry serves it in the next frame */
+    else {                                                   /* 1.0.56: no slot before the cap - arek_bus_frame_carry serves it in the next frame */
+        if (!b->unserved) b->carry_k = -1;
+        if (b->unserved < AREK_BUS_CARRY) { b->carry_ask[b->unserved] = tt; b->carry_ret[b->unserved] = (double)t + 2 - b->slotoff; }   /* 1.0.61: with the clocks between them */
+        b->unserved++; }
     return t + 2 - b->slotoff;
 }
 
@@ -58,9 +62,23 @@ double arek_bus_access(ArekBus *b, double tt) {
 double arek_bus_frame_carry(ArekBus *b, double t) {
     int n = b->unserved; b->unserved = 0;
     if (n <= 0) return t;
-    double t0 = t - 2.0 * n;                                 /* where the first of them stood: each had taken 2 colour clocks */
-    if (t0 < (double)b->hpos - b->slotoff) t0 = (double)b->hpos - b->slotoff;   /* not before the cap: line 1, slot 0 */
-    for (int k = 0; k < n; k++) t0 = arek_bus_access(b, t0);
+    /* the first of them stood at the cap (line 1, slot 0 of the new frame) and asks there again; the others follow with
+     * the idle clocks the instruction has between them, and behind the last one come the clocks that followed it
+     * (1.0.61: an interrupt entry that waited for a blit across the frame's end has 4 and 1 colour clocks between its
+     * seven cycles - they were run back to back, 5 colour clocks short; SWIV, frame 18009) */
+    double t0 = (double)b->hpos - b->slotoff, end = t + (double)b->carry_fend;
+    for (int i = 0; i < n; i++) {
+        if (i > 0 && i < AREK_BUS_CARRY) { double gap = b->carry_ask[i] - b->carry_ret[i - 1]; if (gap > 0) t0 += gap; }
+        /* 1.0.61: the cycle in which the instruction samples the interrupt level, when it is one of the carried ones, is
+         * made HERE - behind the wait of the cycles before it. Its sample time was taken where the cycle first asked, one
+         * line past the old frame's end: an interrupt that came during a 400-clock wait for a blit was missed at this
+         * instruction's end and a lower one, older, taken first (SWIV: level 3 before level 6, frame 6690) */
+        int k = (b->carry_k >= 0 && i > 0) ? b->carry_k + i : -1;   /* the first carried cycle began (and sampled) before its wait, in the old frame */
+        if (k >= 0 && k == b->pat_pj && b->pat_pd < 4) { b->pat_poll = t0 + b->pat_pd * 0.5; b->poll_carried = 1; }
+        t0 = arek_bus_access(b, t0);
+        if (k >= 0 && k == b->pat_pj && b->pat_pd >= 4) { b->pat_poll = t0 + (b->pat_pd - 4) * 0.5; b->poll_carried = 1; }
+    }
+    if (n <= AREK_BUS_CARRY) { double rest = end - b->carry_ret[n - 1]; if (rest > 0) t0 += rest; }
     return t0 > t ? t0 : t;
 }
 
@@ -71,10 +89,11 @@ double arek_bus_undo_last(ArekBus *b) {
 }
 
 static double arek_pat_access(ArekBus *b, double t) {
-    int k = b->pat_acc++;
+    int k = b->pat_acc++, u0 = b->unserved;
     if (k == b->pat_pj && b->pat_pd < 4) b->pat_poll = t + b->pat_pd * 0.5;        /* inside the cycle, before its access (and its wait) */
     t = arek_bus_access(b, t);
     if (k == b->pat_pj && b->pat_pd >= 4) b->pat_poll = t + (b->pat_pd - 4) * 0.5; /* behind the cycle */
+    if (!u0 && b->unserved) b->carry_k = k;                  /* 1.0.61: which bus cycle of the pattern is the first one carried into the next frame */
     return t;
 }
 static double arek_pat_run(ArekBus *b, double t, int to_data) {

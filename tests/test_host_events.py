@@ -551,3 +551,52 @@ def test_paula_takes_dmacon_two_colour_clocks_after_the_write(tmp_path, h0, line
     audio += '@audio 1 0 0 1 -1 -1 2000 2000 10 10 190 40 40 0 0 1 0 0\n'
     slots = _audio_host(tmp_path, '33fc820200dff096' '60fe', 60 * 227 + h0, audio, 0x8200)
     assert slots and slots[0] == (line, 15), slots[:3]
+
+
+@pytest.mark.parametrize('by_tick', [False, True])
+def test_input_lines_by_the_ticks_hits_as_the_emulator_takes_them(tmp_path, by_tick):
+    """1.0.61 (SWIV, frame 16337): the emulator takes the next input line at the first breakpoint hit of a frame on lines
+    0-99. A frame whose VBL handler starts lower takes none, and the original is one line behind from then on - the host,
+    which went by the frame number, was not. host_trace --inputs-v LO:HI follows the emulator's rule. Here the game
+    masks interrupts over a frame's start once: the handler of frame 104 runs at line 150 and reads the joystick."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    HOST, BUS = os.path.dirname(host.__file__), os.path.dirname(bus.__file__)
+    main = ('4df900dff000' '3d7cc020009a'                 # lea $dff000,a6; move.w #$c020,$9a(a6)
+            '0c7800034000' '66f8'                         # loop: cmpi.w #3,$4000; bne.s loop        three frames
+            '46fc2700'                                    # move.w #$2700,sr
+            '0c39009600dff006' '66f6'                     # w1: cmpi.b #150,$dff006; bne.s w1          line 150 of frame 103
+            '0c39000a00dff006' '66f6'                     # w2: cmpi.b #10,$dff006; bne.s w2           line 10 of frame 104
+            '0c39009600dff006' '66f6'                     # w3: line 150 of frame 104
+            '46fc2000' '60fe')                            # move.w #$2000,sr; bra.s self
+    l3 = '33f900dff00c00dff180' '52784000' '33fc002000dff09c' '4e73'   # move.w JOY1DAT,COLOR00; addq.w #1,$4000; ack; rte
+    img = bytearray(0x2000)
+    for at, hx in ((0x1000, main), (0x1100, l3)):
+        b = bytes.fromhex(hx)
+        img[at:at + len(b)] = b
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[0x1000, 0x1100], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1100u', '-DHOST_L3_PC=0x1100u',
+                    '-DHOST_IPL_MODEL=1', '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', os.path.join(HOST, 'arek_host_trace.c'),
+                    os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'), '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    (st / 'creg.bin').write_bytes(bytes(512))
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 300 0 1000\nfe 0 0 0 0 5500\n100\n')
+    (tmp_path / 'inp.txt').write_text('\nR\nL\nU\nD\nRU\nLD\nR\nL\nU\n')
+    r = subprocess.run([str(exe), str(st), str(tmp_path / 'o.vtr'), '8', str(tmp_path / 'inp.txt'), '--inputs-first', '101',
+                        '--reglog', str(tmp_path / 'reg.bin'), '--reglog-regs', '180'] + (['--inputs-v', '0:99'] if by_tick else []),
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    data = (tmp_path / 'reg.bin').read_bytes()
+    seen = [(f, bv >> 16, rv & 0xffff) for f, bv, rv, pc in struct.iter_unpack('<4I', data)]
+    assert [f for f, v, x in seen][:6] == [101, 102, 103, 104, 105, 106] and seen[3][1] >= 150 and all(v < 5 for f, v, x in seen[:3] + seen[4:6]), seen
+    joy = {'': 0, 'R': 3, 'L': 0x300, 'U': 0x100, 'D': 1, 'RU': 0x103}
+    want = ['', 'R', 'L', 'L', 'U', 'D'] if by_tick else ['', 'R', 'L', 'U', 'D', 'RU']      # frame 104 takes no line by the tick's rule
+    assert [x for f, v, x in seen][:6] == [joy[k] for k in want], seen

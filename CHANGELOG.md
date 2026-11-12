@@ -3,6 +3,25 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.61 (2026-11-12)
+
+- bus model, accesses carried over a frame's end beside a blit (1.0.56 / 1.0.58), three more things the game's
+  landscapes met:
+  - the idle clocks between the carried accesses and behind the last one are kept - an interrupt entry that waits for
+    a blit across the frame's end has 4 and 1 colour clocks between its seven cycles, they were run back to back
+    (5 colour clocks short; SWIV frame 18009), and an instruction's clocks behind its carried access were lost
+  - the cycle in which the instruction samples the interrupt level, when it is carried (and not the first carried
+    one), samples in the new frame, behind the wait: an interrupt that came during a 400-clock wait was missed at the
+    instruction's end and an older, lower one taken first (level 3 before level 6; SWIV frame 6690)
+- `host_trace --inputs-v LO:HI`: the next input line at the first pass of the tick's pc in a frame on lines LO..HI -
+  the emulator's own rule (`VAHL_INPUTS_V`, 0:99 by default). By frame number (the default, unchanged) the two sides
+  agree only while the original's breakpoint is hit in that window in every frame; in a frame whose VBL handler
+  starts lower (SWIV frame 16337: line 107, behind a long blit) the original takes no line and is one line behind
+  from then on
+- measured on SWIV against vAmiga, from the boot's capture through the title into the desert landscape (the trainer
+  on, its three code patches translated): the VBL routine's time equal in 18 733 frames of 18 733, frame 790 to
+  19508 (1.0.60: 5 904 in a row); the earlier scenario without the trainer still 5 865 of 5 865
+
 ## 1.0.60 (2026-11-12)
 
 - a capture in the middle of a game carries Paula's audio channels: `? paula channels` of an emulator build with the

@@ -44,6 +44,8 @@ static long MAXFRAMES, HITS = 0;
 static int FULL = 0;
 static uint32_t H_SLOW_SKIP = 0;
 static char **INP = 0; static long NINP = 0, INP_FIRST = -1;
+static int INP_VLO = -1, INP_VHI = -1; static long INP_IDX = 0, INP_LAST = -1;   /* 1.0.61: --inputs-v */
+static void tick_input(void);
 
 static uint64_t fnv(const uint8_t *p, size_t n) {
     uint64_t h = 0xcbf29ce484222325ull;
@@ -86,9 +88,9 @@ static int pc_listed(uint32_t pc) {
 static void on_pc(M68 *m, uint32_t pc) {
     if (R_PCLOG && pc_listed(pc)) { long tt = (long)h_now(); fprintf(R_PCLOG, "%ld %06x %ld %ld\n", H_FRAME0 + H_FRAME, pc, tt / HOST_HPOS, tt % HOST_HPOS); }
 #ifdef HOST_L3_PC
-    if (pc == HOST_L3_PC) { record(m, pc); return; }
+    if (pc == HOST_L3_PC) { tick_input(); record(m, pc); return; }
 #endif
-    if (pc == TICK_PC && !H_IN_IRQ) record(m, pc);
+    if (pc == TICK_PC && !H_IN_IRQ) { tick_input(); record(m, pc); }
 }
 static FILE *R_AUD = 0;
 static void r_aud(int ch, double t, int value) {
@@ -119,14 +121,29 @@ static void r_reg(uint32_t off, uint32_t v) {
     uint32_t rec[4] = { (uint32_t)fr, (uint32_t)(((tt / HOST_HPOS) << 16) | (tt % HOST_HPOS)), (off << 16) | (v & 0xffff), H_PC & 0xffffff };
     fwrite(rec, 4, 4, R_REG);
 }
-static void apply_input(long k) {
-    if (INP_FIRST >= 0) { k = H_FRAME0 + k - INP_FIRST; if (k < 0) return; }      /* the state's own inputs hold until line 0's frame */
-    const char *s = (k < NINP) ? INP[k] : "";
+static void apply_row(long k) {
+    const char *s = (k >= 0 && k < NINP) ? INP[k] : "";
     int r = !!strchr(s, 'R'), l = !!strchr(s, 'L'), u = !!strchr(s, 'U'), d = !!strchr(s, 'D'), f = !!strchr(s, 'F');
     H_JOY1 = (uint16_t)((r << 1) | (r ^ d) | (l << 9) | ((l ^ u) << 8));
     H_CIAA_PRA = (uint8_t)((H_CIAA_PRA & 0x7f) | (f ? 0 : 0x80));
     if (strchr(s, 'M')) H_CIAA_PRA &= (uint8_t)~0x40;        /* 1.0.54: port 0's button (the left mouse button) - M pressed, m released, neither: as it was (the state's) */
     else if (strchr(s, 'm')) H_CIAA_PRA |= 0x40;
+}
+static void apply_input(long k) {
+    if (INP_VLO >= 0) return;                                 /* --inputs-v: the lines go by the tick's hits (on_pc) */
+    if (INP_FIRST >= 0) { k = H_FRAME0 + k - INP_FIRST; if (k < 0) return; }      /* the state's own inputs hold until line 0's frame */
+    apply_row(k);
+}
+/* 1.0.61 --inputs-v LO:HI: the next input line at the first pass of the tick's pc in a frame on lines LO..HI - the rule
+ * of the emulator's VAHL_INPUTS (its window: VAHL_INPUTS_V, 0:99 by default). By frame number (the default) both sides
+ * agree as long as the original's breakpoint is hit in the window in EVERY frame; in a frame whose VBL handler starts
+ * below it (SWIV, frame 16337: the VBL routine at line 107 behind a long blit) the original takes no line and is one
+ * line behind from then on. With --inputs-first F the count starts as if every frame from F to the state's had one. */
+static void tick_input(void) {
+    if (INP_VLO < 0 || !NINP) return;
+    long fr = H_FRAME0 + H_FRAME; int v = (int)(h_now() / HOST_HPOS);
+    if (v < INP_VLO || v > INP_VHI || fr == INP_LAST || (INP_FIRST >= 0 && fr < INP_FIRST)) return;
+    INP_LAST = fr; apply_row(INP_IDX++);
 }
 static void on_frame(void) {
     if (H_FRAME >= MAXFRAMES) longjmp(DONE, 1);
@@ -137,11 +154,12 @@ static void rdfile(const char *dir, const char *n, void *buf, size_t len) {
     FILE *f = fopen(p, "rb"); if (!f || fread(buf, 1, len, f) != len) { fprintf(stderr, "read %s\n", p); exit(1); } fclose(f);
 }
 int main(int argc, char **argv) {
-    if (argc < 4) { fprintf(stderr, "host_trace STATE_DIR OUT.vtr FRAMES [INPUTS.txt] [--inputs-first FRAME] [--full] [--skip-stack N] [--own F] [--pclog F PCS] [--reglog F] [--reglog-regs SPEC] [--audlog F] [--shots P A:B]\n"); return 1; }
+    if (argc < 4) { fprintf(stderr, "host_trace STATE_DIR OUT.vtr FRAMES [INPUTS.txt] [--inputs-first FRAME] [--inputs-v LO:HI] [--full] [--skip-stack N] [--own F] [--pclog F PCS] [--reglog F] [--reglog-regs SPEC] [--audlog F] [--shots P A:B]\n"); return 1; }
     MAXFRAMES = atol(argv[3]);
     for (int i = 4; i < argc; i++) {
         if (!strcmp(argv[i], "--full")) { FULL = 1; continue; }
         if (!strcmp(argv[i], "--inputs-first") && i + 1 < argc) { INP_FIRST = atol(argv[++i]); continue; }
+        if (!strcmp(argv[i], "--inputs-v") && i + 1 < argc) { const char *w = argv[++i], *c = strchr(w, ':'); INP_VLO = atoi(w); INP_VHI = c ? atoi(c + 1) : INP_VLO; continue; }
         if (!strcmp(argv[i], "--skip-stack") && i + 1 < argc) { H_SLOW_SKIP = (uint32_t)strtoul(argv[++i], 0, 0); continue; }
         if (!strcmp(argv[i], "--own") && i + 1 < argc) { H_OWN_DUMP = fopen(argv[++i], "wb"); continue; }
         if (!strcmp(argv[i], "--pclog") && i + 2 < argc) {
@@ -200,6 +218,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "note: the state starts on line %ld of frame %ld and input line 0 applies at once; the original takes line 0 at its "
                         "first breakpoint hit on lines 0-99 (VAHL_INPUTS_V) - if that is the next frame, pass --inputs-first %ld "
                         "(arek trace inputs-frame ORIG.vtr prints it)\n", (long)(t0 / HOST_HPOS), (long)H_FRAME0, (long)H_FRAME0 + 1);
+    if (INP_VLO >= 0 && INP_FIRST >= 0 && H_FRAME0 > INP_FIRST) INP_IDX = H_FRAME0 - INP_FIRST;   /* the lines the original took before the state */
     if (NINP) apply_input(0);
     if (!setjmp(DONE)) {
         if (entry != TICK_PC) fprintf(stderr, "note: the state's pc %x is not TICK_PC %x; the run starts in HOST_ENTRY\n", entry, (unsigned)TICK_PC);

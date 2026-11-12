@@ -620,6 +620,17 @@ int main(void) {
     for (long k = 227; k < 241; k++) own[k] = 8;                    /* the holder goes on to line 1 slot 13 */
     t = arek_bus_frame_carry(&B, t);
     printf("carried %d t %ld slot %ld owner %d\n", B.unserved, (long)t, B.last_slot, own[241]);
+    /* 1b (1.0.61): three accesses of one instruction with 4 and 1 colour clocks between them and 2 behind - an interrupt
+     * entry's shape - the first one waiting to the cap; a pattern whose second cycle samples the interrupt level */
+    arek_bus_frame(&B, 313);
+    for (long k = 312L * 227 + 200; k < cap + 4; k++) own[k] = 8;
+    { static const uint8_t pat[] = { 5, 1, 2, 0x80, 8, 0x80, 2, 0x80 };    /* p, 8 clocks, p (sampled 2 clocks in), 2 clocks, p */
+      t = arek_bus_pat_begin(&B, 312.0 * 227 + 199, pat, 24); t = arek_bus_insn_end(&B, t); t += 2.0; }
+    printf("unserved %d\n", B.unserved);
+    arek_bus_frame(&B, 313); t -= (double)end;
+    for (long k = 227; k < 241; k++) own[k] = 8;
+    t = arek_bus_frame_carry(&B, t);
+    printf("carried t %ld slots %d %d %d poll %.1f %d\n", (long)t, own[241] == 1, own[247] == 1, own[250] == 1, B.pat_poll, B.poll_carried);
     /* 2: the host is asked for its slots while an access waits */
     for (long k = 5000; k < 5300; k++) own[k] = 8;
     B.ahead = ahead; B.ahead_to = 0;
@@ -645,4 +656,7 @@ def test_an_access_that_finds_no_slot_before_the_frame_rolls_waits_on_in_the_nex
     out = subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout.splitlines()
     assert out[0] == 'unserved 1 t 228', out                 # at the cap: one line past the end, + 2 - 1
     assert out[1] == 'carried 0 t 242 slot 241 owner 1', out   # the first free slot of the new frame, then 2 colour clocks
-    assert out[2] == 'asked 4 served 5300 disk 1', out        # every 96 slots of the wait
+    # 1.0.61: the first of three at slot 241 (242), 4 colour clocks, the second at 247 (cycle from 246: the level sampled at
+    # 247.0, in the new frame), 1 colour clock, the third at 250 (251), then the 2 that followed: 253
+    assert out[2] == 'unserved 3' and out[3] == 'carried t 253 slots 1 1 1 poll 247.0 1', out
+    assert out[4] == 'asked 4 served 5300 disk 1', out        # every 96 slots of the wait

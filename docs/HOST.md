@@ -320,6 +320,16 @@ A game that reads the disk with its own loader (DSKLEN, DSKSYNC, its own MFM dec
 
 Use it with `-DHOST_IPL_MODEL=1` (the E clock of the CIA accesses and the interrupt timing belong to the same measurement).
 
+## Input lines: by the frame number or as the emulator takes them
+
+`host_trace STATE OUT.vtr N INPUTS.txt` applies line k of the inputs file in frame k of the run (`--inputs-first F`:
+line 0 in the frame numbered F). The emulator (`arek trace run --inputs`) takes the next line at the first breakpoint
+hit of a frame on lines 0-99 (`--inputs-v` there). The two agree while the breakpoint is hit in that window in every
+frame. A game whose VBL handler can start lower - behind a long blit, with interrupts masked - makes the original skip
+a line in such a frame and stay one behind: give the host the same rule with `host_trace ... --inputs-v 0:99` (1.0.61;
+the tick's pc is the breakpoint). With `--inputs-first F` the count starts as if every frame from F to the state's had
+taken one.
+
 ## A capture in the middle of a game: what state.txt carries
 
 `arek host state CAPTURE OUT` writes, after the registers and the frame number: the CIAs' timers (1.0.49; a running
