@@ -248,6 +248,7 @@ int hw_read_hook(uint32_t off, uint32_t *v) {
     }
     return 0;
 }
+static struct { uint16_t off, v; } H_LATE[32]; static int H_LATE_N;   /* 1.0.63: display registers written behind the frame's end */
 void hw_write_hook(uint32_t off, uint32_t v) {
 #ifdef HOST_FLOPPY
     hfl_reg_write(off, (uint16_t)v);
@@ -256,7 +257,13 @@ void hw_write_hook(uint32_t off, uint32_t v) {
     { ArekBus *bb = arek_glue_bus(); bb->journal_on = H_CIA_SYNC;
       if (arek_bus_cpu_reg(bb, off, (uint16_t)v, (uint32_t)h_now()) && H_NEXTMAP) h_premap_next(); }   /* 1.0.56: the re-map cleared the next frame's first lines behind the end */   /* 1.0.52: DMA registers written in the middle of a frame (with the timing model) */
     if ((off >= 0x080 && off <= 0x086) || (off >= 0x08e && off <= 0x094) || (off >= 0x0e0 && off <= 0x10a) ||
-        (off >= 0x120 && off <= 0x1be)) { ard_until((int)(h_now() / HOST_HPOS)); ard_write(off, (uint16_t)v); }
+        (off >= 0x120 && off <= 0x1be)) {
+        ard_until((int)(h_now() / HOST_HPOS));
+        /* 1.0.63: a write behind the frame's end (the instruction began before it) is the next frame's - the display's
+         * Copper latches COP1LC when the frame starts, and took a list flipped in clock 15 a frame early (SWIV, landscape 4) */
+        if (H_CIA_SYNC && h_now() >= (double)H_LINES * HOST_HPOS && H_LATE_N < (int)(sizeof H_LATE / sizeof H_LATE[0])) { H_LATE[H_LATE_N].off = (uint16_t)off; H_LATE[H_LATE_N].v = (uint16_t)v; H_LATE_N++; }
+        else ard_write(off, (uint16_t)v);
+    }
     if (off == 0x02e) { ard_until((int)(h_now() / HOST_HPOS)); ARD_CDANG = (int)((v >> 1) & 1); arek_glue_bus()->cdang = ARD_CDANG; }   /* 1.0.47: COPCON */
     if (off == 0x096) ard_until((int)(h_now() / HOST_HPOS));   /* the lines before a DMACON write see the old value (the runtime applies it) */
     if (h_wr_cb) h_wr_cb(off, v);
@@ -387,6 +394,8 @@ static void host_events(void) {
         ard_frame_start();
         if (ARD_R[0x100 >> 1] & 0x0004) { H_LOF ^= 1; H_LINES = H_LOF ? 313 : 312; }   /* LACE (by the CPU or the Copper, G39): the fields alternate long / short */
         else if (!H_LINES_FORCED) { H_LOF = 1; H_LINES = 313; }                      /* without LACE every field is long (G35) */
+        for (int i = 0; i < H_LATE_N; i++) ard_write(H_LATE[i].off, H_LATE[i].v);   /* 1.0.63: in the new frame - after the Copper took its list and the field's length was decided */
+        H_LATE_N = 0;
         ARD_LAST = H_LINES - 1;
         arek_glue_frame(H_LINES);
         arek_paula_frame(&H_PAULA, H_PAULA.frame_base + len);
@@ -416,7 +425,7 @@ static void host_events(void) {
 static void host_reset(void) {
     static const HCia cia0 = { { { 0xffff, 0xffff, 0, 0 }, { 0xffff, 0xffff, 0, 0 } }, 0 };
     H_LINES = 313; H_LOF = 1; H_LINES_FORCED = 0;
-    H_FRAME = 0; H_COP_DONE = 0; H_COP_IDX = 0; H_BLIT_PEND = 0; H_IRQ_DEPTH = 0; H_VERTB_PEND = 0; H_NEXTMAP = 0;
+    H_FRAME = 0; H_COP_DONE = 0; H_COP_IDX = 0; H_BLIT_PEND = 0; H_LATE_N = 0; H_IRQ_DEPTH = 0; H_VERTB_PEND = 0; H_NEXTMAP = 0;
     H_CIA[0] = cia0; H_CIA[1] = cia0; H_CIAB_ICR = 0; H_CIAA_DDRA = 0x03; H_CIA_DUE = 0;
     H_IO_UNKNOWN = 0; H_IO_LAST = 0; H_IRQS = 0; H_PC = 0;
     RET_PC = NO_RET;

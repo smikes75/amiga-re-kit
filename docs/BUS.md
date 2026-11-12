@@ -34,9 +34,7 @@ combinations (STRT1/STRT2 wait for a free slot, the first D write is locked, BBU
 last REPEAT), BLTPRI and the yield after two CPU waits (BLS), the CPU taking its slot after the
 Agnus events of the cycle.
 
-Not done: disk DMA, NTSC (227/228 alternating, 262/263 lines), DMA registers changed by the CPU in
-the middle of a frame (the map is built at the frame's start; audio slots are the host's, see
-`arek_bus_mark`), copper SKIP, the line and fill modes of the blitter (time only estimated), ECS/AGA.
+Not done: disk DMA (the host marks its slots), NTSC (227/228 alternating, 262/263 lines), copper SKIP, the line and fill modes of the blitter (time only estimated), ECS/AGA.
 
 ## Geometry
 
@@ -118,6 +116,16 @@ end, the audio slots are planned there too, and an access that still finds no sl
 holds the bus) is left open - after `arek_glue_frame()` and after the host has planned its own DMA in the new map it
 calls `arek_glue_frame_carry()` and the access waits on there. `ArekBus.ahead` (optional): while an access waits, the
 model asks the host for the DMA slots it marks itself (the disk's) before the blitter reaches them.
+
+DMA registers written by the CPU inside a frame (1.0.52, `journal_on`): the map is built at the frame's start;
+`arek_bus_cpu_reg(b, off, value, now)` - called BEFORE the caller stores the value in `regs` - notes a write to DMACON
+(DMAEN, BPLEN, COPEN, SPREN), COPJMP1/2, DIWSTRT/STOP, DDFSTRT/STOP, BPLCON0 or COPxLC with its colour clock and works
+the rest of the frame out again (what has been stays; COPxLC alone changes nothing until a COPJMP or the next frame,
+unless the Copper has not fetched yet in this frame). It returns 1 when the map changed - the host then premaps the
+next frame's first lines again. A write whose clock is at or behind the frame's length (1.0.63: the instruction began
+before the end, or its cycles were carried over) is the next frame's: it is kept with the value the register had,
+the next frame's map starts from that value and takes the write at its clock - a Copper list set in clock 15 of a
+frame runs from the frame after, as the Copper took COP1LC in clock 0.
 
 ## Audio DMA (Paula), kit 0.7.0 / 0.7.1
 

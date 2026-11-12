@@ -23,7 +23,14 @@ void arek_bus_frame_map(ArekBus *b) {
      * procesoru a bitplany zmizely z mapy: 5120 slotu na snimek v originalu, 0 v modelu) */
     for (int i = 0; i < 0x100; i++) if (b->copw[i]) R[i] = b->copr[i];
     if (b->remap) memcpy(R, b->regs0, sizeof R);            /* 1.0.52: the frame again, from what it started with + the CPU's writes at their slots */
-    else { memcpy(b->regs0, R, sizeof R); b->jn = 0; }
+    else {
+        /* 1.0.63: the writes that landed behind the previous frame's end - the frame starts with what the registers held
+         * before them, and the journal brings them at their clocks (COP1LC after the Copper's first fetch does not move it) */
+        for (int i = b->ln - 1; i >= 0; i--) R[b->lreg[i] >> 1] = b->lold[i];
+        memcpy(b->regs0, R, sizeof R); b->jn = 0;
+        for (int i = 0; i < b->ln && b->jn < 32; i++) { b->jt[b->jn] = b->lt[i]; b->jreg[b->jn] = b->lreg[i]; b->jval[b->jn] = b->lval[i]; b->jn++; }
+        b->ln = 0;
+    }
     int ji = 0;
 #define AREK_JOURNAL(at) while (ji < b->jn && b->jt[ji] <= (uint32_t)(at)) { uint32_t jr = b->jreg[ji]; uint16_t jv = b->jval[ji]; ji++; \
         if (jr == 0x096) { if (jv & 0x8000) R[0x096 >> 1] |= jv & 0x7fff; else R[0x096 >> 1] &= (uint16_t)~jv; } \
@@ -195,6 +202,13 @@ int arek_bus_cpu_reg(ArekBus *b, uint32_t off, uint16_t v, uint32_t now) {
     if (!b->journal_on) return 0;
     if (!(off == 0x096 ? (v & 0x03a0) : (off == 0x088 || off == 0x08a || off == 0x08e || off == 0x090 || off == 0x092 || off == 0x094 || off == 0x100 ||
                                           (off >= 0x080 && off <= 0x086)))) return 0;
+    { uint32_t cap = (uint32_t)(b->lines * b->hpos);
+      if (now >= cap) {                                            /* 1.0.63: behind the frame's end - the next frame's */
+          if (b->ln >= 8) return 0;
+          b->lt[b->ln] = now - cap; b->lreg[b->ln] = (uint16_t)off; b->lval[b->ln] = v;
+          b->lold[b->ln] = b->wold_reg == off ? b->wold : b->regs[off >> 1]; b->ln++;
+          return 1;                                                /* the caller maps the next frame's first lines again */
+      } }
     if (b->jn >= 32) return 0;
     b->jt[b->jn] = now; b->jreg[b->jn] = (uint16_t)off; b->jval[b->jn] = v; b->jn++;
     if (off >= 0x080 && off <= 0x086) return 0;                    /* COPxLC: only a later COPJMP (or the next frame) uses it */

@@ -268,6 +268,10 @@ test builds both (`tests/test_host_engine.py`, emcc and node when installed).
   (`engine_key`) wait in a ring of 32 and reach the game one per frame.
 - 1.0.40: VPOSR / VHPOSR read past the frame's end inside an instruction (the frame rolls at the instruction's
   boundary) give line 0 on of the next field, not line 313.
+- 1.0.63, with the timing model: a display or DMA register written past the frame's end inside an instruction is
+  the next frame's write - the bus model starts that frame from the old value and takes the write at its clock
+  (`docs/BUS.md`), the picture gets it after the new frame's Copper has started and the field's length is decided
+  (a Copper list flipped in the frame's first clocks shows from the frame after, as in the original).
 - Not modelled: NTSC, the blitter's line mode on the bus, the CIA TOD counters (a game that seeds its
   random numbers from CIA-B TOD gets the value from the capture: `docs/METHOD.md` §5; a build
   from the disks answers it through `HOST_CIA_READ`), disk DMA. Paula's audio interrupts (kit 0.7.1) and

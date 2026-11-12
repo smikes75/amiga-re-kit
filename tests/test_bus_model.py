@@ -112,6 +112,24 @@ int main(int argc, char **argv) {
         regs[0x096 >> 1] = 0x0280; int r = arek_bus_cpu_reg(&B, 0x096, 0x8280, now + 10);
         long cop = 0, first = -1; for (long k = 0; k < 312L * 227; k++) if (own[k] == AREK_BUS_COPPER) { cop++; if (first < 0) first = k - 215 * 227; }
         printf("r %d cop %ld first %ld\n", r, cop, first);
+    } else if (!strcmp(mode, "late")) {                       /* 1.0.63: a register written behind the frame's end is the next frame's */
+        int what = atoi(argv[3]); uint32_t cap = 312 * 227; B.journal_on = 1;
+        at = 0x2000; for (int k = 0; k < 20; k++) cop(&at, 0x0180, (uint16_t)k); cop(&at, 0xffff, 0xfffe);          /* list B: 20 moves */
+        long n[4] = { 0 }, hi = 0; int r;
+        if (what == 0) {                                                                                 /* COP1LC = B at clock 16 behind the end */
+            memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
+            for (long k = 0; k < 312L * 227; k++) n[0] += own[k] == AREK_BUS_COPPER;
+            arek_bus_cpu_write(&B, 0x082); r = arek_bus_cpu_reg(&B, 0x082, 0x2000, cap + 16); regs[0x082 >> 1] = 0x2000;   /* the hook, then the store */
+        } else {                                                                                         /* list B runs; COPEN off at clock 20 behind the end */
+            regs[0x082 >> 1] = 0x2000; memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
+            for (long k = 0; k < 312L * 227; k++) n[0] += own[k] == AREK_BUS_COPPER;
+            arek_bus_cpu_write(&B, 0x096); r = arek_bus_cpu_reg(&B, 0x096, 0x0080, cap + 20); regs[0x096 >> 1] &= (uint16_t)~0x0080;
+        }
+        for (int f = 1; f < 3; f++) {
+            memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
+            for (long k = 0; k < 312L * 227; k++) { n[f] += own[k] == AREK_BUS_COPPER; if (f == 1 && own[k] == AREK_BUS_COPPER && k > hi) hi = k; }
+        }
+        printf("r %d cop %ld %ld %ld last %ld\n", r, n[0], n[1], n[2], hi);
     } else if (!strcmp(mode, "tail")) {                       /* 1.0.47: reads at the instruction's end, after its internal clocks */
         regs[0x096 >> 1] = 0; memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
         double t = 1000, t0 = t; int tail = atoi(argv[3]);
@@ -578,6 +596,21 @@ def test_dma_switched_on_by_the_cpu_in_the_middle_of_a_frame(harness):
     assert int(on[8]) <= 100 and int(on[9]) > 1000 and on[11] == '1'     # bitplanes from this line's DDFSTRT on; the CPU's own slot kept
     m2 = harness('0000', 'mid2').split()                                 # COP1LC written while the Copper has not run: it starts there, at once
     assert m2[1] == '1' and int(m2[3]) >= 4 and 190 <= int(m2[5]) <= 192, m2
+
+
+def test_a_register_written_behind_the_frames_end_is_the_next_frames(harness):
+    """1.0.63 (SWIV, landscape 4): an instruction that begins before the frame's end (or whose cycles are carried over)
+    writes in the next frame's first clocks, but the host has stored the value before its frame rolls - the next map
+    started from it. SWIV flips its Copper list with `move.l d0,$dff080` every fifth frame; in frame 6721 the write
+    landed in clocks 15 and 17 of the new frame: the original's Copper had taken the old list in clock 0 and ran it one
+    more frame (the old sprite lists), the model ran the new one - other sprite slots from line 47 on, the level 6
+    interrupt 4 colour clocks late on line 237. Now the write is kept with the value the register had, the frame starts
+    from that, and the journal brings the write at its clock."""
+    r = harness('0280', 'late', 0).split()             # list A (2 moves, a wait, a move) -> COP1LC = B (20 moves) at clock 16 of the next frame
+    a, n1, n2 = int(r[3]), int(r[4]), int(r[5])
+    assert r[1] == '1' and n1 == a and n2 > a + 30, r   # the frame of the write still runs list A; the one after it B
+    r = harness('0280', 'late', 1).split()             # list B runs; COPEN cleared at clock 20 of the next frame
+    assert r[1] == '1' and 0 < int(r[4]) <= 11 and int(r[7]) < 20 and r[5] == '0', r   # the Copper up to the write, then nothing; none the frame after
 
 
 def test_reads_at_the_end_of_an_instruction(harness):

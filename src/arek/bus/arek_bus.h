@@ -59,6 +59,11 @@ typedef struct ArekBus {
     /* 1.0.52 (SWIV KIT-GAPS 9): the CPU's writes to the registers that steer DMA, with their slots, and the registers the
      * frame's map started from - arek_bus_cpu_reg works the rest of the frame out again (journal_on: the host's switch) */
     uint16_t regs0[0x100]; int jn, journal_on, remap; uint32_t jt[32]; uint16_t jreg[32], jval[32];
+    /* 1.0.63 (SWIV, landscape 4): a write that lands behind the frame's end (the instruction began before it, or its
+     * cycles are carried over) belongs to the NEXT frame: the caller has stored it in regs before the frame rolls, so the
+     * next map would start from it - a Copper that latched COP1LC in clock 0 ran the new list a frame early. Kept here with
+     * the value the register had, undone at the next frame's first map and replayed at its clock by the journal */
+    int ln; uint32_t lt[8]; uint16_t lreg[8], lval[8], lold[8]; uint16_t wold; uint32_t wold_reg;
     double acc_t[4]; uint32_t poll_back;  /* 1.0.53: when the last four CPU accesses were asked for (0 = the last); the instruction samples its interrupt level poll_back cycles before its last (timing.bus_poll) */
     /* 1.0.55: the instruction's bus pattern (arek.m68k.buspat: Moira's order of idle clocks and bus cycles, and where the
      * interrupt level is sampled) - arek_bus_pat_begin; the accesses of the translation take its data cycles in order */
@@ -113,7 +118,7 @@ int arek_bus_bbusy(ArekBus *b, double t);
 /* a CPU write to a custom register (G50, Alien Breed II): it is later than the Copper's write of the same register, so the
  * next frame's map starts from the CPU's value (regs), not the Copper's (copr) - e.g. COP1LC set by the CPU after a list
  * that wrote COP1LC to itself */
-static inline void arek_bus_cpu_write(ArekBus *b, uint32_t off) { b->copw[(off & 0x1fe) >> 1] = 0; }
+static inline void arek_bus_cpu_write(ArekBus *b, uint32_t off) { uint32_t i = (off & 0x1fe) >> 1; b->wold_reg = off & 0x1fe; b->wold = b->copw[i] ? b->copr[i] : b->regs[i]; b->copw[i] = 0; }   /* wold: what the frame map saw in the register before this write (1.0.63) */
 /* 1.0.52: a CPU write of v to custom register off at slot now (the frame's colour clock): DMACON, DIWSTRT/STOP,
  * DDFSTRT/STOP, BPLCON0, COPJMP1/2 take effect in THIS frame's map from that slot on (the Copper switched on in the
  * middle of a frame runs from where its pointer stood, bitplane DMA starts on the next line...). Returns 1 when the

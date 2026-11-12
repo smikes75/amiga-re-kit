@@ -3,6 +3,20 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.63 (2026-11-12)
+
+- host with the timing model and bus model: a CPU write to a DMA or display register that lands behind the frame's end
+  (the instruction began before it, or its cycles are carried over beside a blit) is the NEXT frame's write. The host
+  stored it before it rolled the frame, so the next frame started from it: a Copper list set with
+  `move.l d0,$dff080` in clocks 15 and 17 of a frame ran in that frame, while the original's Copper had taken COP1LC
+  in clock 0 and ran the old list once more. Now the bus model keeps such a write with the value the register had
+  (`arek_bus_cpu_reg` with a time at or behind the frame's length), starts the next frame's map from that and brings
+  the write at its clock through the journal; the host's picture takes the display registers written there after the
+  new frame's Copper has started and the field's length is decided. SWIV, landscape 4 (frame 6721: the old sprite
+  lists one more frame - other sprite slots from line 47 on, the level 6 interrupt 4 colour clocks late, 70 836 pixels
+  of the picture): the VBL routine's time and registers equal in 18 924 records of 18 924 (frames 790-19706),
+  pictures 6700-6760 equal; landscapes 1, 5 and 6 unchanged at 18 931, 18 924 and 18 932
+
 ## 1.0.62 (2026-11-12)
 
 - `recomp --resume` runtime (**regenerate the translation**): TASK_RUN took a routine it had resumed from the stack for

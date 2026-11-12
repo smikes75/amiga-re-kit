@@ -439,6 +439,52 @@ def test_the_register_log_has_the_slot_of_the_write(tmp_path):
     assert recs == [(100, (100 << 16) | 67, (0x0a6 << 16) | 0x40, 0x1000)], recs
 
 
+def test_a_copper_list_set_behind_the_frames_end_runs_a_frame_later(tmp_path):
+    """1.0.63 (SWIV, landscape 4), -DHOST_IPL_MODEL=1: `move.l #$2000,$dff080` begins 7 colour clocks before the frame's
+    end, its two writes land in the first clocks of the next frame - after the Copper has taken COP1LC (clock 0). The
+    original runs the old list for that whole frame; the host stored the value before it rolled the frame, so its bus
+    model and its picture ran the new list a frame early (SWIV: 70 836 pixels of frame 6721, other sprite slots, the
+    level 6 interrupt 4 colour clocks late). List A: COLOR00 red; list B: five more moves, COLOR00 green."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    HOST, BUS = os.path.dirname(host.__file__), os.path.dirname(bus.__file__)
+    img = bytearray(0x2000)
+    code = bytes.fromhex('23fc0000200000dff080' '60fe')      # move.l #$2000,$dff080; bra.s self
+    img[0x1000:0x1000 + len(code)] = code
+    img[0x1100:0x1102] = bytes.fromhex('4e73')
+    src, _, _ = recomp.generate(bytes(img), 0, auto=[0x1000, 0x1100], timing=True, bus_table=True)
+    (tmp_path / 'game.c').write_text(src)
+    exe = tmp_path / 'host_trace'
+    subprocess.run([cc, '-O1', '-I', BUS, '-I', HOST, '-I', str(tmp_path), '-DGAME_SRC="game.c"', '-DTICK_PC=0x1100u', '-DHOST_IPL_MODEL=1',
+                    '-DHOST_ENTRY=f_001000', '-DHOST_L3=f_001100', os.path.join(HOST, 'arek_host_trace.c'), os.path.join(BUS, 'arek_bus.c'),
+                    os.path.join(BUS, 'arek_bus_vamiga.c'), '-lm', '-o', str(exe)], check=True)
+    st = tmp_path / 'state'
+    st.mkdir()
+    ram = bytearray(0x80000)
+    ram[:len(img)] = img
+    ram[0x3000:0x3008] = bytes.fromhex('01800f00' 'fffffffe')                                   # list A
+    ram[0x2000:0x201c] = bytes.fromhex('01820111' * 5 + '018000f0' 'fffffffe')                  # list B
+    (st / 'chip.bin').write_bytes(ram)
+    (st / 'slow.bin').write_bytes(bytes(0x80000))
+    creg = bytearray(512)
+    creg[0x96:0x98] = struct.pack('>H', 0x0280)                                                 # DMAEN | COPEN
+    creg[0x80:0x84] = struct.pack('>HH', 0, 0x3000)
+    (st / 'creg.bin').write_bytes(creg)
+    (st / 'state.txt').write_text('0 0 0 0 0 0 0 0\n0 0 0 0 0 0 0 7f000\n2000 %d 0 1000\nfe 0 0 0 0 5500\n100\n' % (312 * 227 + 220))
+    r = subprocess.run([str(exe), str(st), str(tmp_path / 'o.vtr'), '3', '--own', str(tmp_path / 'own.bin'), '--shots', str(tmp_path / 'p'), '100:103',
+                        '--reglog', str(tmp_path / 'reg.bin'), '--reglog-regs', '080-082'], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    recs = [struct.unpack('<4I', (tmp_path / 'reg.bin').read_bytes()[k:k + 16]) for k in range(0, (tmp_path / 'reg.bin').stat().st_size, 16)]
+    assert [(f, vh >> 16) for f, vh, _, _ in recs] == [(101, 0), (101, 0)] and all((vh & 0xffff) > 2 for _, vh, _, _ in recs), recs   # in the new frame, after the Copper's first fetch
+    frames = bus.own_frames((tmp_path / 'own.bin').read_bytes(), 100)
+    cop = {f: sum(1 for o in frames[f][:313 * 227] if o == 24) for f in (101, 102)}       # 24: the Copper (AREK_BUS_COPPER)
+    assert 0 < cop[101] < cop[102] and cop[102] - cop[101] == 10, cop                              # the bus: list A in frame 101, B (five moves more) in 102
+    px = lambda f: (lambda d: tuple(d[(150 * 716 + 358) * 3:(150 * 716 + 358) * 3 + 3]))((tmp_path / ('p_%06d.raw' % f)).read_bytes())
+    assert px(101)[0] > 200 and px(101)[1] < 40, px(101)                                          # the picture: red in frame 101
+    assert px(102)[1] > 200 and px(102)[0] < 40, px(102)                                          # green in 102
+
+
 def test_a_captured_running_timer_underflows_in_the_emulators_e_cycle(tmp_path):
     """1.0.56 (SWIV, a capture in the game), -DHOST_IPL_MODEL=1: the emulator's counter c of a running timer reaches 0
     c E cycles after the capture and requests its interrupt in that cycle; three colour clocks later the level is on the
