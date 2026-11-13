@@ -3,6 +3,21 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.72 (2026-11-13)
+
+- `arek recomp --bus-table` for an overlay module or a library (`--lib`): the module carries its own bus table
+  (rows and patterns under its name) and registers it (`bus_rows_register`); the main translation's `bus_tab_row`
+  gives a pc outside its own table the row of the module `overlay_call` entered last. The switch was ignored for
+  `--lib`: a module's instructions had no row, so the bus model gave each ONE bus access and no pattern, and level
+  code ran too fast wherever display DMA or the blitter takes slots. Main translation and modules must be
+  regenerated together (a module made by 1.0.72 does not link with an older main)
+  - found on Turrican II (a pass of level 3-3 took one frame in the host and two in the original): the host's slot
+    map against the original's bus log - 38 lines equal, then `lea d16(pc),a2` in the level's module with one access
+    instead of two. That run, 654 passes, host with `-DHOST_IPL_MODEL=1`: every pass in the original's frame (one was
+    not), a pass begins on the original's colour clock 400 -> 600 times, the Copper handler is entered on it in 453 ->
+    660 frames of 719 and ends on it in 508 -> 675
+  - arek_bus_glue.h takes the pattern tables of the row it got (`BUS_ROWSRC`; an older translation still builds)
+
 ## 1.0.71 (2026-11-13)
 
 - `arek recomp --timing`: a jump into a table of `bra` slots (`--jtab ...:bra`) counts the slot's own instruction -

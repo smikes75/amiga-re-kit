@@ -60,6 +60,15 @@ static inline void arek_glue_interrupt(void) {
 
 /* The instruction at pc with its clock count: what tick_hook() does. A host that keeps its own tick_hook defines
  * AREK_GLUE_NO_TICK before including this file and calls arek_glue_insn() from it. */
+/* 1.0.72: the pattern tables of the row bus_tab_row() gave last - the main translation's or a module's (a translation
+ * made by recomp 1.0.72 defines BUS_ROWSRC; an older one has the main tables only) */
+#ifdef BUS_ROWSRC
+#define AREK_BUS_VAR BUS_ROW_VAR
+#define AREK_BUS_PAT BUS_ROW_PAT
+#else
+#define AREK_BUS_VAR BUS_VAR
+#define AREK_BUS_PAT BUS_PAT
+#endif
 static inline void arek_glue_insn(uint32_t pc, uint32_t clocks) {
     if (!AREK_GLUE.ready) return;
     uint32_t words = 1, extra = 0, flags = 0, pre = 0, ord = 0;
@@ -70,10 +79,10 @@ static inline void arek_glue_insn(uint32_t pc, uint32_t clocks) {
 #endif
 #ifdef BUS_ROW6                                  /* 1.0.55: the instruction's bus pattern (arek.m68k.buspat), one per clock count */
         if (AREK_GLUE.bus.order2 && !AREK_GLUE.bus.pat_off) { uint32_t var = row[4] | (uint32_t)row[5] << 8;
-            if (var) { const uint16_t *v = BUS_VAR + 2 * (var - 1), *any = 0, *hit = 0;
+            if (var) { const uint16_t *v = AREK_BUS_VAR + 2 * (var - 1), *any = 0, *hit = 0;
                 for (;; v += 2) { uint32_t c = v[0] & 0x7fffu; if (c == clocks) { hit = v; break; } if (!c) any = v; if (v[0] & 0x8000u) break; }
                 if (!hit) hit = any;
-                if (hit) { AREK_GLUE.bus.poll_back = 0; AREK_GLUE.t = arek_bus_pat_begin(&AREK_GLUE.bus, AREK_GLUE.t, BUS_PAT + hit[1], clocks); return; } } }
+                if (hit) { AREK_GLUE.bus.poll_back = 0; AREK_GLUE.t = arek_bus_pat_begin(&AREK_GLUE.bus, AREK_GLUE.t, AREK_BUS_PAT + hit[1], clocks); return; } } }
 #endif
     } }
 #elif defined(BUS_N)

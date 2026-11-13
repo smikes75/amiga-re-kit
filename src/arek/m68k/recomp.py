@@ -729,8 +729,22 @@ static uint32_t INLINE_RET = 0;     /* where a routine with data after its call 
    area as it is now, so modules may lie anywhere in the area and several may share it. An unknown module stops the
    run (exit 5) unless the host defines OVERLAY_HOOK and overlay_unknown_hook(m, base, entry, fp). */
 typedef void (*OvlFn)(M68 *m, uint32_t a);
-static struct { uint64_t fp; OvlFn fn; const char *name; uint32_t base, key, end; } OVL[64];
+static struct { uint64_t fp; OvlFn fn; const char *name; uint32_t base, key, end; unsigned long stamp; } OVL[64];
 static int OVL_N = 0;
+static unsigned long OVL_GEN = 0;   /* 1.0.72: counts overlay_call's dispatches; OVL[i].stamp = the last one into module i */
+/* 1.0.72 (Turrican II, the frames a pass takes): the bus rows of a module or library translated with --bus-table - it
+   registers its range and a function that gives an instruction's row and its pattern tables. The main translation's
+   bus_tab_row asks here for a pc outside its own table: of the registered ranges that hold the pc, a library's or the
+   module overlay_call entered last. Before, a module's instructions had no row: one bus access each, no pattern. */
+typedef const uint8_t *(*BusRowFn)(uint32_t pc, const uint16_t **var, const uint8_t **pat);
+static struct { uint32_t lo, hi; BusRowFn fn; int ovl; } BUSX[72];
+static int BUSX_N = 0;
+void bus_rows_register(uint32_t lo, uint32_t hi, BusRowFn fn, uint64_t fp) {   /* fp = the module's fingerprint, 0 = a library (always there) */
+    if (BUSX_N >= 72) return;
+    int ovl = -1;
+    if (fp) { for (int i = 0; i < OVL_N; i++) if (OVL[i].fp == fp && OVL[i].base == lo) ovl = i; if (ovl < 0) return; }
+    BUSX[BUSX_N].lo = lo; BUSX[BUSX_N].hi = hi; BUSX[BUSX_N].fn = fn; BUSX[BUSX_N].ovl = ovl; BUSX_N++;
+}
 void overlay_register(uint64_t fp, OvlFn fn, const char *name, uint32_t base, uint32_t key, uint32_t end) {   /* 1.0.15: end = the module's extent */
     if (OVL_N < 64) { OVL[OVL_N].fp = fp; OVL[OVL_N].fn = fn; OVL[OVL_N].name = name; OVL[OVL_N].base = base; OVL[OVL_N].key = key; OVL[OVL_N].end = end; OVL_N++; }
 }
@@ -759,7 +773,7 @@ class Gen:
         self.data, self.base, self.flow, self.timing = data, base, flow, timing
         self.resume = resume                             # --resume: every instruction is a target of call_addr
         self.labels = {}                                 # entry -> [instruction addresses], with resume
-        self.bus_table = bus_table and not flow.lib      # the table lives with the main runtime
+        self.bus_table = bus_table                       # 1.0.72: a module / library has its own table and registers it (bus_rows_register)
         self.tab_insns = {}                              # pc -> Insn of every translated instruction
         self.smc_rows = {}                               # (pc, bytes) -> (site, Insn): the other contents of rewritten places (Flow.smc)
         self.profile = profile and not flow.lib          # the profile lives in the main runtime
@@ -802,17 +816,21 @@ class Gen:
         self.emit('void call_addr(M68 *m, uint32_t a);')
         if self.flow.module:
             self.emit('void overlay_register(uint64_t fp, void (*fn)(M68 *, uint32_t), const char *name, uint32_t base, uint32_t key, uint32_t end);')
+        if self.flow.lib and self.bus_table:
+            self.emit('void bus_rows_register(uint32_t lo, uint32_t hi, const uint8_t *(*fn)(uint32_t, const uint16_t **, const uint8_t **), uint64_t fp);')
         self.emit()
         for s, e, entry in self.funcs:
             self.gen_func(s, e, entry)
         for entry in sorted(self.cfg):
             self.gen_cfg_func(entry)
-        if self.bus_table:
+        if self.bus_table and not self.flow.lib:
             self.gen_bus_table()
         if not self.flow.lib:
             self.gen_dispatch()
         if self.flow.module:
             self.gen_module()
+        if self.bus_table and self.flow.lib:
+            self.gen_bus_table()                          # behind the module's registration: its rows go under its entry
         return '\n'.join(self.out)
 
     def gen_bus_table(self):
@@ -869,39 +887,84 @@ class Gen:
                 segs.append([k, k])
         if not segs:
             segs = [[0, 0]]
+        lib = self.flow.lib
+        sfx = ''
+        if lib:                                            # 1.0.72: a module's / library's own table under its name
+            sfx = '_' + ((self.flow.prefix[0] if self.flow.prefix else None) or 'lib_%x' % self.base)
         self.emit('/* bus table (recomp --bus-table): words, extra accesses, flags per instruction word, in %d segment(s) of the image */' % len(segs))
-        self.emit('#define BUS_SPARSE 1')
-        self.emit('#define BUS_ROW4 1')                    # 1.0.53: a fourth byte, timing.bus_order (the last prefetch's place)
-        self.emit('#define BUS_ROW6 1')                    # 1.0.55: bytes 5-6, the instruction's bus pattern list (arek.m68k.buspat)
+        if not lib:
+            self.emit('#define BUS_SPARSE 1')
+            self.emit('#define BUS_ROW4 1')                # 1.0.53: a fourth byte, timing.bus_order (the last prefetch's place)
+            self.emit('#define BUS_ROW6 1')                # 1.0.55: bytes 5-6, the instruction's bus pattern list (arek.m68k.buspat)
+            self.emit('#define BUS_ROWSRC 1')              # 1.0.72: BUS_ROW_VAR / BUS_ROW_PAT = the tables of the row bus_tab_row gave last
         if len(blob) > 0xffff or len(var_tab) // 2 > 0xfffe:
             raise Unsupported('bus table: %d bytes of patterns' % len(blob))
-        self.emit('static const uint8_t BUS_PAT[%d] = {%s};' % (max(1, len(blob)), ','.join(str(b) for b in blob) or '0'))
-        self.emit('static const uint16_t BUS_VAR[%d] = {%s};' % (max(2, len(var_tab)), ','.join(str(x) for x in var_tab) or '0,0'))
-        self.emit('#define BUS_LO 0x%xu' % self.base)
+        self.emit('static const uint8_t BUS_PAT%s[%d] = {%s};' % (sfx, max(1, len(blob)), ','.join(str(b) for b in blob) or '0'))
+        self.emit('static const uint16_t BUS_VAR%s[%d] = {%s};' % (sfx, max(2, len(var_tab)), ','.join(str(x) for x in var_tab) or '0,0'))
+        if not lib:
+            self.emit('#define BUS_LO 0x%xu' % self.base)
+            self.emit('static const uint16_t *BUS_ROW_VAR = BUS_VAR; static const uint8_t *BUS_ROW_PAT = BUS_PAT;')
         for j, (a, b) in enumerate(segs):
-            self.emit('static const uint8_t BUS_SEG%d[%d][6] = {' % (j, b - a + 1))
+            self.emit('static const uint8_t BUS_SEG%d%s[%d][6] = {' % (j, sfx, b - a + 1))
             for k in range(a, b + 1, 16):
                 self.emit('  ' + ','.join('{%s}' % rows.get(q, '0,0,0,0,0,0') for q in range(k, min(b + 1, k + 16))) + ',')
             self.emit('};')
-        self.emit('#define BUS_SEGS_N %d' % len(segs))
-        self.emit('static const uint32_t BUS_SEG_LO[BUS_SEGS_N] = {%s};' % ', '.join('0x%xu' % (self.base + 2 * a) for a, b in segs))
-        self.emit('static const uint32_t BUS_SEG_HI[BUS_SEGS_N] = {%s};' % ', '.join('0x%xu' % (self.base + 2 * b + 2) for a, b in segs))
-        self.emit('static const uint8_t (*const BUS_SEGS[BUS_SEGS_N])[6] = {%s};' % ', '.join('BUS_SEG%d' % j for j in range(len(segs))))
+        n = len(segs)
+        dim = str(n) if lib else 'BUS_SEGS_N'
+        if not lib:
+            self.emit('#define BUS_SEGS_N %d' % n)
+        self.emit('static const uint32_t BUS_SEG_LO%s[%s] = {%s};' % (sfx, dim, ', '.join('0x%xu' % (self.base + 2 * a) for a, b in segs)))
+        self.emit('static const uint32_t BUS_SEG_HI%s[%s] = {%s};' % (sfx, dim, ', '.join('0x%xu' % (self.base + 2 * b + 2) for a, b in segs)))
+        self.emit('static const uint8_t (*const BUS_SEGS%s[%s])[6] = {%s};' % (sfx, dim, ', '.join('BUS_SEG%d%s' % (j, sfx) for j in range(n))))
         if smc_tab:
             self.emit('/* --smc: the rows of the other contents of rewritten places, taken while their words are in RAM */')
-            self.emit('static const uint8_t BUS_SMC[%d][6] = {%s};' % (len(smc_tab), ','.join('{%s}' % r for _, _, _, r in smc_tab)))
-            self.emit('static const uint8_t *bus_smc_row(uint32_t pc, const uint8_t *r) {')
+            self.emit('static const uint8_t BUS_SMC%s[%d][6] = {%s};' % (sfx, len(smc_tab), ','.join('{%s}' % r for _, _, _, r in smc_tab)))
+            self.emit('static const uint8_t *bus_smc_row%s(uint32_t pc, const uint8_t *r) {' % sfx)
             for j, (pc, alt, site, _) in enumerate(smc_tab):
-                self.emit('    if (pc == 0x%xu && %s) return BUS_SMC[%d];' % (pc, smc_cond(site, alt), j))
+                self.emit('    if (pc == 0x%xu && %s) return BUS_SMC%s[%d];' % (pc, smc_cond(site, alt), sfx, j))
             self.emit('    return r;')
             self.emit('}')
+        find = ('    for (int k = 0; k < %d; k++) if (pc >= BUS_SEG_LO%s[k] && pc < BUS_SEG_HI%s[k]) { const uint8_t *r = BUS_SEGS%s[k][(pc - BUS_SEG_LO%s[k]) >> 1]; %%s return %s; }'
+                % (n, sfx, sfx, sfx, sfx, ('(r[2] & 0x80) ? bus_smc_row%s(pc, r) : r' % sfx) if smc_tab else 'r'))
+        if lib:
+            self.emit('static const uint8_t *bus_row%s(uint32_t pc, const uint16_t **var, const uint8_t **pat) {' % sfx)
+            self.emit(find % ('*var = BUS_VAR%s; *pat = BUS_PAT%s;' % (sfx, sfx)))
+            self.emit('    return 0;')
+            self.emit('}')
+            if self.flow.module:
+                from ..headless.trace import fnv1a64
+                mbase, key = self.flow.module
+                fp = '0x%016xull' % fnv1a64(self.data[mbase - self.base:mbase - self.base + key])
+            else:
+                mbase, fp = self.base, '0'
+            end = self.base + len(self.data)
+            if self.flow.prefix and self.flow.prefix[2]:
+                end = min(end, self.flow.prefix[2])
+            self.emit('__attribute__((constructor)) static void bus_row%s_register(void) { bus_rows_register(0x%xu, 0x%xu, bus_row%s, %s); }'
+                      % (sfx, mbase, end, sfx, fp))
+            self.emit()
+            return
+        self.emit('/* 1.0.72: a pc outside this table - the rows a module or a library registered (bus_rows_register): of the ranges that')
+        self.emit('   hold it, a library\'s or the module overlay_call entered last */')
+        self.emit('static const uint8_t *bus_ext_row(uint32_t pc) {')
+        self.emit('    static int hit = -1; static unsigned long gen = 0;')
+        self.emit('    if (hit < 0 || gen != OVL_GEN || pc - BUSX[hit].lo >= BUSX[hit].hi - BUSX[hit].lo) {')
+        self.emit('        unsigned long best = 0; hit = -1; gen = OVL_GEN;')
+        self.emit('        for (int k = 0; k < BUSX_N; k++) if (pc - BUSX[k].lo < BUSX[k].hi - BUSX[k].lo) {')
+        self.emit('            unsigned long s = BUSX[k].ovl < 0 ? 1 : OVL[BUSX[k].ovl].stamp;')
+        self.emit('            if (s && s >= best) { best = s; hit = k; } }')
+        self.emit('        if (hit < 0) {                  /* code entered without overlay_call (a host that starts inside a module): by the fingerprint, once a dispatch count */')
+        self.emit('            static unsigned long tried = ~0ul;')
+        self.emit('            if (tried == OVL_GEN) return 0;')
+        self.emit('            tried = OVL_GEN;')
+        self.emit('            for (int k = 0; k < BUSX_N && hit < 0; k++) if (BUSX[k].ovl >= 0 && pc - BUSX[k].lo < BUSX[k].hi - BUSX[k].lo')
+        self.emit('                && OVL[BUSX[k].ovl].fp == overlay_fp(OVL[BUSX[k].ovl].base, OVL[BUSX[k].ovl].key)) { OVL[BUSX[k].ovl].stamp = 1; hit = k; }')
+        self.emit('            if (hit < 0) return 0; } }')
+        self.emit('    return BUSX[hit].fn(pc, &BUS_ROW_VAR, &BUS_ROW_PAT);')
+        self.emit('}')
         self.emit('static inline const uint8_t *bus_tab_row(uint32_t pc) {')
-        if smc_tab:
-            self.emit('    for (int k = 0; k < BUS_SEGS_N; k++) if (pc >= BUS_SEG_LO[k] && pc < BUS_SEG_HI[k]) {')
-            self.emit('        const uint8_t *r = BUS_SEGS[k][(pc - BUS_SEG_LO[k]) >> 1]; return (r[2] & 0x80) ? bus_smc_row(pc, r) : r; }')
-        else:
-            self.emit('    for (int k = 0; k < BUS_SEGS_N; k++) if (pc >= BUS_SEG_LO[k] && pc < BUS_SEG_HI[k]) return BUS_SEGS[k][(pc - BUS_SEG_LO[k]) >> 1];')
-        self.emit('    return 0;')
+        self.emit(find % 'BUS_ROW_VAR = BUS_VAR; BUS_ROW_PAT = BUS_PAT;')
+        self.emit('    return BUSX_N ? bus_ext_row(pc) : 0;')
         self.emit('}')
         self.emit()
 
@@ -919,9 +982,9 @@ class Gen:
         self.emit('        int best = -1;')
         self.emit('        for (int i = 0; i < OVL_N; i++)')
         self.emit('            if (OVL[i].base <= a && a < OVL[i].end && (best < 0 || OVL[i].base > OVL[best].base) && OVL[i].fp == overlay_fp(OVL[i].base, OVL[i].key)) best = i;')
-        self.emit('        if (best >= 0) { OVL[best].fn(m, a); return; } }')
+        self.emit('        if (best >= 0) { OVL[best].stamp = ++OVL_GEN; OVL[best].fn(m, a); return; } }')
         self.emit('    for (int i = 0; i < OVL_N; i++)')
-        self.emit('        if (OVL[i].base - base < size && OVL[i].fp == overlay_fp(OVL[i].base, OVL[i].key)) { OVL[i].fn(m, a); return; }')
+        self.emit('        if (OVL[i].base - base < size && OVL[i].fp == overlay_fp(OVL[i].base, OVL[i].key)) { OVL[i].stamp = ++OVL_GEN; OVL[i].fn(m, a); return; }')
         self.emit('    uint64_t fp = overlay_fp(a, key);')
         self.emit('#ifdef OVERLAY_HOOK')
         self.emit('    overlay_unknown_hook(m, base, a, fp); return;')

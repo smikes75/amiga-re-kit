@@ -128,3 +128,37 @@ def test_a_module_running_past_its_area_is_found_through_a_pointer(tmp_path):
     d, *_ = run(tmp_path, main, {}, auto=(0x1000,), flow=two, extra_c='\n' + src_big + '\n' + src_small,
                 ram_init={0x2000: big})
     assert d[0] == 9
+
+
+def test_a_modules_instructions_have_their_bus_rows(tmp_path):
+    """1.0.72 (Turrican II, the frames a pass takes): a module translated with --bus-table carries its own table and
+    registers it; the main translation's bus_tab_row gives the row of the module overlay_call entered last, with that
+    module's pattern tables. Before, a module's instructions had no row - one bus access each and no pattern, so level
+    code ran too fast beside display DMA: of 654 passes of a level 400 began on the original's colour clock (600 now)
+    and one took a frame less."""
+    from arek.m68k.decoder import decode
+    from arek.m68k.timing import bus_table_entry
+    mod_a, mod_b = bytes.fromhex('303900004000' '4e75'), bytes.fromhex('7002' '4e75')   # move.w $4000.l,d0 ; rts  |  moveq #2,d0 ; rts
+
+    def mod(code, name):
+        src, _, _ = recomp.generate(code, 0x2000, auto=[0x2000], timing=True, bus_table=True,
+                                    flow=Flow(prefix=(name, 0x2000, 0x2100), lib=True, module=(0x2000, 4)))
+        return src
+    a, b = mod(mod_a, 'ovA_'), mod(mod_b, 'ovB_')
+    assert 'BUS_VAR_ovA_' in a and 'bus_row_ovA_' in a and 'bus_rows_register(0x2000u, 0x2008u, bus_row_ovA_, 0x' in a
+    assert '#define BUS_SPARSE' not in a and 'bus_tab_row' not in a           # the lookup and the switches are the main's
+    hook = ('\nvoid tick_hook(M68 *m, uint32_t pc, uint32_t clocks) { (void)m; (void)clocks; const uint8_t *r = bus_tab_row(pc);'
+            ' if (pc == 0x2000u) { MEM[0x4010] = r ? r[0] : 0xee; MEM[0x4011] = r ? r[1] : 0xee; MEM[0x4012] = (uint8_t)(BUS_ROW_VAR != BUS_VAR); }'
+            ' if (pc == 0x1004u) { MEM[0x4013] = (uint8_t)(r && BUS_ROW_VAR == BUS_VAR && BUS_ROW_PAT == BUS_PAT); } }\n')
+    for loaded in (mod_a, mod_b):
+        *_, mem = run(tmp_path, MAIN, {}, auto=(0x1000, 0x1010), flow=MAIN_FLOW, timing=True, bus_table=True,
+                      pre_c='#define TICK_HOOK 1\n', extra_c='\n' + a + '\n' + b + hook, ram_init={0x2000: loaded})
+        w, x, _ = bus_table_entry(decode(loaded, 0x2000, 0x2000))
+        assert tuple(mem[0x4010:0x4014]) == (w, x, 1, 1), (loaded.hex(), tuple(mem[0x4010:0x4014]), (w, x))
+    assert bus_table_entry(decode(mod_a, 0x2000, 0x2000))[0] == 3 and bus_table_entry(decode(mod_b, 0x2000, 0x2000))[0] == 1   # the two modules' rows differ
+    # a library (no module): its range is always there
+    lib, _, _ = recomp.generate(mod_b, 0x2000, auto=[0x2000], timing=True, bus_table=True, flow=Flow(prefix=('lb_', 0x2000, 0x2100), lib=True))
+    assert 'bus_rows_register(0x2000u, 0x2004u, bus_row_lb_, 0);' in lib
+    # a main translation without modules: the lookup is the table's own
+    plain, _, _ = recomp.generate(bytes.fromhex(MAIN), 0x1000, auto=[0x1000, 0x1010], flow=MAIN_FLOW, timing=True, bus_table=True)
+    assert 'return BUSX_N ? bus_ext_row(pc) : 0;' in plain and '#define BUS_ROWSRC 1' in plain

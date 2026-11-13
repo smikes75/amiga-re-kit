@@ -78,6 +78,13 @@ jsr/bsr push two words after). The runtime always has the hooks `BUS_ACCESS` (ev
 the chip bus, in rd8/rd16/wr8/wr16), `BUS_BLIT` (BLTSIZE) and `BUS_BBUSY` (DMACONR bit 14); they are
 empty unless the translation is built with `-DBUS_HOOK`.
 
+Overlay modules and libraries (`--lib`, 1.0.72): give them `--timing --bus-table` too. A module then carries its own
+table and registers it (`bus_rows_register(lo, hi, row function, fingerprint)`); `bus_tab_row(pc)` of the main
+translation answers a pc outside its own table from the module `overlay_call` entered last (a library: always),
+and the glue takes that module's pattern tables (`BUS_ROW_VAR`, `BUS_ROW_PAT`). Without it a module's
+instruction has no row - one bus access, no pattern - and its code runs too fast beside DMA. Regenerate the main
+translation and all modules with the same kit.
+
 Since 1.0.55 a row has six bytes: `words, extra, flags`, the order / sample rules of 1.0.53, and the index of the
 instruction's **bus pattern** (`BUS_VAR`, `BUS_PAT` beside the table; `arek.m68k.buspat`). A pattern is the sequence
 the 68000 really makes, measured on Moira: clocks without the bus, program reads, data accesses, the clocks that
