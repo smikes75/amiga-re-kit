@@ -217,6 +217,18 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES, cd
                 cop['next'] = t + 1
                 return
             st = cop['st'] = 9
+        # 1.0.73 (vAmiga COP_JMP1 / COP_JMP2): a MOVE to COPJMP1 / COPJMP2 is followed by two more steps before the new
+        # list's first fetch - one two cycles later whatever the bus does (one cycle later from $E0), one in the next
+        # free cycle: 4 colour clocks a jump
+        if st == 10:
+            cop['st'], cop['next'] = 11, t + (1 if c == 0xe0 else 2)
+            return
+        if st == 11:
+            if busy or c == 0xe0:
+                cop['next'] = t + 1
+                return
+            cop['pc'], cop['st'], cop['next'] = lc[cop['jmp']], 1, t + 2
+            return
         free = not (c & 1) and not busy and (c != 0xe0 or st == 9)
         if not free:
             cop['next'] = t + 1
@@ -241,8 +253,8 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES, cd
                 cop['skip'] = False
             else:
                 off = cop['w1'] & 0x1fe
-                if off == 0x088 or off == 0x08a:        # COPJMP1/2
-                    cop['pc'] = lc[(off - 0x088) >> 1]
+                if off == 0x088 or off == 0x08a:        # COPJMP1/2: the jump's two steps come first (1.0.73)
+                    cop['jmp'], cop['st'] = (off - 0x088) >> 1, 10
                 else:
                     write(off, w2, v, c)
         elif st == 3:                                   # WAIT_OR_SKIP: the second word

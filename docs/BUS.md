@@ -124,6 +124,15 @@ holds the bus) is left open - after `arek_glue_frame()` and after the host has p
 calls `arek_glue_frame_carry()` and the access waits on there. `ArekBus.ahead` (optional): while an access waits, the
 model asks the host for the DMA slots it marks itself (the disk's) before the blitter reaches them.
 
+A read of DMACONR by such a carried cycle (1.0.73): `bus_bbusy_hook()` answers for the slot the cycle gets in the next
+frame - it plays the roll and the carry on a copy of the model (without the host's own DMA of the next frame) - and no
+longer for the cap. Other registers read by a carried cycle (the beam, a CIA) are still read at the cap.
+
+Rules of the fixed DMA added in 1.0.73: a Copper jump's two extra steps (COP_JMP1 holds the bus, COP_JMP2 waits for a
+free cycle, then the fetch); sprite slots on a vertical-blank line behind a DMACON write that changes SPREN or DSKEN on
+that line (for sprites whose VSTOP equals the line; `spr_ve0` / `spr_ve_end` carry VSTOP from frame to frame - a host
+that premaps the next frame on a copy copies `spr_ve_end` into the copy's `spr_ve0`).
+
 DMA registers written by the CPU inside a frame (1.0.52, `journal_on`): the map is built at the frame's start;
 `arek_bus_cpu_reg(b, off, value, now)` - called BEFORE the caller stores the value in `regs` - notes a write to DMACON
 (DMAEN, BPLEN, COPEN, SPREN), COPJMP1/2, DIWSTRT/STOP, DDFSTRT/STOP, BPLCON0 or COPxLC with its colour clock and works

@@ -279,6 +279,9 @@ test builds both (`tests/test_host_engine.py`, emcc and node when installed).
   still gets the line's sprites as the slots left them (cycle $34). And the Copper's slots inside the bitplane
   fetch: every even slot no plane takes, slot 4 of a fetch group included (it counted as taken below 6 planes - a
   MOVE inside the fetch came 2-6 cycles late; 144 WAIT positions at 1-6 planes equal the emulator's now).
+- 1.0.73: a Copper MOVE to COPJMP1 / COPJMP2 costs two more steps before the new list's first fetch (the emulator's
+  COP_JMP1 - the bus held, not used - and COP_JMP2 - a free cycle): 4 colour clocks, in the renderers and in the bus
+  model (36 positions against the emulator's register log).
 - 1.0.70 with `-DHOST_IPL_MODEL=1`: a read of a running CIA timer's counter gives the emulator's value (the model's
   count + 2, never 0: the latch shows for two E cycles; a timer just started or loaded shows the latch) - 176 reads of
   a boot program equal the emulator's; and the Copper's INTREQ write is requested at its own slot + 1 colour clock

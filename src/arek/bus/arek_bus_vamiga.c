@@ -32,15 +32,28 @@ void arek_bus_frame_map(ArekBus *b) {
         b->ln = 0;
     }
     int ji = 0;
+/* 1.0.73 (Turrican II, a pass that took two frames instead of one): outside lines 25 .. last - 1 Agnus has no sprite slots,
+ * but a write to DMACON that changes SPREN or DSKEN puts the new DMA bits into the REST OF THAT LINE's slot table, without
+ * the vertical blank's mask (vAmiga Agnus::setDMACON: updateDasEvents(newDAS, h + 2)). A Copper list that switches sprite
+ * DMA on at the top of line 0 gives every sprite whose slots are still to come and whose VSTOP equals the line (0 behind a
+ * list's terminator) its two control-word fetches there: 6 slots a blit across the frame's end does not get. */
+#define AREK_SPR_VBL(oldv, newv, hh) do { uint16_t od_ = ((oldv) & 0x200) ? (uint16_t)(oldv) : 0, nd_ = ((newv) & 0x200) ? (uint16_t)(newv) : 0; \
+        if (((od_ ^ nd_) & 0x30) && (nd_ & 0x20) && (v < 25 || v >= NL - 1)) for (int n_ = 0; n_ < 8; n_++) { BSpr *p_ = &S[n_]; \
+            for (int q_ = 0; q_ < 2; q_++) { int s_ = 0x15 + 4 * n_ + 2 * q_; \
+                if (s_ < (int)(hh) + 2 || (int)v != (p_->st ? p_->ve : b->spr_ve0[n_])) continue; \
+                uint32_t w_ = b->rd16(b->ctx, p_->ptr); p_->ptr += 2; L[s_] = (uint8_t)(16 + n_); \
+                if (!q_) p_->vs = (p_->vs < 0 ? 0 : (p_->vs & 0x100)) | (int)(w_ >> 8); \
+                else { p_->vs = (p_->vs < 0 ? 0 : (p_->vs & 0xff)) | (int)((w_ & 4) << 6); p_->ve = (int)((w_ >> 8) | ((w_ & 2) << 7)); p_->st = 1; p_->on = 0; } } } } while (0)
 #define AREK_JOURNAL(at) while (ji < b->jn && b->jt[ji] <= (uint32_t)(at)) { uint32_t jr = b->jreg[ji]; uint16_t jv = b->jval[ji]; ji++; \
-        if (jr == 0x096) { if (jv & 0x8000) R[0x096 >> 1] |= jv & 0x7fff; else R[0x096 >> 1] &= (uint16_t)~jv; } \
+        if (jr == 0x096) { uint16_t jo = R[0x096 >> 1]; if (jv & 0x8000) R[0x096 >> 1] |= jv & 0x7fff; else R[0x096 >> 1] &= (uint16_t)~jv; \
+                           if (L) AREK_SPR_VBL(jo, R[0x096 >> 1], (int)(at) - (int)(v * H)); } \
         else if (jr == 0x088) { cp = ((uint32_t)R[0x080 >> 1] << 16 | R[0x082 >> 1]) & b->chipmask; cst = 1; cnext = (int)(at); } \
         else if (jr == 0x08a) { cp = ((uint32_t)R[0x084 >> 1] << 16 | R[0x086 >> 1]) & b->chipmask; cst = 1; cnext = (int)(at); } \
         else { R[jr >> 1] = jv; \
                if ((jr == 0x080 || jr == 0x082) && !cact) cp = ((uint32_t)R[0x080 >> 1] << 16 | R[0x082 >> 1]) & b->chipmask; } }   /* vAmiga pokeCOP1LC: a Copper that has not run in this frame takes the new address at once */
     uint32_t cp = ((uint32_t)R[0x080 >> 1] << 16 | R[0x082 >> 1]) & b->chipmask; if (!cp) cp = b->cop_default;   /* COP1LC jeste nezapsany (start ze stavu) */
     int cact = 0;                                            /* 1.0.52: the Copper has fetched in this frame */
-    int cst = 1, cnext = 0; uint16_t c1 = 0, c2 = 0; uint32_t cwait = 0, cmask = 0;   /* copper: 1 FETCH, 2 MOVE, 3 WAIT_OR_SKIP, 4 WAIT1, 5 WAIT2, 6 cekani, 7 SKIP1, 8 SKIP2, 0 stop */
+    int cst = 1, cnext = 0, cjmp = 0; uint16_t c1 = 0, c2 = 0; uint32_t cwait = 0, cmask = 0;   /* copper: 1 FETCH, 2 MOVE, 3 WAIT_OR_SKIP, 4 WAIT1, 5 WAIT2, 6 cekani, 7 SKIP1, 8 SKIP2, 0 stop */
     int vflop = 0; BSpr S[8]; for (int n = 0; n < 8; n++) { S[n].ptr = ((uint32_t)R[(0x120 >> 1) + 2 * n] << 16 | R[(0x122 >> 1) + 2 * n]) & b->chipmask; S[n].st = 0; S[n].on = 0; S[n].vs = S[n].ve = -1; }
     for (uint32_t v = 0; v < NL; v++) {
         uint8_t *L = b->own + v * H;
@@ -115,11 +128,13 @@ void arek_bus_frame_map(ArekBus *b) {
                    * next frame, one to $40-$7E does unless CDANG is set - a list of zeros (MOVE #0,$000) took every other
                    * free slot of the frame (18 407 against the original's 3). CDANG unknown (-1): $40-$7E is let through */
                   if (reg < 0x040 || (reg < 0x080 && b->cdang == 0)) { cst = 0; break; }
-                  if (reg == 0x088) { cp = ((uint32_t)R[0x080 >> 1] << 16 | R[0x082 >> 1]) & b->chipmask; }
-                  else if (reg == 0x08a) { cp = ((uint32_t)R[0x084 >> 1] << 16 | R[0x086 >> 1]) & b->chipmask; }   /* 1.0.7: COPJMP2 (Turrican II KIT-GAPS 8: the intro jumps to a second list) */
+                  /* 1.0.73 (vAmiga COP_JMP1 / COP_JMP2): a jump takes two more steps - one that holds the bus without using it, one
+                   * that waits for a free cycle - before the first fetch of the new list: 4 colour clocks */
+                  if (reg == 0x088 || reg == 0x08a) { cjmp = (int)reg; cst = 10; }   /* 1.0.7: COPJMP2 (Turrican II KIT-GAPS 8: the intro jumps to a second list) */
                   else if (reg == 0x09c) { if ((c2 & 0x8010) == 0x8010 && b->cop_int < 0) b->cop_int = v * H + h + b->cop_lat;   /* INTREQ SET|COPER; zda preruseni dojde, rozhodne volajici */
                       if ((c2 & 0x8000) && (c2 & 0x7fff) && b->cop_irq_n < AREK_BUS_COPIRQ) { b->cop_irq[b->cop_irq_n].t = v * H + h + b->cop_lat; b->cop_irq[b->cop_irq_n].bits = (uint16_t)(c2 & 0x7fff); b->cop_irq_n++; } }   /* 1.0.6: kazdy SET, kterekoli bity */
-                  else if (reg == 0x096) { if (c2 & 0x8000) R[0x096 >> 1] |= c2 & 0x7fff; else R[0x096 >> 1] &= ~c2; dma = R[0x096 >> 1]; den = dma & 0x200;
+                  else if (reg == 0x096) { uint16_t co = R[0x096 >> 1]; if (c2 & 0x8000) R[0x096 >> 1] |= c2 & 0x7fff; else R[0x096 >> 1] &= ~c2; dma = R[0x096 >> 1]; den = dma & 0x200;
+                      AREK_SPR_VBL(co, dma, h);
                       if (c2 & 0x8000) b->regs[0x096 >> 1] |= c2 & 0x7fff; else b->regs[0x096 >> 1] &= ~c2; }   /* DMACON je jeden registr: zapis copperu plati i pro blitter a cteni DMACONR */
                   else if (reg >= 0x120 && reg < 0x140) { R[reg >> 1] = c2; int n = (reg - 0x120) >> 2; S[n].ptr = ((uint32_t)R[(0x120 >> 1) + 2 * n] << 16 | R[(0x122 >> 1) + 2 * n]) & b->chipmask; }
                   else if (reg >= 0x140 && reg < 0x180 && !(reg & 4)) {   /* SPRxPOS/SPRxCTL: Agnus z nich bere okno DMA spritu */
@@ -132,6 +147,13 @@ void arek_bus_frame_map(ArekBus *b) {
             case 3:   /* WAIT_OR_SKIP: druhe slovo */
                 if (!freeb) { cnext = v * H + h + 1; break; }
                 L[h] = 24; c2 = b->rd16(b->ctx, cp); cp += 2; cst = (c2 & 1) ? 7 : 4; cnext = v * H + h + 2; break;
+            case 10:  /* COP_JMP1: the bus is allocated (when it is free), not needed; from $E0 the next step comes a clock later */
+                if (freeb) L[h] = 24;
+                cst = 11; cnext = v * H + h + (h == 0xe0 ? 1 : 2); break;
+            case 11:  /* COP_JMP2: a free cycle, then the list's address */
+                if (!freeb) { cnext = v * H + h + 1; break; }
+                cp = (cjmp == 0x088 ? ((uint32_t)R[0x080 >> 1] << 16 | R[0x082 >> 1]) : ((uint32_t)R[0x084 >> 1] << 16 | R[0x086 >> 1])) & b->chipmask;
+                cst = 1; cnext = v * H + h + 2; break;
             case 4: if (!freeb) { cnext = v * H + h + 1; break; } cst = 5; cnext = v * H + h + 2; break;
             case 7: if (!freeb) { cnext = v * H + h + 1; break; } cst = 8; cnext = v * H + h + 2; break;
             case 8: if (!freeb) { cnext = v * H + h + 1; break; } cst = 1; cnext = v * H + h + 2; break;   /* SKIP: bez preskoceni (hra ho v levelu nepouziva) */
@@ -156,6 +178,7 @@ void arek_bus_frame_map(ArekBus *b) {
             }
         }
     }
+    for (int n = 0; n < 8; n++) b->spr_ve_end[n] = S[n].st ? S[n].ve : b->spr_ve0[n];   /* 1.0.73: for the next frame's line 0 (AREK_SPR_VBL) */
 }
 /* ---- blitter po taktech (mikroprogramy SlowBlitter vAmigy, Blitter/SlowBlitter.cpp: 16 kombinaci kanalu, bez rezimu car a fill) ---- */
 #define B_BUS 1

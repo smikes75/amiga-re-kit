@@ -79,6 +79,23 @@ int main(int argc, char **argv) {
         cop(&a2, 0x6407, 0xfffe); cop(&a2, 0x009c, 0x8010); cop(&a2, 0xffff, 0xfffe);                  /* the second list: WAIT 100, INTREQ SET|COPER */
         arek_bus_frame(&B, 312);
         printf("cop_int %.1f\n", B.cop_int);
+    } else if (!strcmp(mode, "jmp")) {                        /* 1.0.73: a jump's two steps - the Copper's slots of line 0 */
+        uint32_t a2 = 0x2000;
+        at = 0x1000; cop(&at, 0x0084, 0x0000); cop(&at, 0x0086, 0x2000); cop(&at, 0x008a, 0x0000); cop(&at, 0x0180, 0x0111);
+        cop(&a2, 0x0182, 0x0222); cop(&a2, 0xffff, 0xfffe);
+        memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
+        printf("copper:"); for (int h = 0; h < 60; h++) if (own[h] == 24) printf(" %d", h); printf("\n");
+    } else if (!strcmp(mode, "sprvbl")) {                     /* 1.0.73: SPREN switched on by the Copper on line 0, off on line 100 */
+        int moves = atoi(argv[3]);                            /* MOVEs before the DMACON write */
+        at = 0x1000; for (int k = 0; k < moves; k++) cop(&at, 0x0180, (uint16_t)k);
+        cop(&at, 0x0096, 0x8020); cop(&at, 0x6407, 0xfffe); cop(&at, 0x0096, 0x0020); cop(&at, 0xffff, 0xfffe);
+        for (int n = 0; n < 8; n++) { regs[(0x120 >> 1) + 2 * n] = 0; regs[(0x122 >> 1) + 2 * n] = 0x3000; }   /* empty lists: control words 0, 0 */
+        for (int f = 0; f < 3; f++) {
+            regs[0x096 >> 1] &= (uint16_t)~0x0020; memset(own, 0, sizeof own); arek_bus_frame(&B, 312);
+            printf("frame %d line 0:", f); for (int h = 0; h < 227; h++) if (own[h] >= 16 && own[h] < 24) printf(" %d", h);
+            long l1 = 0, l25 = 0; for (int h = 0; h < 227; h++) { l1 += own[227 + h] >= 16 && own[227 + h] < 24; l25 += own[25 * 227 + h] >= 16 && own[25 * 227 + h] < 24; }
+            printf(" | line 1: %ld line 25: %ld\n", l1, l25);
+        }
     } else if (!strcmp(mode, "ill")) {                        /* 1.0.47: a MOVE to an illegal register stops the Copper */
         B.cdang = atoi(argv[3]); uint32_t reg = (uint32_t)strtoul(argv[4], 0, 16);
         at = 0x1000; cop(&at, 0x0180, 0x0123); cop(&at, (uint16_t)reg, 0);
@@ -629,6 +646,29 @@ def test_copjmp2_continues_in_the_second_list(harness):
     assert 100 * 227 <= t < 101 * 227, out                      # the INTREQ write of the second list at line 100, not line 200
 
 
+
+def test_a_copper_jump_takes_two_more_steps(harness):
+    """1.0.73 (Turrican II; vAmiga COP_JMP1 / COP_JMP2): a MOVE to COPJMP is followed by a step that holds the bus without
+    using it and one that waits for a free cycle, before the new list's first fetch - 4 colour clocks. The model fetched
+    from the new list at once; a blit beside the list's start got 4 slots less, twice a frame in that game."""
+    out = harness('8380', 'jmp')
+    # cycle 0 the list's start, three MOVEs (2-12), the jump's held cycle 14, cycle 16 free, the second list from 18
+    assert out.split(':')[1].split() == ['0', '2', '4', '6', '8', '10', '12', '14', '18', '20', '22', '24'], out
+
+
+def test_sprite_slots_in_the_vertical_blank_behind_a_dmacon_write(harness):
+    """1.0.73 (Turrican II, a pass that took two frames instead of one): lines 0-24 have no sprite slots, but a write to
+    DMACON that changes SPREN puts the new bits into the rest of that line's slots (vAmiga Agnus::setDMACON). A Copper
+    list that switches sprite DMA on at the top of line 0 gives every sprite whose VSTOP is 0 (behind a list's end) its
+    two control-word fetches there. The blit across the frame's end lost 6 slots to them in the original."""
+    out = harness('8380', 'sprvbl', 0).splitlines()
+    assert out[0].startswith('frame 0 line 0: |')                              # the first frame: VSTOP not known yet
+    all16 = ' '.join(str(0x15 + 2 * k) for k in range(16))
+    assert out[1] == 'frame 1 line 0: %s | line 1: 0 line 25: 16' % all16 and out[2].startswith('frame 2 line 0: ' + all16), out
+    out = harness('8380', 'sprvbl', 8).splitlines()                            # the write in cycle 36: the slots from 38 on
+    assert out[1].startswith('frame 1 line 0: ' + ' '.join(str(h) for h in range(39, 0x35, 2)) + ' |'), out
+
+
 def test_an_illegal_move_stops_the_copper(harness):
     """1.0.47 (SWIV KIT-GAP 1): a Copper list of zeros is MOVE #0,$000 over and over - the original stops at the first
     one (3 Copper slots a frame: vAmiga, OCS, register below $40), the model read on in every other free slot (18 407).
@@ -778,3 +818,49 @@ def test_an_access_that_finds_no_slot_before_the_frame_rolls_waits_on_in_the_nex
     # 247.0, in the new frame), 1 colour clock, the third at 250 (251), then the 2 that followed: 253
     assert out[2] == 'unserved 3' and out[3] == 'carried t 253 slots 1 1 1 poll 247.0 1', out
     assert out[4] == 'asked 4 served 5300 disk 1', out        # every 96 slots of the wait
+
+
+BBUSY_CARRY = r"""
+#include <stdio.h>
+#include <string.h>
+#define AREK_GLUE_NO_TICK 1
+typedef struct M68 M68;
+#include "arek_bus_glue.h"
+static uint16_t rd16(void *c, uint32_t a) { (void)c; (void)a; return 0xffff; }
+int main(void) {
+    static uint8_t own[400 * 227]; static uint16_t regs[0x100];
+    regs[0x096 >> 1] = 0x0640;                                    /* DMAEN BLTEN BLTPRI: the blit holds the bus */
+    arek_glue_init(227, 313, 400, own, regs, rd16, 0);
+    arek_glue_frame(313);
+    arek_glue_set_time(312.0 * 227 + 100);
+    bus_blit_hook(0x09f0, 0, (32 << 6) | 20);                     /* A -> D, 32 x 20 words: 1 280 slots, ends on line 5 of the next frame */
+    arek_glue_set_time(arek_glue_time() + 8.0);                   /* the blit has the bus */
+    int at_start = bus_bbusy_hook();
+    bus_access_hook(0);                                           /* the read of DMACONR: no slot before the cap */
+    int unserved = arek_glue_bus()->unserved, busy = bus_bbusy_hook();
+    /* what the frame's roll then does with the cycle */
+    double end = 313.0 * 227; arek_glue_frame(313); arek_glue_frame_carry();
+    long slot = arek_glue_bus()->last_slot; int after = arek_bus_bbusy(arek_glue_bus(), arek_glue_time());
+    (void)end;
+    printf("start %d unserved %d busy %d | served at %ld busy %d\n", at_start, unserved, busy, slot, after);
+    return 0;
+}
+"""
+
+
+def test_dmaconr_read_by_a_cycle_carried_across_the_frames_end(tmp_path):
+    """1.0.73 (Turrican II, a pass that took two frames instead of one): `btst #14,$dff002` behind a blit that crosses the
+    frame's end. The read's bus cycle found no slot before the cap and is served in the next frame, when the blit is
+    over - but BBUSY was taken at the cap, still set, and the game's wait loop went round once more (12 colour clocks:
+    its pass missed the Copper's interrupt of that frame). The glue plays the roll on a copy of the model and takes
+    BBUSY at the slot the cycle gets."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    BUS = os.path.dirname(bus.__file__)
+    (tmp_path / 'b.c').write_text(BBUSY_CARRY)
+    exe = tmp_path / 'b'
+    subprocess.run([cc, '-O1', '-I', BUS, str(tmp_path / 'b.c'), os.path.join(BUS, 'arek_bus.c'), os.path.join(BUS, 'arek_bus_vamiga.c'), '-lm', '-o', str(exe)], check=True)
+    out = subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout.strip()
+    f = out.replace('|', ' ').split()
+    assert f[1] == '1' and f[3] == '1' and f[5] == '0' and f[10] == '0' and int(f[8]) > 227, out   # busy at the start; the carried read: not busy, as at its slot

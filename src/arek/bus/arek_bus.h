@@ -36,6 +36,7 @@ typedef uint16_t (*arek_bus_rd16_fn)(void *ctx, uint32_t addr);   /* cteni chip 
 typedef struct ArekBus {
     int hpos;                  /* takty na radek (PAL 227) */
     int lines;                 /* radku snimku (PAL 312 / 313) */
+    int spr_ve0[8], spr_ve_end[8];   /* 1.0.73: every sprite's VSTOP at the frame's start (as the frame before left it) and at its end; -1 = not known */
     int maxlines;              /* kapacita mapy v radcich (>= lines; radky za koncem snimku drzi pristupy, ktere pretekly) */
     uint8_t *own;              /* cte volajici: own[radek * hpos + takt], maxlines * hpos bajtu; volajici do nej smi znacit sloty
                                   vlastnich modelu DMA (zvuk: arek_bus_mark) */

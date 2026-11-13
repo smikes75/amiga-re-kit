@@ -8,6 +8,7 @@ void arek_bus_init(ArekBus *b, int hpos, int lines, int maxlines, uint8_t *own, 
     memset(b, 0, sizeof *b);
     b->hpos = hpos; b->lines = lines; b->maxlines = maxlines; b->own = own; b->regs = regs; b->rd16 = rd16; b->ctx = ctx;
     b->chipmask = 0x7fffe; b->slotoff = 1; b->cop_int = -1; b->cop_irq_n = 0; b->cdang = -1;
+    for (int n = 0; n < 8; n++) b->spr_ve0[n] = b->spr_ve_end[n] = -1;
     memset(own, 0, (size_t)maxlines * hpos);
 }
 
@@ -16,6 +17,7 @@ void arek_bus_frame(ArekBus *b, int lines) {
     if (b->bl.on) { arek_bus_blt_advance(b, fend - 1); if (b->bl.on) b->bl.bt = b->bl.bt >= fend ? b->bl.bt - fend : 0; }
     b->carry_fend = fend;
     b->lines = lines; b->cpu_n = b->wait_n = 0;
+    memcpy(b->spr_ve0, b->spr_ve_end, sizeof b->spr_ve0);   /* 1.0.73: the sprites' VSTOP as the frame that ends left it */
     arek_bus_frame_map(b);
 }
 

@@ -110,6 +110,10 @@ CASES = {
                                                         0x5807, 0xfffe, 0x14c, 0xffff, 0x5941, 0xfffe, 0x14c, 0x0000,
                                                         0x5a07, 0xfffe, 0x14c, 0xffff, 0x5b61, 0xfffe, 0x148, 0x0070,
                                                         0x5c07, 0xfffe, 0x148, 0x0060, 0x5d61, 0xfffe, 0x148, 0x0050, 0x5e07, 0xfffe, 0x14a, 0] + END, PLANES[:2]),
+    # 1.0.73: a Copper jump in mid-line (COPJMP2 behind a WAIT), a colour MOVE in the second list - both renderers
+    'copper jump in mid-line': ram_with(with_colours(setup(4, ptrs=[p for p, _ in PLANES[:4]]))
+                                        + [0x4841, 0xfffe, 0x084, 0, 0x086, 0x2000, 0x08a, 0] + END,
+                                        PLANES[:4] + [(0x2000, [0x180, 0x0f0, 0x48d1, 0xfffe, 0x180, 0x00f] + END)]),
     # 1.0.70: Copper MOVEs inside the bitplane fetch at 4 and 5 planes (slot 4 of a fetch group is the Copper's)
     'copper moves inside the fetch': ram_with(with_colours(setup(4, ptrs=[p for p, _ in PLANES[:4]]))
                                               + [w for k, hp in enumerate(range(0x41, 0x71, 2)) for w in (((0x40 + k) << 8) | hp, 0xfffe, 0x180, 0x111 * (k % 15 + 1))]
@@ -332,3 +336,19 @@ def test_the_copper_gets_every_even_slot_no_plane_takes():
         fr = display.render(ram_with(cop, PLANES[:n]), COP, regs={0x096: 0x83c0})
         got = [c for (line, c, off, v) in fr.writes if off == 0x180 and line >= 0x40]
         assert got == want.get(n, [hp + 1 for hp in hps]), (n, [hex(c) for c in got])
+
+
+def test_a_copper_jump_takes_two_more_steps_in_the_renderers():
+    """1.0.73 (vAmiga COP_JMP1 / COP_JMP2): the cycle of the MOVE behind a COPJMP2 in mid-line, as the emulator's register
+    log has it (the selftest disk with a jump behind a WAIT at 12 positions, 4, 5 and 6 planes - 36 of 36; the MOVE came
+    4 colour clocks early at all of them before): WAIT, COP2LCH, COP2LCL, COPJMP2, then the MOVE in the second list."""
+    want = {0x41: (0, 0x52), 0x43: (0, 0x54), 0x45: (0, 0x56), 0x47: (0, 0x58), 0x49: (0, 0x5a), 0x4b: (0, 0x5c),
+            0xd5: (1, 0x02), 0xd7: (1, 0x06), 0xd9: (1, 0x08), 0xdb: (1, 0x0a), 0xdd: (1, 0x0c), 0xdf: (1, 0x0e)}
+    cop = setup(4, ptrs=[p for p, _ in PLANES[:4]])
+    for k, hp in enumerate(sorted(want)):
+        at = COP + 2 * (len(cop) + 8)                                             # the entry behind the COPJMP2
+        cop += [((0x40 + 2 * k) << 8) | hp, 0xfffe, 0x084, at >> 16, 0x086, at & 0xffff, 0x08a, 0, 0x180, k + 1]
+    fr = display.render(ram_with(cop + END, PLANES[:4]), COP, regs={0x096: 0x83c0})
+    got = {v: (line, c) for (line, c, off, v) in fr.writes if off == 0x180 and line >= 0x40}
+    for k, hp in enumerate(sorted(want)):
+        assert got[k + 1] == (0x40 + 2 * k + want[hp][0], want[hp][1]), (hex(hp), got[k + 1])

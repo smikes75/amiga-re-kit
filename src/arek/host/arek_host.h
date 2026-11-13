@@ -467,6 +467,7 @@ static uint8_t OWN_NEXT[HOST_MAXLINES * HOST_HPOS];
 static void h_premap_next(void) {
     ArekBus *b = arek_glue_bus(); ArekBus t = *b; static uint16_t R2[0x100];
     memcpy(R2, b->regs, sizeof R2); t.regs = R2; t.own = OWN_NEXT; t.lines = H_LINES;
+    memcpy(t.spr_ve0, b->spr_ve_end, sizeof t.spr_ve0);   /* 1.0.73: the next frame starts with the sprites' VSTOP of this one's end */
     arek_bus_frame_map(&t);
     for (int k = 0; k < 2 * HOST_HPOS; k++) { uint32_t j = (uint32_t)H_LINES * HOST_HPOS + k; if (j < (uint32_t)HOST_MAXLINES * HOST_HPOS && !b->own[j]) b->own[j] = OWN_NEXT[k]; }
 }

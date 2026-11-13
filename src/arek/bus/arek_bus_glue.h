@@ -22,6 +22,8 @@
  * instruction's reads come at its end, after its internal clocks (move to SR / CCR, andi/ori/eori to SR / CCR, lea d8(An,Xn)). */
 #ifndef AREK_BUS_GLUE_H
 #define AREK_BUS_GLUE_H
+#include <stdlib.h>
+#include <string.h>
 #include "arek_bus.h"
 
 static struct { ArekBus bus; double t; int ready; } AREK_GLUE;
@@ -120,8 +122,26 @@ void bus_blit_hook(uint16_t con0, uint16_t con1, uint16_t size) {
     if (AREK_GLUE.ready) AREK_GLUE.t = arek_bus_blit(&AREK_GLUE.bus, AREK_GLUE.t, con0, con1, size);
 }
 
+/* 1.0.73 (Turrican II, a pass that took two frames instead of one): DMACONR read by a bus cycle that found no slot before
+ * the frame's end (a `btst #14,$dff002` behind a blit that crosses it, the Copper list's start taking the other slots).
+ * The cycle is served in the next frame (arek_bus_frame_carry), but the value was taken where the cycle stood at the cap,
+ * a line past the frame's end: BBUSY still set, although the blit ends before the cycle gets its slot - the game's wait
+ * loop went round once more. Here the roll and the carry are played on a copy of the model (the next frame's map without
+ * the host's own DMA - audio, disk) and BBUSY is taken at the slot the cycle gets there. */
+static int arek_glue_bbusy_carried(void) {
+    ArekBus *b = &AREK_GLUE.bus; static uint8_t *own2 = 0; static size_t own2n = 0; static uint16_t R2[0x100];
+    size_t n = (size_t)b->maxlines * (size_t)b->hpos;
+    if (own2n < n) { uint8_t *q = (uint8_t *)realloc(own2, n); if (!q) return arek_bus_bbusy(b, AREK_GLUE.t); own2 = q; own2n = n; }
+    ArekBus t = *b; memcpy(own2, b->own, n); memcpy(R2, b->regs, sizeof R2); t.own = own2; t.regs = R2; t.ahead = 0;
+    double len = (double)b->lines * b->hpos, tt = AREK_GLUE.t > len ? AREK_GLUE.t - len : 0;
+    arek_bus_frame(&t, b->lines);
+    tt = arek_bus_frame_carry(&t, tt);
+    return arek_bus_bbusy(&t, tt);
+}
 int bus_bbusy_hook(void) {
-    return AREK_GLUE.ready ? arek_bus_bbusy(&AREK_GLUE.bus, AREK_GLUE.t) : 0;
+    if (!AREK_GLUE.ready) return 0;
+    if (AREK_GLUE.bus.unserved > 0) return arek_glue_bbusy_carried();
+    return arek_bus_bbusy(&AREK_GLUE.bus, AREK_GLUE.t);
 }
 
 double bus_time_hook(void) { return AREK_GLUE.t; }

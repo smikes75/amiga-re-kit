@@ -3,6 +3,30 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.73 (2026-11-13)
+
+Three rules of the emulator the models did not have, found on one pass of Turrican II's level 3-3 that took two
+frames in the host and one in the original (a blit across the frame's end, the game waiting for it):
+
+- bus model and both renderers: a Copper MOVE to COPJMP1 / COPJMP2 takes two more steps before the new list's first
+  fetch - one that holds the bus without using it, one that waits for a free cycle (4 colour clocks; the models
+  fetched from the new list at once)
+  - the emulator's register log, a jump behind a WAIT at 12 positions with 4, 5 and 6 planes, the cycle of the MOVE
+    behind it: 0 of 36 equal before (4 clocks early), 36 now
+- bus model: sprite slots in the vertical blank behind a DMACON write. Lines 0-24 and the last line have none, but
+  a write that changes SPREN (or DSKEN) puts the new bits into the rest of THAT line's slots: a Copper list that
+  switches sprite DMA on at the top of line 0 gives every sprite whose VSTOP is that line (0 behind a list's end)
+  its two control-word fetches there. The model keeps every sprite's VSTOP across frames for it
+- arek_bus_glue.h: DMACONR read by a bus cycle that found no slot before the frame's end is answered for the slot
+  the cycle gets in the next frame (the roll and the carry played on a copy of the model). BBUSY was taken at the
+  cap, a line past the frame's end: still set although the blit ends before the cycle is served - a `btst` / `bne`
+  wait went round once more
+  (an engine without a thread no longer gets a wait-loop round there to hand the frame over - any other wait loop does)
+- Turrican II, level 3-3 from the start with its route, 1 043 passes, host with `-DHOST_IPL_MODEL=1`: every pass in
+  the original's frame (pass 670 and all behind it were a frame late); passes that begin on the original's colour
+  clock 614 of the first 670 -> 1 001 of 1 043, within 10 clocks 1 040. Level 3-3 from another place, 654 passes:
+  600 -> 623 on the clock, the Copper handler's entry 660 -> 686 of 719 frames
+
 ## 1.0.72 (2026-11-13)
 
 - `arek recomp --bus-table` for an overlay module or a library (`--lib`): the module carries its own bus table

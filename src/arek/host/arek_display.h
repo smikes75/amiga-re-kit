@@ -53,7 +53,7 @@ static int ARD_CDANG = -1;                             /* 1.0.47: COPCON bit 1 a
 static uint16_t ARD_R[0x100];                          /* the display registers as the renderer sees them */
 static uint32_t ARD_BPL[6], ARD_LC[2];
 static ArdSprite ARD_SPR[8], ARD_SPRI[8];              /* ARD_SPRI: the sprites at full DMA (ard_spri_cb) */
-static struct { uint32_t pc; int st, skip, skipcmd; long next; uint16_t w1; int wv, wh, vm, hm; } ARD_COP;   /* st: 1 FETCH 2 MOVE 3 WAIT_OR_SKIP 4 WAIT1 5 WAIT2 6 waiting 9 wake 7 SKIP1 8 SKIP2 0 off */
+static struct { uint32_t pc; int st, skip, skipcmd, jmp; long next; uint16_t w1; int wv, wh, vm, hm; } ARD_COP;   /* st: 1 FETCH 2 MOVE 3 WAIT_OR_SKIP 4 WAIT1 5 WAIT2 6 waiting 9 wake 7 SKIP1 8 SKIP2 0 off */
 static uint16_t ARD_PIX[ARD_LINES][ARD_WIDTH];
 static uint16_t ARD_PIXH[ARD_LINES][2 * ARD_WIDTH];    /* hires lines: both pixels of every lowres pixel */
 static uint8_t ARD_HR[ARD_LINES];                      /* 1 = the line was drawn in hires (ARD_PIX holds the pair averages) */
@@ -162,6 +162,11 @@ static void ard_copper(int v, int c, int busy) {
         if (!ard_compare(v, c)) { ARD_COP.next = t + 1; return; }
         st = ARD_COP.st = 9;
     }
+    /* 1.0.73 (vAmiga COP_JMP1 / COP_JMP2): a MOVE to COPJMP1 / COPJMP2 is followed by two more steps before the new list's
+     * first fetch - one two cycles later whatever the bus does (one cycle later from $E0), one in the next free cycle */
+    if (st == 10) { ARD_COP.st = 11; ARD_COP.next = t + (c == 0xe0 ? 1 : 2); return; }
+    if (st == 11) { if (busy || c == 0xe0) { ARD_COP.next = t + 1; return; }
+                    ARD_COP.pc = ARD_LC[ARD_COP.jmp] & 0x1ffffe; ARD_COP.st = 1; ARD_COP.next = t + 2; return; }
     int free = !(c & 1) && !busy && (c != 0xe0 || st == 9);
     if (!free) { ARD_COP.next = t + 1; return; }
     switch (st) {
@@ -175,7 +180,7 @@ static void ard_copper(int v, int c, int busy) {
         uint32_t off = ARD_COP.w1 & 0x1fe;
         if (off < 0x040 || (off < 0x080 && ARD_CDANG == 0)) { ARD_COP.st = 0; return; }   /* 1.0.47: an illegal MOVE stops the Copper for the frame (as the bus model) */
         if (ARD_COP.skip) { ARD_COP.skip = 0; break; }
-        if (off == 0x088 || off == 0x08a) ARD_COP.pc = ARD_LC[(off - 0x088) >> 1] & 0x1ffffe;
+        if (off == 0x088 || off == 0x08a) { ARD_COP.jmp = (int)((off - 0x088) >> 1); ARD_COP.st = 10; }
         else ard_write(off, w2);
         break; }
     case 3: {                                          /* WAIT_OR_SKIP: the second word */
