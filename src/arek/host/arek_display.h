@@ -25,7 +25,8 @@
  * ($080-$086, $08E-$094, $0E0-$10A, $120-$1BE) from the Copper (inside) and the CPU (the host, after ard_until(line of
  * the write)); ard_frame_start() at the start of a frame; ard_until(v) draws the lines before v; ard_to_rgb() converts
  * the frame; ARD_LAST = the frame's last line (311; the host sets it from its LOF), where sprite DMA stops.
- * Hooks: ard_line_cb(v) before a line is drawn, ard_spr_cb(v, sprites, n) with the sprites of the line, ARD_SPR_FULL = 1
+ * Hooks: ard_line_cb(v) before a line is drawn, ard_spr_cb(v, sprites, n) with the sprites of the line, ard_fetch_cb (1.0.77)
+ * with a line's bitplane fetch (addresses, words, first pixels: arek_scene.h), ARD_SPR_FULL = 1
  * draws the sprites as if every slot were served (a rebuild's enhanced mode), ard_overlay() lets a renderer-only RAM
  * window replace a range of chip RAM (smooth scrolling without touching the game's RAM). */
 #ifndef AREK_DISPLAY_H
@@ -67,6 +68,9 @@ static int ARD_SPR_FULL = 0;                           /* 1 = sprites as if the 
 static void (*ard_line_cb)(int v) = 0;
 static void (*ard_spr_cb)(int v, const ArdSpriteLine *sl, int n) = 0;
 static void (*ard_spri_cb)(int v, const ArdSpriteLine *sl, int n) = 0;
+/* 1.0.77: a line's bitplane fetch - n planes from the addresses pt[k] (before the line's modulo), nw words each (words[k][i]
+ * as fetched), the first pixel of planes 0, 2, 4 at ARD_PIX column base[0] and of planes 1, 3, 5 at base[1]; hr = hires */
+static void (*ard_fetch_cb)(int v, int n, const uint32_t *pt, int nw, const int *base, int hr, uint16_t (*words)[64]) = 0;
 static int ARD_OVL_ON = 0; static const uint8_t *ARD_OVL = 0; static uint32_t ARD_OVL_LO = 0, ARD_OVL_HI = 0;
 
 static void ard_pal_init(void) {                       /* vAmiga's monitor: YUV matrix, gamma 2.8 in / 2.2 out */
@@ -337,10 +341,12 @@ static void ard_line(int v) {
                 nw = (ddfstop - ddfstrt) / 8 + 1; if (hr) nw *= 2; if (nw > 64) nw = 64;
                 if (n > (hr ? 4 : 6)) n = hr ? 4 : 6;
                 for (int k = 0; k < n; k++) for (int i = 0; i < nw; i++) words[k][i] = ard_rd(ARD_BPL[k] + 2 * i);
+                uint32_t pt[6]; for (int k = 0; k < n; k++) pt[k] = ARD_BPL[k];
                 for (int k = 0; k < n; k++) { int16_t mod = (int16_t)ARD_R[((k % 2 == 0) ? 0x108 : 0x10a) >> 1]; ARD_BPL[k] = (ARD_BPL[k] + 2 * nw + mod) & 0x1ffffe; }
                 uint16_t con1 = ARD_R[0x102 >> 1]; int start = 2 * ddfstrt + 17, ofs = 2 * (ddfstrt & 7);
                 if (hr) { start = 2 * ddfstrt + 9; ofs = 0; }   /* hires $3C = lowres $38: the same first pixel */
                 base[0] = start + (((con1 & 15) + ofs) & 15); base[1] = start + ((((con1 >> 4) & 15) + ofs) & 15);
+                if (ard_fetch_cb) ard_fetch_cb(v, n, pt, nw, base, hr, words);   /* 1.0.77: the scene recorder (arek_scene.h) */
                 fetch_end = ddfstrt + (hr ? 4 : 8) * nw; nplanes = n; fetch = 1;
                 if (hr) { ARD_HR[v] = 1; for (int x = 0; x < 4 * c; x++) ARD_PIXH[v][x] = ARD_PIX[v][x >> 1]; }
             } else fetch = -1;

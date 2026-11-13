@@ -563,6 +563,56 @@ piece. SWIV with group = the node (the shadow apart): 0 splits, with and without
 A game that can merge the parts into one picture should; `group` is for parts that cannot be merged (the window's
 part and the band's part of one node).
 
+## I. The scene recorder (`arek_scene.h` + `wb-scenerec.js`, kit 1.0.77) - one hint instead of a recorder per game
+
+Until 1.0.77 every game wrote its own scene record for G: SWIV's `src/swiv_scene.c` (307 lines: its buffers, its node list,
+the PCs of its blits) and `web/sw_rec.js`, Xenon 2's and Alien Breed II's the same way. The kit's host now records the
+scene from what the game does to the hardware and asks the game for one thing it cannot see: where an object is.
+
+- **What the kit finds itself** (`arek_scene.h`, from the display model's new `ard_fetch_cb` and the hooks the host had):
+  the window and the palette of every row as the display used them; the playfield's planes and what lies above them
+  (a line with more planes than most - SWIV's fifth plane - or outside the playfield's chain = the HUD, one object fixed on
+  the screen); the camera from the chain of plane-0 addresses through a ring of rows (learnt from the pointer reloaded to
+  the ring's start inside the window, per buffer) - the window's top row unwrapped over the frames; the objects from the
+  blits masked by A (a cookie-cut with B, a shadow or flash without it, also SWIV's shadow `D = A & C` with an inverted
+  mask), placed by plane, row and column in the shown ring - the rows the window does not show and the margin that is
+  the next row's left edge included, all parts of one call one picture; the clean playfield from the word under the first
+  object blit, kept until a restore or a copy writes the word; which objects a frame shows from the words' generations
+  (a restore makes them new, another object over a part does not); the hardware sprites by line.
+- **The hint** (`ArsConf`): `obj_pc` the first instruction of the routine that draws one object (its blits happen with
+  the stack at or under the entry's, its return ends the object), `obj_reg` the register with the object's address,
+  `obj_x` / `obj_y` the offsets of its logical position (the one the game moves), `obj_img` its picture word (wb-scene's
+  `run`); optional `pass_pc` (where a pass starts: passTime), `logic_pc` (where the logic is done: `rec.next` from the
+  objects' own fields), `cam_x` / `cam_y` (the game's camera words, read there: the next pass's camera, so an object the
+  game keeps on the screen stays there). SWIV: `{ 0x12dcc, a0, 12, 14, 10, 0x15fec, 0x13834, 0, 0x25b2 }`.
+- **The page**: `WBSCENEREC.reader(Module).rec(n)`, `toScene(r, st, lut, { runOf })` - wb-scene's record (the clean window
+  and its palettes, `over` = what the record does not explain, objects at their logical position with the drawing's
+  offset, `group` per object and kind, the HUD object, the sprites) - and `nextOf(r, sc, st)` for `rec.next`.
+- **Not covered** (the record's `reason`): hires, dual playfield, HAM and EHB lines (2); a playfield whose ring the kit has
+  not seen wrap yet (1) - a linear buffer, a screen redrawn by copying, a horizontal ring: the next games will show what
+  to add. Line-mode blits are ignored; a CPU's drawing into the buffer stays in the window and, where it covers an
+  object, in `over`.
+
+Measured on SWIV (city, fuzz_23, frames 4200-5200; SWIV's own recorder and the kit's in one engine, the scene with SWIV's
+page options at 60 Hz):
+
+| | SWIV's recorder | the kit's |
+|---|---|---|
+| valid frames | 1000 | 1000 |
+| camera | - | SWIV's + one constant in every frame |
+| objects at SWIV's place to the pixel | - | 14 181 (19 more wholly in the margin or the hidden rows, placed at the nearer edge) |
+| pixels the record does not explain | 72 | 0 |
+| wb-scene motion, 42 common objects (y / x px) | equal to three decimals | equal to three decimals |
+| mean over the objects | 0.159 / 0.103 (its HUD counted) | 0.157 / 0.101 (2 small objects SWIV leaves in its window) |
+
+On the way the kit learnt three things SWIV had shown: a shadow cut with `D = A & C` is a mask too; ownership by whole
+words lost a helicopter under the player's 16 px (the generations do not); the frame's pass is the one most of its objects
+come from (SWIV draws a piece of the next pass into the shown buffer - one frame with the newest pass's time made four
+helicopters 0.03-0.05 px rougher). Synthetic test: `tests/test_host_scene.py` (two rings scrolled by the Copper, restores,
+a picture in two parts, a shadow, a picture across the left edge, pictures cut by the ring's end and the window, a score
+line in a fifth plane: the composition equals the shown picture to the pixel, the camera keeps its row, every object
+where it was drawn), and the web side on the same record.
+
 ## H. The display never touches the game (`arek web replay`, kit 0.9.6) - done
 
 A page replayed under a virtual clock: `requestAnimationFrame` and `performance.now` are replaced before the page's

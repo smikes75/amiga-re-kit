@@ -3,6 +3,18 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.77 (2026-11-13)
+
+- The host's scene recorder `arek_scene.h` + `wb-scenerec.js` 1.0: wb-scene's record from what the game does to the
+  hardware with one hint of the game (the routine that draws one object, its register, the offsets of its logical x and
+  y; optional the pass's start, the end of its logic and the game's camera words). The kit finds the window, the row
+  palettes, the HUD planes, the camera (the ring of rows the Copper's pointers run through), the objects (blits masked by
+  A inside the routine, all parts of a call one picture, placed in the shown ring), the clean playfield under them,
+  which of them a frame shows, the sprites, `rec.next`. `arek_display.h`: `ard_fetch_cb`, a line's bitplane fetch
+  - SWIV (the user's "make it systemic, separate bitplanes, objects, sprites"): against its own 307-line recorder in one
+    engine, 1000 frames: camera at one constant offset, 14 181 objects at its place to the pixel, 0 unexplained pixels
+    (its 72), wb-scene's motion of all 42 common objects equal to three decimals
+
 ## 1.0.76 (2026-11-13)
 
 - wb-scene 2.15, `objects[].group` (optional, any value): the parts of one thing move as one piece - the first paired

@@ -171,7 +171,7 @@ def test_package_and_copy(tmp_path):
         assert (tmp_path / name).exists()
     here = os.path.dirname(os.path.abspath(host.__file__))
     assert 'arek_host_datadisk.h' in host.FILES and 'arek_host_disk.h' in host.FILES and 'arek_host_engine_check.js' in host.FILES and 'arek_host_engine_node.js' in host.FILES   # G55 (Alien Breed II): the list forgot the newest header; 1.0.20 the Node harness
-    assert sorted(host.FILES) == sorted(f for f in os.listdir(here) if f.endswith(('.h', '.c', '.js'))) and len(host.FILES) == 12 and 'arek_host_floppy.h' in host.FILES
+    assert sorted(host.FILES) == sorted(f for f in os.listdir(here) if f.endswith(('.h', '.c', '.js'))) and len(host.FILES) == 13 and 'arek_host_floppy.h' in host.FILES and 'arek_scene.h' in host.FILES   # 1.0.77: the scene recorder
     import tomllib
     from pathlib import Path
     data = tomllib.loads((Path(__file__).parent.parent / 'pyproject.toml').read_text())['tool']['setuptools']['package-data']
