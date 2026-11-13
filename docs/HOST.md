@@ -149,8 +149,8 @@ The rules the Alien Breed II project and `arek selftest display` measured, in bo
   host sets it from its LOF), where sprite DMA stops;
 - HAM6 (bits 4-5 = palette / blue / red / green from the previous pixel, the chain starting at
   COLOR00 on every line), hires (2 words per 8-CCK block, 4 planes, the first pixel at
-  `2 * DDFSTRT + 9`, the Copper's slots in 4-CCK blocks), with 6 lowres planes the Copper gets
-  both free even slots of a fetch group; the Copper runs the emulator's state machine as the bus
+  `2 * DDFSTRT + 9`, the Copper's slots in 4-CCK blocks), the Copper gets every even slot of a fetch
+  group no plane takes (0 and 4 always, 2 below 6 planes, 6 below 5); the Copper runs the emulator's state machine as the bus
   model does (FETCH, MOVE or WAIT_OR_SKIP, WAIT1, WAIT2, each in a free even cycle two cycles
   after the last, the comparator on the beam two colour clocks ahead of the current line), so a
   WAIT whose words end a line is first compared on the next one: WAIT 255,$DE then WAIT $21,0
@@ -271,6 +271,22 @@ test builds both (`tests/test_host_engine.py`, emcc and node when installed).
   (not the renderer): the Copper's INTREQ writes that fell into an instruction crossing the frame's end (the CPU
   behind a blit) are requested at the roll with their own times, and PORTS / EXTER are set again after any INTREQ
   write while their CIA still asks (ICR & mask), as vAmiga's `Paula::setINTREQ` does.
+- 1.0.70, measured with `arek selftest display` (sprite 5 on lines $66-$69) and the emulator's register log: a Copper
+  write to a sprite's registers behind the line's sprite slots counts from its pixel on - SPRxDATA / SPRxDATB from
+  lowres pixel 2c + 2, SPRxPOS / SPRxCTL from 2c + 3 (c = the cycle of the write). A sprite whose first pixel lies
+  before it has loaded its shifter and keeps the line's picture; one that starts at or behind it shows the new words,
+  or nothing when disarmed; a start moved right behind a loaded picture draws the sprite a second time. `ard_spr_cb`
+  still gets the line's sprites as the slots left them (cycle $34). And the Copper's slots inside the bitplane
+  fetch: every even slot no plane takes, slot 4 of a fetch group included (it counted as taken below 6 planes - a
+  MOVE inside the fetch came 2-6 cycles late; 144 WAIT positions at 1-6 planes equal the emulator's now).
+- 1.0.70 with `-DHOST_IPL_MODEL=1`: a read of a running CIA timer's counter gives the emulator's value (the model's
+  count + 2, never 0: the latch shows for two E cycles; a timer just started or loaded shows the latch) - 176 reads of
+  a boot program equal the emulator's; and the Copper's INTREQ write is requested at its own slot + 1 colour clock
+  (as a CPU write; `HOST_COP_LAT`). Measured on Turrican II's Copper handler (level 4-1, 26 frames): 18 entries on the
+  original's colour clock, the others within -2 .. +6 (the phase of the wait loop it interrupts), 25 of 26 values
+  read from CIA-A's timer equal. A game whose handler reads a counter or the beam needs the switch: without it an
+  interrupt is taken at the first instruction end after its event, also when that instruction sampled the level
+  before a bus cycle that then waited behind DMA.
 - 1.0.43: `host_init` starts from a clean host (`host_reset`, `ard_reset`): what the state does not carry - the frame
   count, the CIA timers, a pending blit, the field length, the renderer's registers and sprites - is as at the first
   start, so the page's restart repeats the first run (the native engine's `--twice` prints both hashes). Raw keys
@@ -403,4 +419,4 @@ change. The state a comparison starts from must be the original's at that frame,
 (`arek trace run --capture-at`, docs/HEADLESS.md), and the inputs of the original's run (`M` / `m` for port 0's
 button). Measured on SWIV's boot with `-DHOST_FLOPPY=1`, from the capture to the title (1 824 frames, 45 disk reads,
 the music's level 6 interrupts): 22 780 instruction times of 22 780 at 14 addresses, 1 687 863 of 1 687 863 at 28
-addresses over the first 600 frames. Not measured: the interrupts of the blitter, the audio channels and the Copper.
+addresses over the first 600 frames. Not measured: the interrupts of the blitter and the audio channels (the Copper's: Turrican II, 1.0.70 above).

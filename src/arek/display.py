@@ -21,8 +21,11 @@ red / green modified from the previous pixel, the chain starting at COLOR00 on e
 (two pixels per lowres pixel, 2 words per 8-CCK block, 4 planes, the Copper's slots in 4-CCK blocks;
 ``Frame.hires[v]`` holds the 912 hires pixels of such a line and ``to_screenshot`` uses them, the
 lowres ``pixels`` hold the average of each pair); sprite DMA only with DMACON SPREN and DMAEN (when
-DMACON is known; a Copper write to DMACON sets or clears its bits); with 6 lowres planes the Copper
-gets both free even slots of a fetch group; the Copper runs vAmiga's state machine (as the bus
+DMACON is known; a Copper write to DMACON sets or clears its bits); the Copper gets every even slot of a
+fetch group no plane takes (1.0.70: slot 4 too at any number of planes - measured on 24 WAIT positions x
+1-6 planes); a Copper write to a sprite's registers behind the line's slots counts from its pixel on
+(1.0.70: SPRxDATA / SPRxDATB 2c + 2, SPRxPOS / SPRxCTL 2c + 3; a sprite that starts before it keeps
+the line's picture); the Copper runs vAmiga's state machine (as the bus
 model does): FETCH, MOVE or WAIT_OR_SKIP, WAIT1, WAIT2, each in a free even cycle two cycles after
 the last, the comparator on the beam two colour clocks ahead of the current line, so a WAIT whose
 words end a line is first compared on the next one (WAIT 255,$DE then WAIT $21,0 passes on line
@@ -151,7 +154,7 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES, cd
     bpl = [0] * 6
     spr = [_Sprite() for _ in range(8)]
     lc = [cop1lc & 0x1ffffe, cop2lc & 0x1ffffe]
-    writes, pixels = [], []
+    writes, pixels, sprw = [], [], []
 
     def write(off, v, line, cck):
         if off == 0x096:                                # DMACON: bit 15 sets, else clears
@@ -167,6 +170,7 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES, cd
             s.pt = (s.pt & 0xffff) | (v & 0x1f) << 16 if not off & 2 else (s.pt & 0x1f0000) | (v & 0xfffe)
         elif 0x140 <= off <= 0x17e:
             s, kind = spr[(off - 0x140) >> 3], off & 6
+            sprw.append(off - 0x140)                    # 1.0.70: the line being drawn takes it from the write's pixel on
             if kind == 0:
                 s.pos = v
             elif kind == 2:                             # a CTL write sets VSTOP and disarms Denise
@@ -357,9 +361,14 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES, cd
                 if hr:
                     busy = _PLANE_AT_HR[(c - ddfstrt) & 3] <= nplanes
                 else:
-                    pos = (c - ddfstrt) & 7                     # with 6 planes the Copper gets both free even slots
-                    busy = _PLANE_AT[pos] <= nplanes or (pos == 4 and v >= 1 and nplanes < 6)
+                    # 1.0.70: the even slots no plane takes are the Copper's - 0 and 4 always, 2 below 6 planes, 6 below 5
+                    # (measured: 24 WAIT positions x 1-6 planes against the emulator's register log; slot 4 counted as
+                    # taken below 6 planes before, so a MOVE inside the fetch came 2-6 colour clocks late)
+                    busy = _PLANE_AT[(c - ddfstrt) & 7] <= nplanes
+            del sprw[:]
             copper(v, c, busy)
+            if sprw and c >= 0x34:                      # 1.0.70: a write to a sprite's registers behind the line's slots
+                _sprite_change(sline, sprw[0] >> 3, spr[sprw[0] >> 3], 2 * c + (2 if sprw[0] & 4 else 3))
             for h in (2 * c, 2 * c + 1):
                 if hr and fetch == 1:
                     if hline is None:
@@ -380,6 +389,26 @@ def render(ram, cop1lc=None, chips=None, colors=None, regs=None, lines=LINES, cd
         if hline is not None:
             hires[v] = hline
     return Frame(pixels, writes, {i * 2: x for i, x in enumerate(r) if x}, hires)
+
+
+def _sprite_change(sline, k, s, p):
+    """A Copper write to sprite ``k``'s registers behind the line's slots, as Denise takes it (vAmiga's
+    ``sprChanges``; Turrican II KIT-GAP 36): the write counts from lowres pixel ``p`` on (2c + 2 for
+    SPRxDATA / SPRxDATB, 2c + 3 for SPRxPOS / SPRxCTL). A sprite that starts before ``p`` has loaded its
+    shifter and keeps this line's picture; one that starts at or behind it shows the new words - or nothing
+    when the write disarmed it or moved its start back before ``p``; a start moved further right behind a
+    picture already loaded draws the sprite a second time on the line."""
+    hs = s.hstart() + 1
+    on = s.armed and hs >= p
+    new = (k, hs, s.da, s.db, (s.ctl >> 7) & 1)
+    at = max((i for i, x in enumerate(sline) if x[0] == k), default=None)
+    if at is not None and sline[at][1] >= p:            # not loaded yet
+        if on:
+            sline[at] = new
+        else:
+            del sline[at]
+    elif on:
+        sline.insert(sum(1 for x in sline if x[0] <= k), new)
 
 
 def _avg12(a, b):

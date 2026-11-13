@@ -821,3 +821,60 @@ def test_ports_and_exter_follow_the_cias_interrupt_lines(tmp_path):
             L3: L3_H}
     w = run(tmp_path, prog, 3, [MAIN, L3])
     assert [w(a) & 0x2000 for a in (0x4010, 0x4012, 0x4014, 0x4016)] == [0x2000, 0x2000, 0x2000, 0]
+
+
+# 1.0.70: a program that reads CIA-A timer A's low byte 176 times into $60000 - A: continuous, latch 20, started with FORCE
+# LOAD, 48 reads; B: stopped (2 reads), loaded by the high byte (1), started without FORCE LOAD (45); C: one-shot, latch 9,
+# started by the high byte, 32 reads three NOPs apart; D: continuous, latch 6, 24 reads each beside a read of the ICR.
+# CIA_READS_EMU: what the emulator's RAM holds after it (the program as a boot block, VAHeadless 899da5d, 2026-11-13).
+CIA_READS = (
+    '4df900dff0003d7c7fff009a3d7c7fff009643f90006000013fc007f00bfed0113fc000000bfee0113fc001400bfe401'
+    '13fc000000bfe50113fc001100bfee01702f12f900bfe40151c8fff813fc000000bfee0112f900bfe40112f900bfe401'
+    '13fc000000bfe50112f900bfe40113fc000100bfee01702c12f900bfe40151c8fff813fc000800bfee0113fc000900bf'
+    'e40113fc000000bfe501701f12f900bfe4014e714e714e7151c8fff213fc000000bfee01123900bfed0113fc000600bf'
+    'e40113fc000000bfe50113fc001100bfee01701712f900bfe40112f900bfed0151c8fff2')
+CIA_READS_EMU = bytes.fromhex(
+    '14100c080414110d090501120e0a0602130f0b070314100c080414110d090501120e0a0602130f0b070314100c080414'
+    '0e0e14130f0b070314100c080414110d090501120e0a0602130f0b070314100c080414110d090501120e0a0602130f0b'
+    '090409090909090909090909090909090909090909090909090909090909090906000601060106010601060106010601'
+    '0601060106010601060106010601060106010601060106010601060106010601')
+
+
+def test_a_cia_counter_reads_as_the_emulators_with_the_model(tmp_path):
+    """1.0.70 (Turrican II KIT-GAP 37): the game reads the low byte of CIA-A's free-running timer A in its Copper handler
+    as a random number for the screen's shake. With -DHOST_IPL_MODEL=1 the handler read in the original's colour clock
+    and got a value two lower: the model counts from the write that starts a timer, the 8520 two E cycles later - right
+    for the interrupt, wrong for a read. A running counter reads two higher than the model's, never 0 (the latch is
+    there for two cycles: 2 1 20 20 19), a timer just started or loaded shows its latch. 57 of the 176 reads were the
+    emulator's before."""
+    prog = {MAIN: CIA_READS + '4df900dff000' '3d7cc020009a' + WAIT_VBL, L3: L3_H}
+    run(tmp_path, prog, 4, [MAIN, L3], defines=['HOST_IPL_MODEL=1'])
+    got = (tmp_path / 'out.bin').read_bytes()[0x60000:0x60000 + len(CIA_READS_EMU)]
+    bad = [(i, got[i], CIA_READS_EMU[i]) for i in range(len(got)) if got[i] != CIA_READS_EMU[i]]
+    assert not bad, (len(bad), bad[:8])
+    assert CIA_READS_EMU[:6] == bytes([20, 16, 12, 8, 4, 20]) and 0 not in CIA_READS_EMU[:48]   # the counter never reads 0
+
+
+def test_a_copper_interrupt_has_the_coppers_time_with_the_model(tmp_path, monkeypatch):
+    """1.0.70, -DHOST_IPL_MODEL=1: the Copper's INTREQ write is Paula's request a colour clock after its slot (as a CPU
+    write; vAmiga's pokeINTREQ is the same for both) - before, the request had the time of the instruction boundary
+    that noticed it, so the instruction that sampled the level between the two was not interrupted. The mechanism:
+    HOST_COP_LAT moves the request, and the handler's entry with it."""
+    prog = {MAIN: '4df900dff000'
+                  '2d7c000018000080'      # move.l #$1800,$80(a6)       COP1LC
+                  '3d400088'              # move.w d0,$88(a6)           COPJMP1
+                  '3d7c82800096'          # move.w #$8280,$96(a6)       DMACON: DMAEN COPEN
+                  '3d7cc010009a'          # move.w #$c010,$9a(a6)       INTENA: master, COPER
+                  + WAIT_VBL,
+            L3: '33f900dff00600004010'    # move.w $dff006,$4010       VHPOSR at the entry
+                '52784002' '33fc001000dff09c' '4e73',
+            0x1800: '5041fffe' '009c8010' 'fffffffe'}                  # WAIT line $50, $40; INTREQ <- SET COPER
+    at = []
+    for lat in ('1', '41'):
+        monkeypatch.setenv('HOST_COP_LAT', lat)
+        d = tmp_path / lat
+        d.mkdir()
+        w = run(d, prog, 6, [MAIN, L3], defines=['HOST_IPL_MODEL=1'])
+        assert w(0x4002) >= 4 and w(0x4010) >> 8 == 0x50, (w(0x4002), hex(w(0x4010)))
+        at.append(w(0x4010) & 0xff)
+    assert 0x44 + 22 <= at[0] <= 0x44 + 22 + 30 and 28 <= at[1] - at[0] <= 52, at   # entry: 44 clocks after the request reached the pins and an instruction ended

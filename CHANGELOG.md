@@ -3,6 +3,37 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.70 (2026-11-13)
+
+- renderers (C and Python): a Copper write to a sprite's registers behind the line's sprite slots counts from its
+  pixel on, as Denise takes it - SPRxDATA / SPRxDATB from lowres pixel 2c + 2 (c = the write's cycle), SPRxPOS /
+  SPRxCTL from 2c + 3. A sprite that starts before that pixel keeps the line's picture, one that starts at or behind
+  it shows the new words (or nothing), a start moved right behind a loaded picture draws the sprite twice. The
+  line's sprites were taken once, in cycle $34: a Copper that zeroes SPRxDATA in mid-line left the sprite on that line
+  - Turrican II level 1-2, the first line of the status bar (the rest of KIT-GAP 36): 12 frames had 10-54 pixels of
+    a sprite there; now 561 of 563 pictures equal the original's (549 before; the other 2 are the run's first frames)
+- renderers: inside the bitplane fetch the Copper gets every even slot no plane takes - slot 4 of a fetch group too.
+  It counted as taken below 6 planes, so a MOVE behind a WAIT inside the fetch came 2 cycles late at 18 of 24
+  positions with 1-4 planes and 2-6 cycles late at all 24 with 5
+  - measured on the emulator's register log: WAIT at $41-$6F, 1-6 planes, 144 positions - all equal now
+- host with `-DHOST_IPL_MODEL=1`: a running CIA timer's counter reads as the emulator's - two higher than the model's
+  count (the model counts from the write that starts a timer, the 8520 two E cycles later), never 0 (the latch is
+  there for two cycles: 2 1 20 20 19), the latch while a timer just started or loaded does not count yet. The
+  interrupt's time was right, a read was two low
+  - measured against the emulator with a boot program: 176 reads of CIA-A timer A (continuous with and without FORCE
+    LOAD, one-shot, stopped, beside ICR reads) - 57 equal before, 176 now
+  - Turrican II (KIT-GAP 37; it reads the timer's low byte in its Copper handler as the random number of the
+    screen's shake), level 4-1, 26 frames: without the switch the handler is entered 2-10 colour clocks early (an
+    interrupt is taken at the first instruction end; the original's wait loop had sampled the level before a bus
+    cycle that stood 89 slots behind the Copper and the bitplanes) and 10 of 26 shake values are the original's; with
+    the switch and this release 18 entries of 26 fall on the original's colour clock (the rest within -2 .. +6), the
+    instruction after the read on 19 of 20, and 25 of 26 values are equal
+- host with the switch: the Copper's INTREQ write is Paula's request a colour clock after its slot, as a CPU write
+  is (the emulator runs the same code for both; not measured separately) - the request had the time of the
+  instruction end that noticed it. `HOST_COP_LAT` in the environment tries other values
+- `arek selftest display`: sprite 5's registers written in mid-line on three lines (SPR5DATA at the sprite's first
+  pixel and 4 pixels behind it, SPR5CTL one pixel behind it): 32 of 204 060 pixels differed, now 0 in both renderers
+
 ## 1.0.69 (2026-11-13)
 
 - host: a Copper interrupt requested while the CPU stands behind a blit across the frame's end is served. The

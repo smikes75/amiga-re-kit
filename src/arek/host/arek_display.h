@@ -12,8 +12,8 @@
  *   DMAEN (DMACON known; a Copper write to DMACON sets or clears bits) or, on a line with bitplane DMA, from DDFSTRT - 1
  *   on (DDFSTRT $24: sprite 3 gets one word, sprites 4-7 none; the missing word keeps the old register - a striped
  *   sprite and a vertical line on the screen, as the emulator shows), and a sprite whose VSTOP passes while its slots
- *   are not served keeps showing its last data; sprites only inside the display window; with 6 lowres planes the Copper
- *   gets both free even slots of a fetch group; the Copper runs vAmiga's state machine (FETCH, MOVE / WAIT_OR_SKIP, WAIT1,
+ *   are not served keeps showing its last data; sprites only inside the display window; the Copper
+ *   gets every even slot of a fetch group no plane takes (1.0.70: slot 4 too, at any number of planes); the Copper runs vAmiga's state machine (FETCH, MOVE / WAIT_OR_SKIP, WAIT1,
  *   WAIT2 in free even cycles two apart, the comparator on the beam two CCK ahead of the current line - G36);
  *   HAM6 bits 4-5 = palette / blue / red / green from the previous pixel, the chain starting at COLOR00 on every line;
  *   hires: 2 words per 8-CCK block, 4 planes, the first pixel at 2 * DDFSTRT + 9, the Copper's slots in 4-CCK blocks.
@@ -61,6 +61,8 @@ static int ARD_NEXT = 0;                               /* the next line to draw 
 static uint8_t ARD_RGB[ARD_SHOT_W * ARD_SHOT_H * 3];
 static uint8_t ARD_PAL[0x2000][3];
 static int ARD_READY = 0;
+static int ARD_SPRW = -1;                             /* 1.0.70: the last write to a sprite's POS / CTL / DATA / DATB (offset - $140), -1 = none */
+#define ARD_SL_MAX 24                                  /* the sprites of one line: 8 and the ones a mid-line write starts again */
 static int ARD_SPR_FULL = 0;                           /* 1 = sprites as if the bitplanes took no slot; 0 = the slot rule like the emulator */
 static void (*ard_line_cb)(int v) = 0;
 static void (*ard_spr_cb)(int v, const ArdSpriteLine *sl, int n) = 0;
@@ -123,6 +125,7 @@ static void ard_write(uint32_t off, uint16_t v) {
             if (kind == 0) s->pos = v; else if (kind == 2) { s->ctl = v; s->armed = 0; s->vstop = ARD_VSTOP(s); }   /* a CTL write sets VSTOP, disarms */
             else if (kind == 4) { s->da = v; s->armed = 1; } else s->db = v;   /* 1.0.69 (Turrican II KIT-GAP 36): a write to SPRxDATA arms Denise with that word, SPRxDATB sets the other - a Copper that zeroes them behind a DMACON SPREN off leaves no stripe */
         }
+        ARD_SPRW = (int)(off - 0x140);                 /* 1.0.70: the line being drawn takes it from the write's pixel on (ard_sprite_change) */
     } else if (off == 0x080) ARD_LC[0] = (ARD_LC[0] & 0xffff) | ((uint32_t)(v & 0x1f) << 16);
     else if (off == 0x082) ARD_LC[0] = (ARD_LC[0] & 0x1f0000) | (v & 0xfffe);
     else if (off == 0x084) ARD_LC[1] = (ARD_LC[1] & 0xffff) | ((uint32_t)(v & 0x1f) << 16);
@@ -279,9 +282,27 @@ static int ard_sprite_lines(ArdSprite *spr, ArdSpriteLine *sl) {   /* the armed 
         sl[ns].k = k; sl[ns].hs = (((s->pos & 0xff) << 1) | (s->ctl & 1)) + 1; sl[ns].da = s->da; sl[ns].db = s->db; sl[ns].att = (s->ctl >> 7) & 1; ns++; }
     return ns;
 }
+/* 1.0.70 (Turrican II KIT-GAP 36, the bar's first line): a Copper write to a sprite's registers behind the line's slots, as
+ * Denise takes it (vAmiga's sprChanges): SPRxDATA / SPRxDATB count from lowres pixel 2c + 2 on, SPRxPOS / SPRxCTL from 2c + 3.
+ * A sprite whose start lies before that pixel has loaded its shifter and keeps this line's picture; one that starts at or
+ * behind it shows the new words - or nothing when the write disarmed it or moved its start back before the pixel; a start
+ * moved further right behind a picture already loaded draws the sprite a second time on the line. */
+static int ard_sprite_change(ArdSpriteLine *sl, int ns, int k, int p) {
+    ArdSprite *s = &ARD_SPR[k]; int at = -1, ins = 0;
+    for (; ins < ns && sl[ins].k <= k; ins++) if (sl[ins].k == k) at = ins;
+    int hs = (((s->pos & 0xff) << 1) | (s->ctl & 1)) + 1, on = s->armed && hs >= p;
+    if (at >= 0 && sl[at].hs >= p) {                   /* not loaded yet */
+        if (on) { sl[at].hs = hs; sl[at].da = s->da; sl[at].db = s->db; sl[at].att = (s->ctl >> 7) & 1; return ns; }
+        memmove(&sl[at], &sl[at + 1], (size_t)(ns - at - 1) * sizeof *sl); return ns - 1;
+    }
+    if (!on || ns >= ARD_SL_MAX) return ns;
+    memmove(&sl[ins + 1], &sl[ins], (size_t)(ns - ins) * sizeof *sl);
+    sl[ins].k = k; sl[ins].hs = hs; sl[ins].da = s->da; sl[ins].db = s->db; sl[ins].att = (s->ctl >> 7) & 1;
+    return ns + 1;
+}
 static void ard_line(int v) {
     if (ard_line_cb) ard_line_cb(v);
-    ArdSpriteLine sl[8]; int ns = 0;
+    ArdSpriteLine sl[ARD_SL_MAX]; int ns = 0;
     uint16_t ham = ARD_R[0x180 >> 1] & 0xfff;           /* the HAM chain starts the line at COLOR00 */
     ARD_HR[v] = 0;
     for (int k = 0; k < 8; k++) { ard_sprite_line(&ARD_SPR[k], v); ard_sprite_line(&ARD_SPRI[k], v); }
@@ -323,9 +344,10 @@ static void ard_line(int v) {
             int busy = 0;
             if (!(c & 1) && fetch == 1 && ddfstrt <= c && c < fetch_end) {
                 if (hr) busy = ARD_PLANE_AT_HR[(c - ddfstrt) & 3] <= nplanes;
-                else { int pos = (c - ddfstrt) & 7; busy = ARD_PLANE_AT[pos] <= nplanes || (pos == 4 && v >= 1 && nplanes < 6); }   /* 6 planes: both free even slots */
+                else busy = ARD_PLANE_AT[(c - ddfstrt) & 7] <= nplanes;   /* 1.0.70: the even slots no plane takes are the Copper's (0 and 4 always; slot 4 counted as taken below 6 planes before - a MOVE inside the fetch came 2-6 CCK late) */
             }
-            ard_copper(v, c, busy);
+            ARD_SPRW = -1; ard_copper(v, c, busy);
+            if (ARD_SPRW >= 0 && c >= 0x34) ns = ard_sprite_change(sl, ns, ARD_SPRW >> 3, 2 * c + ((ARD_SPRW & 4) ? 2 : 3));
         }
         for (int h = 2 * c; h <= 2 * c + 1; h++) {
             if (hr && fetch == 1) {

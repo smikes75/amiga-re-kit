@@ -66,6 +66,7 @@ static double H_IRQ_POLL = 1, H_IPL_PIPE = 3;
 #else
 static double H_IRQ_POLL = -1, H_IPL_PIPE = 3;
 #endif
+static double H_COP_LAT = 1;             /* colour clocks from the Copper's INTREQ write to Paula's request (HOST_COP_LAT to try others) */
 static double H_POLL_T = 0, H_EVT_T = -1e30, H_PEND_T[7]; static uint8_t H_PEND_ON[7], H_PEND_INIT = 0;
 static void h_irq_mark(void);
 #ifdef HOST_IPL_MODEL
@@ -87,7 +88,7 @@ static long   H_TICKS = 0;              /* instructions run (1.0.51: which acces
 static int    H_JDEPTH = 0; static uint8_t H_JLEV[8];   /* 1.0.48: handlers entered by a jump (HOST_VECTOR_JUMP), by level */
 static uint8_t H_CIAA_PRA = 0xfe;        /* $BFE001: bits 6/7 = fire port 0/1 (0 = pressed), bit 1 = LED output */
 static uint8_t H_CIAA_SDR = 0, H_CIAA_ICR = 0, H_CIAA_DDRA = 0x03, H_CIAB_ICR = 0;
-typedef struct { uint16_t latch, cnt; uint8_t cr; int64_t e0; } HCiaTimer;   /* e0 in E ticks: 64 bits (G47: a long is 32 bits in wasm32) */   /* e0: the E tick of the last update */
+typedef struct { uint16_t latch, cnt; uint8_t cr, fresh; int64_t e0; } HCiaTimer;   /* fresh (1.0.70): started or loaded and not run out since - h_cia_seen */   /* e0 in E ticks: 64 bits (G47: a long is 32 bits in wasm32) */   /* e0: the E tick of the last update */
 typedef struct { HCiaTimer t[2]; uint8_t mask; } HCia;
 static HCia H_CIA[2] = { { { { 0xffff, 0xffff, 0, 0 }, { 0xffff, 0xffff, 0, 0 } }, 0 }, { { { 0xffff, 0xffff, 0, 0 }, { 0xffff, 0xffff, 0, 0 } }, 0 } };   /* 0 = CIA-A, 1 = CIA-B */
 static int    H_LED_OFF = -1;            /* CIA-A PRA bit 1 as the game wrote it: 1 = LED off = filter off; -1 = not yet */
@@ -129,7 +130,7 @@ static void h_cia_run(int i, int k) {
     if (now <= t->e0) return;                              /* 1.0.52: also a timer that starts counting later (H_CIA_START) */
     int64_t n = now - t->e0; t->e0 = now;
     if (n <= t->cnt) { t->cnt = (uint16_t)(t->cnt - n); return; }
-    *h_cia_icr(i) |= (uint8_t)(1 << k); h_cia_raise(i);
+    *h_cia_icr(i) |= (uint8_t)(1 << k); h_cia_raise(i); t->fresh = 0;
     if (t->cr & 8) { t->cr &= ~1; t->cnt = t->latch; return; }   /* one-shot: stops */
     int64_t per = (int64_t)t->latch + 1, m = (n - t->cnt - 1) % per;
     t->cnt = (uint16_t)(t->latch - m);
@@ -155,7 +156,7 @@ static void host_cia_state(const unsigned v[16]) {
             /* 1.0.56: the emulator's counter is two E cycles ahead of the model's (which counts from the write that starts a
              * timer; the 8520 from two cycles later) - a running timer of a capture underflowed two cycles late (SWIV, a
              * capture in the game: the first level 6 entry 2 colour clocks late, the next ones right) */
-            t->e0 = h_eticks() - ((H_CIA_SYNC && (t->cr & 1)) ? 2 : 0); }
+            t->e0 = h_eticks() - ((H_CIA_SYNC && (t->cr & 1)) ? 2 : 0); t->fresh = 0; }
         H_CIA[i].mask = (uint8_t)(c[6] & 0x7f); *h_cia_icr(i) = (uint8_t)(c[7] & 0x7f); }
     H_CIA_DUE = 0; h_cia_due();
 }
@@ -275,6 +276,7 @@ static void host_init(double t0) {
     if (getenv("HOST_CIA_START")) H_CIA_START_N = atoi(getenv("HOST_CIA_START"));
     if (getenv("HOST_CIA_IRQ")) H_CIA_IRQ_LAT = atof(getenv("HOST_CIA_IRQ"));
     if (getenv("HOST_IPL_PIPE")) H_IPL_PIPE = atof(getenv("HOST_IPL_PIPE"));
+    if (getenv("HOST_COP_LAT")) H_COP_LAT = atof(getenv("HOST_COP_LAT"));
     H_VBL_LAT = H_IRQ_POLL >= 0 ? 0 : 10;
     if (getenv("HOST_VBL_LAT")) H_VBL_LAT = atof(getenv("HOST_VBL_LAT"));
     if (getenv("HOST_IRQ_PRE")) H_IRQ_PRE = (uint32_t)atoi(getenv("HOST_IRQ_PRE"));
@@ -377,6 +379,19 @@ void hw_write_hook(uint32_t off, uint32_t v) {
  * VBL handler against vAmiga: bclr #6,$BFEE01 20 colour clocks (the old rule: 17), move.b $BFED01,d0 12 (10).
  * Without the switch: the rule fitted on three instructions (H_CIA_A + ((H_CIA_B - phase) mod 10) clocks). */
 static long H_CIA_RD_N = -1, H_CIA_UNDO_N = -1;
+/* 1.0.70 (Turrican II KIT-GAP 37), with the model: the counter a READ sees. The model counts from the write that starts a
+ * timer, the emulator's 8520 two E cycles later, so a running counter reads two higher than the model's - and it never
+ * reads 0: in the cycle it would, the latch is there already and stays two cycles (latch 20: ... 2 1 20 20 19 ...). A
+ * timer just started or loaded shows its latch until it counts. Measured against the emulator: 176 reads of timer A
+ * (continuous with and without FORCE LOAD, one-shot, stopped, beside ICR reads) - 57 were equal, now all; a game that
+ * reads the low byte of a free-running timer as a random number (Turrican II's shake) got another one. */
+static uint16_t h_cia_seen(const HCiaTimer *t) {
+    if (!H_CIA_SYNC || !(t->cr & 1)) return t->cnt;
+    uint32_t x = (uint32_t)t->cnt + 2, l = t->latch;
+    if (x <= l) return (uint16_t)x;
+    if (x == l + 1 || t->fresh || l < 2) return t->latch;
+    return (uint16_t)(x - l - 1);
+}
 static void h_cia_wait2(int write) {
     if (H_CIA_SYNC) {
         int rmw = write && H_CIA_RD_N == H_TICKS;                              /* this instruction read a CIA before: its write comes last */
@@ -404,7 +419,7 @@ uint8_t cia_read_hook(uint32_t a) {
 #endif
     int i, reg = h_cia_reg(a, &i);
     if (i == 0 && reg >= 0) hkb_run(h_abs());
-    if (reg >= 4 && reg <= 7) { h_cia_run(i, (reg - 4) >> 1); h_cia_due(); HCiaTimer *t = &H_CIA[i].t[(reg - 4) >> 1]; return (uint8_t)((reg & 1) ? t->cnt >> 8 : t->cnt); }
+    if (reg >= 4 && reg <= 7) { h_cia_run(i, (reg - 4) >> 1); h_cia_due(); uint16_t c = h_cia_seen(&H_CIA[i].t[(reg - 4) >> 1]); return (uint8_t)((reg & 1) ? c >> 8 : c); }
     if (reg == 13) { h_cia_run(i, 0); h_cia_run(i, 1); h_cia_due(); uint8_t *icr = h_cia_icr(i), r = (uint8_t)(*icr | ((*icr & H_CIA[i].mask) ? 0x80 : 0)); *icr = 0; return r; }
     if (reg == 14 || reg == 15) { int k = reg - 14; h_cia_run(i, k); h_cia_due(); return H_CIA[i].t[k].cr; }
     switch (a) {
@@ -429,13 +444,13 @@ void cia_write_hook(uint32_t a, uint8_t v) {
     int i, reg = h_cia_reg(a, &i);
     if (reg >= 4 && reg <= 7) {                         /* the latch; the high byte loads a stopped timer (and starts a one-shot) */
         int k = (reg - 4) >> 1; HCiaTimer *t = &H_CIA[i].t[k]; h_cia_run(i, k);
-        if (reg & 1) { t->latch = (uint16_t)((t->latch & 0xff) | (v << 8)); if (!(t->cr & 1)) { t->cnt = t->latch; if (t->cr & 8) { t->cr |= 1; t->e0 = h_eticks() + H_CIA_START + H_CIA_SYNC; } } }   /* 1.0.55: a start that also loads counts one E cycle later (vAmiga: the load clears CountA2) */
+        if (reg & 1) { t->latch = (uint16_t)((t->latch & 0xff) | (v << 8)); if (!(t->cr & 1)) { t->cnt = t->latch; if (t->cr & 8) { t->cr |= 1; t->fresh = 1; t->e0 = h_eticks() + H_CIA_START + H_CIA_SYNC; } } }   /* 1.0.55: a start that also loads counts one E cycle later (vAmiga: the load clears CountA2) */
         else t->latch = (uint16_t)((t->latch & 0xff00) | v);
     } else if (reg == 13) { if (v & 0x80) H_CIA[i].mask |= v & 0x7f; else H_CIA[i].mask &= (uint8_t)~v; h_cia_raise(i); }
     else if (reg == 14 || reg == 15) {                 /* control: START (0), ONESHOT (3), FORCE LOAD (4, not stored) */
         int k = reg - 14; HCiaTimer *t = &H_CIA[i].t[k]; h_cia_run(i, k);
-        if (v & 0x10) { t->cnt = t->latch; if (H_CIA_SYNC && (t->cr & 1)) t->e0 = h_eticks() + 1; }   /* a forced load skips a count */
-        if ((v & 1) && !(t->cr & 1)) t->e0 = h_eticks() + H_CIA_START + ((v & 0x10) ? H_CIA_SYNC : 0);
+        if (v & 0x10) { t->cnt = t->latch; t->fresh = 1; if (H_CIA_SYNC && (t->cr & 1)) t->e0 = h_eticks() + 1; }   /* a forced load skips a count */
+        if ((v & 1) && !(t->cr & 1)) { t->fresh = 1; t->e0 = h_eticks() + H_CIA_START + ((v & 0x10) ? H_CIA_SYNC : 0); }
         if (i == 0 && k == 0 && ((v ^ t->cr) & 0x40)) hkb_spline(!(v & 0x40), h_abs());   /* 1.0.65: the serial port's direction - the keyboard's handshake */
         t->cr = (uint8_t)(v & 0xef);
     }
@@ -482,8 +497,8 @@ static void host_events(void) {
          * request of line 236 was forgotten with the roll (4 interrupts served of the original's 6, the music 2 frames
          * late after every death). They are requested at their own times, so the instruction that ends the wait takes them */
         { ArekBus *cb = arek_glue_bus();
-          if (!H_COP_DONE && cb->cop_int >= 0) { h_irq_mark(); H_INTREQ |= 0x0010; H_COP_DONE = 1; H_EVT_T = H_PAULA.frame_base + cb->cop_int; h_irq_mark(); }
-          while (H_COP_IDX < cb->cop_irq_n) { h_irq_mark(); H_INTREQ |= cb->cop_irq[H_COP_IDX].bits; H_EVT_T = H_PAULA.frame_base + cb->cop_irq[H_COP_IDX].t; h_irq_mark(); H_COP_IDX++; } }
+          if (!H_COP_DONE && cb->cop_int >= 0) { h_irq_mark(); H_INTREQ |= 0x0010; H_COP_DONE = 1; H_EVT_T = H_PAULA.frame_base + cb->cop_int + H_COP_LAT; h_irq_mark(); }
+          while (H_COP_IDX < cb->cop_irq_n) { h_irq_mark(); H_INTREQ |= cb->cop_irq[H_COP_IDX].bits; H_EVT_T = H_PAULA.frame_base + cb->cop_irq[H_COP_IDX].t + H_COP_LAT; h_irq_mark(); H_COP_IDX++; } }
         if (H_OWN_DUMP) { fwrite(&H_FRAME, sizeof H_FRAME, 1, H_OWN_DUMP); fwrite(OWN, 1, (size_t)H_LINES * HOST_HPOS, H_OWN_DUMP); }
         arek_paula_run(&H_PAULA, H_PAULA.frame_base + len - 1e-9);
         ard_until(ARD_LINES);
@@ -514,8 +529,10 @@ static void host_events(void) {
     h_cia_poll();
     { double kd = hkb_due(); if (kd > -1e299 && kd <= h_abs()) hkb_run(h_abs()); }   /* 1.0.65: the keyboard's bytes reach the CIA when they are due */
     ArekBus *b = arek_glue_bus();
-    if (!H_COP_DONE && b->cop_int >= 0 && h_now() >= b->cop_int) { H_INTREQ |= 0x0010; H_COP_DONE = 1; }
-    while (H_COP_IDX < b->cop_irq_n && h_now() >= b->cop_irq[H_COP_IDX].t) { H_INTREQ |= b->cop_irq[H_COP_IDX].bits; H_COP_IDX++; }   /* 1.0.6: the Copper's other INTREQ bits (e.g. RBF: level 5) at their times*/
+    /* 1.0.70: with the model the request has the Copper's own time - its write lands a colour clock after its slot, as a CPU
+     * write does (vAmiga: the same pokeINTREQ) - not the time of the instruction boundary that noticed it */
+    if (!H_COP_DONE && b->cop_int >= 0 && h_now() >= b->cop_int) { h_irq_mark(); H_INTREQ |= 0x0010; H_COP_DONE = 1; H_EVT_T = H_PAULA.frame_base + b->cop_int + H_COP_LAT; h_irq_mark(); }
+    while (H_COP_IDX < b->cop_irq_n && h_now() >= b->cop_irq[H_COP_IDX].t) { h_irq_mark(); H_INTREQ |= b->cop_irq[H_COP_IDX].bits; H_EVT_T = H_PAULA.frame_base + b->cop_irq[H_COP_IDX].t + H_COP_LAT; h_irq_mark(); H_COP_IDX++; }   /* 1.0.6: the Copper's other INTREQ bits (e.g. RBF: level 5) at their times*/
     if (H_BLIT_PEND && !arek_bus_bbusy(b, h_now())) { H_INTREQ |= 0x0040; H_BLIT_PEND = 0; }   /* 1.0.5: the blit finished (as BBUSY sees it) */
 }
 

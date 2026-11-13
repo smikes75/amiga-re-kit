@@ -99,6 +99,22 @@ CASES = {
                                                   + [0x4807, 0xfffe, 0x096, 0x0020, 0x144, 0, 0x146, 0,
                                                      0x5007, 0xfffe, 0x148, 0x0070, 0x14c, 0xff00, 0x14e, 0x0000, 0x5407, 0xfffe, 0x14a, 0] + END,
                                                   PLANES[:2] + [sprite(0x20000, 0x40, 0x60, 0x120, [(0xffff, 0)] * 32)]),
+    # 1.0.70 (Turrican II KIT-GAP 36, the bar's first line): sprite 1 without DMA at pixel 194, its registers written by
+    # the Copper in mid-line (measured on the emulator: selftest display, lines $66-$69) - SPR1DATA in cycle $60 counts
+    # from pixel 194 (line $51 shows the new word), in cycle $62 from 198 (line $52 keeps the loaded word), SPR1CTL in
+    # cycle $60 from 195 (line $53 still shows the sprite); zeroed before its start (line $59) it shows nothing; SPR1POS
+    # moved right behind the loaded picture draws it a second time (line $5b), moved back it does not (line $5d)
+    'sprite registers written in mid-line': ram_with(with_colours(setup(2, con2=0x02, ptrs=[p for p, _ in PLANES[:2]]))
+                                                     + [0x5007, 0xfffe, 0x148, 0x0060, 0x14a, 0x0001, 0x14c, 0xff00, 0x14e, 0x0000,
+                                                        0x515f, 0xfffe, 0x14c, 0x00ff, 0x5261, 0xfffe, 0x14c, 0xf0f0, 0x535f, 0xfffe, 0x14a, 0x0001,
+                                                        0x5807, 0xfffe, 0x14c, 0xffff, 0x5941, 0xfffe, 0x14c, 0x0000,
+                                                        0x5a07, 0xfffe, 0x14c, 0xffff, 0x5b61, 0xfffe, 0x148, 0x0070,
+                                                        0x5c07, 0xfffe, 0x148, 0x0060, 0x5d61, 0xfffe, 0x148, 0x0050, 0x5e07, 0xfffe, 0x14a, 0] + END, PLANES[:2]),
+    # 1.0.70: Copper MOVEs inside the bitplane fetch at 4 and 5 planes (slot 4 of a fetch group is the Copper's)
+    'copper moves inside the fetch': ram_with(with_colours(setup(4, ptrs=[p for p, _ in PLANES[:4]]))
+                                              + [w for k, hp in enumerate(range(0x41, 0x71, 2)) for w in (((0x40 + k) << 8) | hp, 0xfffe, 0x180, 0x111 * (k % 15 + 1))]
+                                              + [0x6007, 0xfffe, 0x100, 0x5200]
+                                              + [w for k, hp in enumerate(range(0x41, 0x71, 2)) for w in (((0x62 + k) << 8) | hp, 0xfffe, 0x180, 0x111 * (k % 15 + 1))] + END, PLANES[:5]),
     'ddfstrt 24 with sprites 3 and 4': ram_with(with_colours(setup(3, con1=0x88, ddfstrt=0x24, ptrs=[p for p, _ in PLANES[:3]]))
                                                 + sprite_copper([0x20200, 0x20200, 0x20200, 0x20000, 0x20100]) + END,
                                                 PLANES[:3] + [sprite(0x20000, 0x40, 0x50, 0x180, [(0xf0f0, 0x0ff0)] * 16),
@@ -184,7 +200,9 @@ def test_ham6_hires_sprite_dma_and_six_planes_in_python():
     five = display.render(ram_with(with_colours(setup(5, ptrs=[p for p, _ in PLANES[:5]])) + [0x4007, 0xfffe, 0x180, 0x0f0, 0x4055, 0xfffe, 0x180, 0x00f] + END, PLANES[:5]), COP, regs={0x096: 0x83e0}).writes
     w6 = [w for w in six if w[0] == 0x40 and w[2] == 0x180 and w[3] == 0x00f][0]
     w5 = [w for w in five if w[0] == 0x40 and w[2] == 0x180 and w[3] == 0x00f][0]
-    assert (w6[1], w5[1]) == (0x5c, 0x5a)                                          # WAIT $54 (seen from $52, h + 2): 5 planes wake at $52 (slot of plane 6 free), 6 planes at $54
+    # WAIT $54 (seen from $52, h + 2): 5 planes wake at $52 (slot of plane 6 free), fetch in $54, MOVE behind plane 5's slot in $58
+    # (1.0.70: $5A before - slot 4 counted as taken; the emulator's register log has $58); 6 planes wake at $54
+    assert (w6[1], w5[1]) == (0x5c, 0x58)
 
 
 def test_sprite_dma_off_band_window_and_dmacon_writes_in_python():
@@ -277,3 +295,40 @@ def test_sprite_data_registers_written_by_the_copper_in_python():
     assert [own(v) for v in range(0x48, 0x50)] == [0] * 8        # zeroed: no stripe
     assert own(0x50) > 0 and own(0x53) > 0 and own(0x50) == own(0x53)   # armed by the write to SPR1DATA
     assert [own(v) for v in range(0x54, 0x60)] == [0] * 12       # disarmed by the write to SPR1CTL
+
+
+def test_sprite_registers_written_in_mid_line_in_python():
+    """1.0.70 (Turrican II KIT-GAP 36, the first line of the status bar): the game's Copper zeroes SPRxDATA / SPRxDATB
+    in cycles 120-148 of the line a sprite further right is still on; the renderer took the line's sprites in cycle $34
+    and showed the sprite one line longer than the emulator. A write counts from its pixel on (SPRxDATA / SPRxDATB
+    2c + 2, SPRxPOS / SPRxCTL 2c + 3): a sprite that starts before it keeps the line's picture."""
+    regs = {0x096: 0x83e0}
+    f = display.render(CASES['sprite registers written in mid-line'], COP, regs=regs).pixels
+    plain = display.render(ram_with(with_colours(setup(2, con2=0x02, ptrs=[p for p, _ in PLANES[:2]])) + END, PLANES[:2]), COP, regs=regs).pixels
+    xs = lambda v: [h for h in range(456) if f[v][h] != plain[v][h]]
+    run = lambda a, n: list(range(a, a + n))
+    assert xs(0x50) == run(194, 8)                               # $FF00 from the line start
+    assert xs(0x51) == run(202, 8)                               # $00FF written at the sprite's first pixel: this line
+    assert xs(0x52) == run(202, 8)                               # $F0F0 written 4 pixels behind it: the loaded word stays
+    assert xs(0x53) == run(194, 4) + run(202, 4)                 # ... and shows here; the CTL write came a pixel late
+    assert [xs(v) for v in range(0x54, 0x58)] == [[]] * 4        # disarmed
+    assert xs(0x58) == run(194, 16) and xs(0x59) == []           # zeroed before its start: nothing on that line
+    assert xs(0x5a) == run(194, 16)
+    assert xs(0x5b) == run(194, 16) + run(226, 16)               # the start moved right behind the picture: drawn twice
+    assert xs(0x5c) == run(194, 16)
+    assert xs(0x5d) == run(194, 16) and xs(0x5e) == []           # moved back before the write's pixel: once
+
+
+def test_the_copper_gets_every_even_slot_no_plane_takes():
+    """1.0.70: the cycle of a MOVE after a WAIT at 24 positions inside the bitplane fetch, as the emulator's register log
+    has it (selftest disk with the WAIT moved, 1-6 planes): 1-4 planes one cycle behind the WAIT's position, 5 planes
+    without slot 6, 6 planes without slots 2 and 6. Slot 4 counted as taken below 6 planes before - 18 of 24 positions
+    came 2 cycles late at 1-4 planes, all 24 by 2-6 cycles at 5."""
+    hps = list(range(0x41, 0x71, 2))
+    want = {5: [0x44, 0x44, 0x48, 0x4a, 0x4c, 0x4c, 0x50, 0x52, 0x54, 0x54, 0x58, 0x5a, 0x5c, 0x5c, 0x60, 0x62, 0x64, 0x64, 0x68, 0x6a, 0x6c, 0x6c, 0x70, 0x72],
+            6: [0x48, 0x48, 0x4c, 0x4c, 0x50, 0x50, 0x54, 0x54, 0x58, 0x58, 0x5c, 0x5c, 0x60, 0x60, 0x64, 0x64, 0x68, 0x68, 0x6c, 0x6c, 0x70, 0x70, 0x74, 0x74]}
+    for n in range(1, 7):
+        cop = setup(n, ptrs=[p for p, _ in PLANES[:n]]) + [w for k, hp in enumerate(hps) for w in (((0x40 + k) << 8) | hp, 0xfffe, 0x180, k + 1)] + END
+        fr = display.render(ram_with(cop, PLANES[:n]), COP, regs={0x096: 0x83c0})
+        got = [c for (line, c, off, v) in fr.writes if off == 0x180 and line >= 0x40]
+        assert got == want.get(n, [hp + 1 for hp in hps]), (n, [hex(c) for c in got])
