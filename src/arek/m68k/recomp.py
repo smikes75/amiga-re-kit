@@ -1561,7 +1561,15 @@ class Gen:
         L = ['{ int32_t off = %s + (%d) + %s; if (off < 0 || off %% %d) { unknown_call((uint32_t)off); %s } '
              'else switch (off / %d) {' % (ix, i.ea.disp, base, jt.stride, tail, jt.stride)]
         for k, t in enumerate(jt.targets):
-            L.append('  case %d: %s' % (k, empty if t is None else case(t)))
+            pre = ''
+            if self.timing and getattr(jt, 'slots', False):
+                # 1.0.71 (Turrican II KIT-GAP 37, the handler ran 4-38 colour clocks fast): the slot's own instruction -
+                # the bra (10 clocks, two prefetches) or the rts the 68000 runs between the jump and its target
+                slot = jt.table + k * jt.stride
+                si = decode(self.data, self.base, slot)
+                self.tab_insns.setdefault(slot, si)
+                pre = (self.tick(si) or '') + ' '
+            L.append('  case %d: %s%s' % (k, pre, empty if t is None else case(t)))
         L.append('  default: unknown_call((uint32_t)off); %s } }' % tail)
         return L
 
@@ -1733,7 +1741,7 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
         table, stride = _hex(table), int(stride)
         origin = p[5] if len(p) > 5 else None
         jt = JumpTable(jtab_targets(data, base, table, int(count), stride, kind), stride, table,
-                       None if origin in (None, 'an') else _hex(origin), base_reg=origin == 'an')
+                       None if origin in (None, 'an') else _hex(origin), base_reg=origin == 'an', slots=kind == 'bra')
         for site in sites.split(','):
             jtabs[_hex(site)] = jt
     ind = {}

@@ -211,6 +211,38 @@ def test_jump_table_of_bra_slots(tmp_path):
         assert mem[0x4000:0x4002].hex() == want, d0
 
 
+
+def test_jump_table_slots_count_their_own_clocks(tmp_path):
+    """1.0.71 (Turrican II KIT-GAP 37): a jump into a table of bra slots runs the slot's bra (10 clocks, two prefetches)
+    or rts (16) before the target. A translation with timing went from the jump straight to the target: the music
+    player's command dispatch lost 10 clocks a command, its interrupt handler ended 4-38 colour clocks early."""
+    entry = '4eb00000' '33c100004000' '4e75'
+    prog = code_at(entry) + '00' * (0x100 - 0x36)
+    prog += '6000ff1e' '4e750000' '6000ff26'
+    data = bytes.fromhex(prog + '4e75')
+    targets = jtab_targets(data, BASE, 0x1100, 3, 4, 'bra')
+    cyc = {}
+    for slots in (False, True):
+        flow = Flow(jtabs={0x1000: JumpTable(targets, 4, 0x1100, slots=slots)})
+        for d0 in (0, 4, 8):
+            logs = []
+            *_, mem = run(tmp_path, prog, {'a0': 0x1100, 'd0': d0, 'd1': 0x7777}, flow=flow, timing=True, logs=logs)
+            cyc[slots, d0] = int(logs[0].split('cycles ')[1].split()[0])
+    assert [cyc[True, d0] - cyc[False, d0] for d0 in (0, 4, 8)] == [10, 16, 10], cyc
+    from arek.m68k.recomp import flow_from_specs
+    flow = flow_from_specs(data, BASE, jtab=['1000:1100:3:4:bra'])          # the command line's spelling: a bra table has slots
+    assert flow.jtabs[0x1000].slots
+    src, _, _ = recomp.generate(data, BASE, auto=[BASE], flow=flow, timing=True, bus_table=True)
+    assert 'case 0: TICK(0x1100u, 10); ' in src and 'case 1: TICK(0x1104u, 16); ' in src and 'case 2: TICK(0x1108u, 10); ' in src
+    plain, _, _ = recomp.generate(data, BASE, auto=[BASE], flow=flow)
+    assert 'TICK(0x1100u' not in plain
+    # the slot has its row in the bus table (2 words: the bra.w with its two prefetches)
+    hook = '\nvoid tick_hook(M68 *m, uint32_t pc, uint32_t clocks) { (void)m; (void)clocks; if (pc == 0x1100u) { const uint8_t *r = bus_tab_row(pc); MEM[0x4010] = r[0]; MEM[0x4011] = 0x5a; } }\n'
+    *_, mem = run(tmp_path, prog, {'a0': 0x1100, 'd0': 0, 'd1': 0x7777}, flow=flow, timing=True, bus_table=True, pre_c='#define TICK_HOOK 1\n', extra_c=hook)
+    assert tuple(mem[0x4010:0x4012]) == (2, 0x5a)
+    assert not JumpTable(jtab_targets(data, BASE, 0x1100, 3, 4, 'bra'), 4, 0x1100).slots   # the class's default: as before
+
+
 def test_indirect_jsr_through_a_register(tmp_path):
     entry = '4e91' '33c100004000' '4e75'                   # jsr (a1) ; move.w d1,$4000 ; rts
     flow = Flow(indirect={0x1000: [0x1020, 0x1030]})

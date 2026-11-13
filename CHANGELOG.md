@@ -3,6 +3,18 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.71 (2026-11-13)
+
+- `arek recomp --timing`: a jump into a table of `bra` slots (`--jtab ...:bra`) counts the slot's own instruction -
+  the bra (10 clocks, two prefetches) or the rts (16) the 68000 runs between the jump and its target. The
+  translation went from the jump straight to the target and the slot's clocks and bus cycles were missing. A
+  translation must be regenerated to get them; nothing changes without `--timing`
+  - found on Turrican II (the rest of KIT-GAP 37): its music player dispatches every command through such a table,
+    so the Copper handler that calls it ended 4-38 colour clocks early. Level 4-1, 26 frames, host with
+    `-DHOST_IPL_MODEL=1`: the handler's end on the original's colour clock in 21 frames of 26 (1 before), its entry
+    in 20 (18), the main loop's next pass in 18 (1); without the switch the end is within -20 .. 0 (-48 .. -4)
+  - `decoder.JumpTable(..., slots=True)` for the class's users; the command line sets it for `bra` tables
+
 ## 1.0.70 (2026-11-13)
 
 - renderers (C and Python): a Copper write to a sprite's registers behind the line's sprite slots counts from its

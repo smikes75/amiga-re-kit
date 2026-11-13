@@ -618,12 +618,14 @@ class JumpTable:
     """``targets`` per slot (None = an rts slot), ``stride`` bytes per slot, ``table`` its
     address and ``origin`` the value of An at the jump (when the table starts below it);
     ``base_reg``: An is only known at run time (the program adds an offset to the table's
-    address), the slot is then (An - table + Dn) / stride."""
+    address), the slot is then (An - table + Dn) / stride. ``slots`` (1.0.71): every slot holds an
+    instruction (a ``bra`` table: bra.w / bra.s / rts) that the 68000 runs on the way to the target -
+    a translation with timing counts its clocks and bus cycles (it skipped them: 10 clocks a jump)."""
 
-    def __init__(self, targets, stride, table, origin=None, base_reg=False):
+    def __init__(self, targets, stride, table, origin=None, base_reg=False, slots=False):
         self.targets, self.stride, self.table = list(targets), stride, table
         self.origin = table if origin is None else origin
-        self.base_reg = base_reg
+        self.base_reg, self.slots = base_reg, slots
 
 
 def jtab_targets(data, base, table, count, stride, kind):
