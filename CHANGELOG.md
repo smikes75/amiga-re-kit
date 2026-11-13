@@ -3,6 +3,15 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.79 (2026-11-13)
+
+- wb-scene 2.16, `objects[].lead` (ms, optional): an object composed at the objects' time + lead from its own pair of
+  passes - the player nearer to the keys than the enemies (SWIV KIT-GAP 13: one latO 76 for the enemies' smoothness
+  cost the player 41 ms). In SWIV's page loop lead 36 on the player: reversal -> picture 50 -> 17 ms (engine 5 ms),
+  33 -> 0 ms (15 ms), the player's knocks of the old latency back, set 4 unchanged 0.116 / 0.055
+- `arek web smooth` 1.9: the key -> player probe waits for a standing player and a move in the key's direction (SWIV:
+  a respawn's blinking answered the old probe - 7-15 ms where the page had 39-80 ms)
+
 ## 1.0.78 (2026-11-13)
 
 - The page's latencies measured and simulated (SWIV: the helicopters' knocking in Enhanced was the page's timing, not

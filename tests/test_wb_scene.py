@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.15' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.16' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -715,3 +715,19 @@ def test_parts_of_a_group_move_as_one_piece():
     for one in r['b']:                                                                    # with it: the same distance in every display frame
         world = {tuple(x) for x in one if x[0] != 's'}; scr = {tuple(x) for x in one if x[0] == 's'}
         assert world == {(0.0, 0.0)} and scr == {('s', 0.0, 0.0)}, one
+
+
+def test_an_objects_lead_composes_it_nearer_to_now():
+    """2.16 (SWIV KIT-GAP 13): objects[].lead = ms - the object is composed at the objects' time + lead from its own pair of
+    passes; the others stay at the objects' time. Object 1 with lead 20 at 60 ms behind is where it is at 40 ms behind
+    without a lead (the next pass and the past-the-newest extrapolation included), object 2 is where it is at 60 ms;
+    without leads nothing changes."""
+    r = js("""(() => { const R = %s; const fr = R.build('next'), V = { W: 320, H: 200, S: 1 }, o = { passTime: true, extrapolateObjects: 1 };
+        const led = fr.map((f) => Object.assign({}, f, { objects: f.objects.map((ob) => (ob.id === 1 ? Object.assign({}, ob, { lead: 20 }) : ob)) }));
+        const out = [];
+        for (let T = 600; T < 2000; T += 1000 / 60) { const vis = (a) => a.filter((f) => f.t <= T);
+            const a = S.compose(vis(led), T - 60, V, o, null), b = S.compose(vis(fr), T - 40, V, o, null), c = S.compose(vis(fr), T - 60, V, o, null);
+            const x = (cmp, id) => cmp.objs.find((e) => e.o.id === id).x, y = (cmp, id) => cmp.objs.find((e) => e.o.id === id).y;
+            out.push([x(a, 1) - x(b, 1), Math.abs(x(a, 2) - x(c, 2)) + Math.abs(y(a, 2) - y(c, 2)), x(c, 1) - x(b, 1)]); }
+        return { lead: Math.max(...out.map((v) => Math.abs(v[0]))), other: Math.max(...out.map((v) => Math.abs(v[1]))), apart: Math.max(...out.map((v) => Math.abs(v[2]))) }; })()""" % RHYTHM)
+    assert r['lead'] < 1e-9 and r['other'] < 1e-9 and r['apart'] > 1, r

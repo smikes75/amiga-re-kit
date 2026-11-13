@@ -45,6 +45,7 @@
 // for a frame after the camera stopped or turned, 0.2-0.8 px forth and back); stopped = the newest value held as long as the one
 // before it, so a camera that moves every few frames is carried within its own cadence as before.
 // 2.15 kit 1.0.76 - objects[].group: a part without a pair moves with its group (SWIV: a helicopter drawn in one or two parts split)
+// 2.16 kit 1.0.79 - objects[].lead: an object composed at tvO + lead (SWIV: latO 76 for the enemies' smoothness cost the player 41 ms)
 // 2.14 kit 1.0.75 - objMean: an object's world position as the mean over its passes (SWIV: the game's own uneven steps)
 // 2.13 kit 1.0.68 - passTime and rec.next (SWIV: a pass computed every 2 frames and shown after 3, 1, 3, 1 frames - an object's even
 // steps came out as a double step and a stand): the objects' passes on the axis of the game's computation, and the pass the game
@@ -101,7 +102,10 @@
 //                                        the point of the image that stays at (x + ox, y + oy)
 //                                        run (2.14, optional, any value) = objMean's window does not cross a change of it;
 //                                        group (2.15, optional, any value) = the parts of one thing: a part without a pair takes
-//                                        the motion of a paired part of the same group (see groupMotion)
+//                                        the motion of a paired part of the same group (see groupMotion);
+//                                        lead (2.16, optional, ms > 0) = composed at the objects' time + lead from its own pair of
+//                                        passes (past the newest pass by extrapolateObjects): the player and its shots nearer to
+//                                        the keys than the enemies (SWIV KIT-GAP 13); give it to every part of a group alike
 //     sprites: [{ k, h, idx, x, y, screen, id }],   hardware sprites of this frame: k = sprite number (lower on top), idx =
 //                                        Uint8Array(16*h), x, y = the HARDWARE position of the occurrence (hs, vs) in screen px
 //                                        relative to the window, the image carrying its blank columns and rows - not the box of
@@ -163,7 +167,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '2.15';
+    const VERSION = '2.16';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -319,9 +323,10 @@ const WBSCENE = (() => {
             if (mx !== null) { vcam = [o.fixedAxis && o.fixedAxis.axis === 'x' ? vcam[0] : mx, o.fixedAxis && o.fixedAxis.axis === 'y' ? vcam[1] : my]; }
             spriteCam[0] = cl[0]; spriteCam[1] = cl[1];                             // the sprites: the original's screen position plus the hard stop at an edge
         }
-        const history = passes.filter((fr) => fr.t < (OA ? OA.t : 0));
         const tracks = o.objMean && o.objMean.tau > 0 ? objTracks(passes) : null;   // 2.14
-        const objs = pairById(OA, OB, of, (fr) => fr.objects || [], o.pairOlder || 0, history, 1 + extO).map((pr) => {
+        // the objects at time tO from the pair OA, OB at the fraction of (2.16: an object with a lead is composed at tvO + lead)
+        const objsAt = (tO, OA, OB, of) => { const history = passes.filter((fr) => fr.t < (OA ? OA.t : 0));
+          return pairById(OA, OB, of, (fr) => fr.objects || [], o.pairOlder || 0, history, 1 + extO).map((pr) => {
             const from = pr.from && !jumped([pr.from.x, pr.from.y], [pr.to.x, pr.to.y]) ? pr.from : null;
             const fc = from ? frameCam(passes, from, OA, 'objects') : null, tc = OB.cam;   // 2.4: the anchor per axis - the same screen position (and not the same world one) = on the screen
             const screen = !!pr.to.screen;                                          // 2.7: fixed on the screen, said by the record
@@ -333,11 +338,21 @@ const WBSCENE = (() => {
                 const run = trackRun(tracks.get(pr.to.id), passes.indexOf(OB), jumped);
                 if (run && run.length > 1) {
                     const sh = { shape: o.objMean.shape || 'box', step: o.objMean.step };
-                    if (!sx) x = windowMean(run, tvO, o.objMean.tau, (e) => e.x, sh);
-                    if (!sy) y = windowMean(run, tvO, o.objMean.tau, (e) => e.y, sh);
+                    if (!sx) x = windowMean(run, tO, o.objMean.tau, (e) => e.x, sh);
+                    if (!sy) y = windowMean(run, tO, o.objMean.tau, (e) => e.y, sh);
                 }
             }
-            return { o: pr.to, x, y, sx, sy, scr, screen, a: Math.round(alpha * 256), sc: scaleOf(from, pr.to, pr.f), paired: !!from }; });   // 2.8: a /256; 2.10: the size
+            return { o: pr.to, x, y, sx, sy, scr, screen, a: Math.round(alpha * 256), sc: scaleOf(from, pr.to, pr.f), paired: !!from }; }); };   // 2.8: a /256; 2.10: the size
+        const objs = objsAt(tvO, OA, OB, of);
+        // 2.16 (SWIV KIT-GAP 13): objects[].lead (ms) - an object composed at tvO + lead from its own pair of passes (past the
+        // newest pass by extrapolateObjects); one latency for all objects made the enemies' smoothness cost the player's response
+        const leads = new Set(); for (const ob of objs) if (ob.o.lead > 0) leads.add(+ob.o.lead);
+        for (const L of leads) {
+            const pq = pairOf(passes, tvO + L); if (!pq) continue;
+            const lA = pq.a, lB = pq.b || pq.a, lf = Math.min(Math.max(pq.f, 0), pq.b ? 1 + extO : 0);
+            const at = new Map(); for (const e of objsAt(tvO + L, lA, lB, lf)) if (e.o.lead === L) at.set(e.o.id, e);
+            for (let i = 0; i < objs.length; i++) if (+objs[i].o.lead === L) { const e = at.get(objs[i].o.id); if (e) objs[i] = e; }
+        }
         groupMotion(objs, OB.cam);                                                  // 2.15: a part without a pair moves with its group
         const shist = frames.filter((fr) => fr.t < A.t);
         const sprs = pairById(A, B, f, (fr) => (fr.sprites || []).map((s) => Object.assign({ id: s.id !== undefined ? s.id : s.k, _cam: fr.cam }, s)), o.pairOlder || 0, shist, 1 + extC).map((pr) => {

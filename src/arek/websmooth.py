@@ -42,6 +42,11 @@ buffer a pass later: 60-100 ms by the phase); the limit then applies to what the
 State the median over the phases, not the worst. ``--game-latency MS`` says the same for a page without the hook.
 1.7.1 (kit 1.0.31, Xenon 2 KIT-GAP 11): a camera step over CAM_JUMP game px (a respawn at a checkpoint, as wb-scene's
 jumpMax shows it at once) ends a moving stretch like a stop, so it and its neighbours are not judged as jitter.
+1.9 (kit 1.0.79, SWIV KIT-GAP 13): the key -> player probe waits until the player stands (position and presence unchanged for
+10 display frames, up to 3 s, else the probe is void and repeated) and ends at a move in the key's direction over 0.5 game px,
+or at a change of an image that held during the rest. SWIV's probes answered at the first change over 0.01 px - a
+respawn's blinking (its hook lost the player every other frame) gave 7-15 ms and 93-261 ms where the page's real key ->
+player latency was latO + 0-10 ms (39 ms at latO 40, 80 ms at 76).
 1.8 (kit 1.0.78, SWIV): the objects' steps AGAINST their motion - a step whose sign is against the mean of the 9 steps around
 it while that mean is over BACK_MEAN (an object of a stable id, on the screen, either axis) - are counted and judged per mille
 of such moving steps (a page whose objects run past their newest pass and come back: SWIV's helicopters 2.5-10 px back,
@@ -86,17 +91,33 @@ LATENCY_JS = """([code, maxMs, axis]) => new Promise((res) => { const H = global
         else if (dt > maxMs) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(null); }
         else requestAnimationFrame(f); };
     requestAnimationFrame(f); })"""
-PLAYER_JS = """([code, maxMs]) => new Promise((res) => { const H = globalThis.WBLONGRUN; const p0 = H.player(); if (!p0) { res(null); return; }
+PLAYER_JS = """([code, maxMs, dir, rest, minMove]) => new Promise((res) => { const H = globalThis.WBLONGRUN; if (!H.player()) { res(null); return; }
     const out = () => H.ready && !H.ready();
-    const t0 = performance.now();
     const ev = (type) => new KeyboardEvent(type, { key: code.replace('Arrow', ''), code, bubbles: true, cancelable: true });
-    window.dispatchEvent(ev('keydown')); document.dispatchEvent(ev('keydown'));
-    const f = () => { const dt = performance.now() - t0, p = H.player();
-        if (out()) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(-1); }
-        else if (p && (Math.abs(p[0] - p0[0]) > 0.01 || Math.abs(p[1] - p0[1]) > 0.01 || (p.length > 2 && p[2] !== p0[2]))) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(dt); }
-        else if (dt > maxMs) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(null); }
-        else requestAnimationFrame(f); };
-    requestAnimationFrame(f); })"""
+    // 1.9 (SWIV KIT-GAP 13): the probe starts when the player stands - its position and its presence unchanged for `rest`
+    // display frames (up to 3 s, else void) - and ends at a move IN THE KEY'S DIRECTION over `minMove` game px, or at a
+    // change of the image when the image held during the rest (a player the camera tracks changes its picture first);
+    // before, the first change over 0.01 px counted - a respawn's blinking, an animation or a drift answered the probe
+    const same = (a, b) => a && b && Math.abs(a[0] - b[0]) < 0.01 && Math.abs(a[1] - b[1]) < 0.01;
+    let last = null, still = 0, imgStill = 0; const w0 = performance.now();
+    const wait = () => { const p = H.player();
+        if (out()) { res(-1); return; }
+        if (p && same(p, last)) { still++; imgStill = p.length > 2 && last.length > 2 && p[2] === last[2] ? imgStill + 1 : 0; } else { still = 0; imgStill = 0; }
+        last = p;
+        if (still >= rest) go(p, imgStill >= rest);
+        else if (performance.now() - w0 > 3000) res(-1);
+        else requestAnimationFrame(wait); };
+    const go = (p0, img) => { const t0 = performance.now();
+        window.dispatchEvent(ev('keydown')); document.dispatchEvent(ev('keydown'));
+        const f = () => { const dt = performance.now() - t0, p = H.player();
+            if (out()) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(-1); }
+            else if (p && ((p[0] - p0[0]) * dir > minMove || (img && p.length > 2 && p0.length > 2 && p[2] !== p0[2]))) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(dt); }
+            else if (dt > maxMs) { window.dispatchEvent(ev('keyup')); document.dispatchEvent(ev('keyup')); res(null); }
+            else requestAnimationFrame(f); };
+        requestAnimationFrame(f); };
+    requestAnimationFrame(wait); })"""
+PLAYER_REST = 10                   # display frames the player stands before a key probe (1.9)
+PLAYER_MOVE = 0.5                  # game px in the key's direction that answer the probe (1.9)
 STALL_JS = "(ms) => { const t = performance.now(); while (performance.now() - t < ms) {} return ms; }"
 
 
@@ -324,7 +345,7 @@ def measure(page, seconds=30.0, stalls=10, stall_ms=150, reps=5, log=None, inter
                 page.wait_for_function('!WBLONGRUN.ready || WBLONGRUN.ready()', timeout=10000)
             except Exception:
                 continue
-            lat = page.evaluate(PLAYER_JS, [keys['right'] if k % 2 == 0 else keys['left'], 1000])
+            lat = page.evaluate(PLAYER_JS, [keys['right'] if k % 2 == 0 else keys['left'], 1000, 1 if k % 2 == 0 else -1, PLAYER_REST, PLAYER_MOVE])
             if lat is not None and lat >= 0:
                 pl.append(lat)
             page.wait_for_timeout(400)

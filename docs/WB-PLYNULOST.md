@@ -162,6 +162,11 @@ are. The canon's limits are for the interpolated mode. 1.6: there the camera's m
 either: an original camera that moves 1 px every few frames has no stretch of motion at all. 1.7.1 (kit 1.0.31, Xenon 2
 KIT-GAP 11): a camera step over 40 game px (a respawn at a checkpoint, shown at once by the scene's jumpMax) ends a moving
 stretch like a stop; before, one such step in a 20 s run put the camera jitter at 0.115-0.157 px.
+1.9 (kit 1.0.79, SWIV KIT-GAP 13): the key -> player probe waits until the player stands (its position and presence unchanged
+for 10 display frames, up to 3 s, else the probe is void and repeated) and ends at a move in the key's direction over 0.5
+game px, or at a change of an image that held during the rest. Before, the first change over 0.01 px answered: a
+respawn's blinking (SWIV's hook lost the player every other frame) gave 7-15 ms and 93-261 ms where the page's real
+latency was latO + 0-10 ms.
 1.8 (kit 1.0.78, SWIV): the jitter leaves out a step further than 1 px from the median of its 3 (an animation frame's
 offset), so an object that runs past its newest pass and comes back 2.5-10 px was not in the number - SWIV's helicopters
 knocked at 0.139 px of jitter with 443 such steps and 89 against their motion in 2701 display frames. Every object of a
@@ -608,6 +613,26 @@ every 2 frames, uneven 4 / 8 px steps, passTime + next, D 30; 1500 game frames a
 back steps at latO 40; 12-18 ms with 5 % stalls of 40 ms gives records 20 ms late (max 107), 243 of 1720 frames past the
 pass and 97 back steps; latO 76 with ahead 4 takes most of it back. Tune latC / latO / ahead there, then confirm in the
 browser.
+
+**2.17 (kit 1.0.79, SWIV KIT-GAP 13): an object's own latency (`objects[].lead`).** One objects' latency for all objects
+makes the enemies' smoothness cost the player's response: SWIV's key -> drawn player was latO + 0-10 ms (39 ms at latO 40,
+80 ms at 76 - the original's own 80 ms). `lead` (ms, optional, per object) composes that object at the objects' time +
+lead from its own pair of passes (`rec.next` included, past the newest pass by `extrapolateObjects`, objMean's window and
+the screen anchors at that time); give it to every part of a group alike. Measured in SWIV's page loop (its records,
+frames 4100-5200, 60 Hz, ahead 4, latC 50, latO 76, the engine 5 / 15 ms; a reversal of the player's x in `rec.next` to
+the first drawn step in the new direction, median):
+
+| | player reversal -> picture | player jitter | player back steps | set 4 jitter y / x |
+|---|---|---|---|---|
+| no lead, 5 ms | 50 ms | 0.365 | 3 of 457 | 0.116 / 0.055 |
+| lead 36 on the player, 5 ms | 17 ms | 0.418 | 17 of 461 | 0.116 / 0.055 |
+| no lead, 15 ms | 33 ms | 0.370 | 4 of 460 | 0.138 / 0.061 |
+| lead 36 on the player, 15 ms | 0 ms | 0.446 | 17 of 475 | 0.138 / 0.061 |
+| ahead 2, 30 / 40, 15 ms (before) | 0 ms | 0.454 | 14 of 482 | 0.248 / 0.107 |
+
+The player with a lead is the player of the old latency - its response and its knocks - while the enemies keep the new
+smoothness; the trade is the page's (SWIV: a Debug switch). A player's shots drawn without the player's lead start up to
+the lead's motion behind its nose; give them the same lead.
 
 ## I. The scene recorder (`arek_scene.h` + `wb-scenerec.js`, kit 1.0.77) - one hint instead of a recorder per game
 
