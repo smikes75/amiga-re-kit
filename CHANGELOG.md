@@ -3,6 +3,15 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.76 (2026-11-13)
+
+- wb-scene 2.15, `objects[].group` (optional, any value): the parts of one thing move as one piece - the first paired
+  part of a group leads, every other part (paired or not, on the screen too) takes its shift from its own record's
+  position. A part that was not there in the pass before had no pair and stood while the others slid
+  - SWIV (the user: "the helicopters split at diagonal motion"): a helicopter is one object per part of its picture,
+    a blade part drawn every other pass, another copy in the band below the window. fuzz_23 4100-4400, 60 Hz: 272 splits
+    >= 0.5 px in 350 display frames (up to 5.3 px), 578 with objMean; with group = the node: 0, also with the band
+
 ## 1.0.75 (2026-11-13)
 
 - wb-scene 2.14, `objMean: { tau, step }`: every object's world position as the mean over its own passes within tau ms

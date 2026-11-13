@@ -552,6 +552,17 @@ tau 50 (a little over one pass each side) is the setting to start from; the fitt
 the long one (turns), so it is not offered. The player (on the screen) is unchanged. A wider window lags behind a
 turn: past the newest pass the mean is carried by the last slope, as `camMean` does.
 
+**2.15 (kit 1.0.76): the parts of one thing (`objects[].group`).** SWIV's helicopters are several objects - one per
+part of the node's picture, a blade part drawn only every other pass, a copy in the band below the window. A part that
+was not there in the pass before had no pair and was drawn where it is while the body slid: the helicopter split, at
+diagonal motion visibly (fuzz_23 4100-4400, 60 Hz: 272 splits >= 0.5 px in 350 display frames, up to 5.3 px; with
+`objMean` 578, since parts with rows of different length average apart; the player's parts too, up to 3.7 px).
+`group` (any value) names the parts of one thing: the first paired part of a group leads and every other part takes
+its shift from its own record's position, on both axes and for parts on the screen too - the group moves as one
+piece. SWIV with group = the node (the shadow apart): 0 splits, with and without `objMean`, with and without the band.
+A game that can merge the parts into one picture should; `group` is for parts that cannot be merged (the window's
+part and the band's part of one node).
+
 ## H. The display never touches the game (`arek web replay`, kit 0.9.6) - done
 
 A page replayed under a virtual clock: `requestAnimationFrame` and `performance.now` are replaced before the page's

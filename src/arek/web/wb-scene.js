@@ -44,6 +44,7 @@
 // 2.12 kit 1.0.44 - camMean's carried-on window stops where a stopped camera stands (Turrican II KIT-GAP 33: 2.9's slope ran on
 // for a frame after the camera stopped or turned, 0.2-0.8 px forth and back); stopped = the newest value held as long as the one
 // before it, so a camera that moves every few frames is carried within its own cadence as before.
+// 2.15 kit 1.0.76 - objects[].group: a part without a pair moves with its group (SWIV: a helicopter drawn in one or two parts split)
 // 2.14 kit 1.0.75 - objMean: an object's world position as the mean over its passes (SWIV: the game's own uneven steps)
 // 2.13 kit 1.0.68 - passTime and rec.next (SWIV: a pass computed every 2 frames and shown after 3, 1, 3, 1 frames - an object's even
 // steps came out as a double step and a stand): the objects' passes on the axis of the game's computation, and the pass the game
@@ -98,7 +99,9 @@
 //                                        scale (2.10, optional) = [sx, sy], default 1: drawn at that size, interpolated between
 //                                        the pair; anchor (2.10, optional) = [ax, ay] in the object's own pixels, default [0, 0],
 //                                        the point of the image that stays at (x + ox, y + oy)
-//                                        run (2.14, optional, any value) = objMean's window does not cross a change of it
+//                                        run (2.14, optional, any value) = objMean's window does not cross a change of it;
+//                                        group (2.15, optional, any value) = the parts of one thing: a part without a pair takes
+//                                        the motion of a paired part of the same group (see groupMotion)
 //     sprites: [{ k, h, idx, x, y, screen, id }],   hardware sprites of this frame: k = sprite number (lower on top), idx =
 //                                        Uint8Array(16*h), x, y = the HARDWARE position of the occurrence (hs, vs) in screen px
 //                                        relative to the window, the image carrying its blank columns and rows - not the box of
@@ -160,7 +163,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '2.14';
+    const VERSION = '2.15';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -334,7 +337,8 @@ const WBSCENE = (() => {
                     if (!sy) y = windowMean(run, tvO, o.objMean.tau, (e) => e.y, sh);
                 }
             }
-            return { o: pr.to, x, y, sx, sy, scr, screen, a: Math.round(alpha * 256), sc: scaleOf(from, pr.to, pr.f) }; });   // 2.8: a /256; 2.10: the size
+            return { o: pr.to, x, y, sx, sy, scr, screen, a: Math.round(alpha * 256), sc: scaleOf(from, pr.to, pr.f), paired: !!from }; });   // 2.8: a /256; 2.10: the size
+        groupMotion(objs, OB.cam);                                                  // 2.15: a part without a pair moves with its group
         const shist = frames.filter((fr) => fr.t < A.t);
         const sprs = pairById(A, B, f, (fr) => (fr.sprites || []).map((s) => Object.assign({ id: s.id !== undefined ? s.id : s.k, _cam: fr.cam }, s)), o.pairOlder || 0, shist, 1 + extC).map((pr) => {
             if (pr.to.screen) return { s: pr.to, x: vcam[0] + ext.x + pr.to.x, y: vcam[1] + ext.y + pr.to.y, screen: true, sx: true, sy: true };   // 1.1: fixed on the screen
@@ -428,6 +432,24 @@ const WBSCENE = (() => {
         while (lo > 0 && !brk(tr[lo - 1], tr[lo])) lo--;
         while (hi < tr.length - 1 && !brk(tr[hi], tr[hi + 1])) hi++;
         return tr.slice(lo, hi + 1);
+    }
+    /** 2.15 (SWIV: a helicopter drawn by one blit in one pass and by two - its upper and lower part - in the next, where it
+     *  crosses the ring buffer's wrap; the new part had no pair and was drawn where it is while the other part slid - the
+     *  picture split by up to 5 px, 272 times in 300 game frames): objects[].group (optional, any value) = the parts of one
+     *  thing. The first paired part of a group leads; every other part takes its motion - the same shift from its own
+     *  record's position, on both axes, with the lead's anchors - so the group moves as one piece (a part without a pair
+     *  would stand while the others slide; with objMean parts with rows of different length would average apart). */
+    function groupMotion(objs, tc) {
+        let lead = null;
+        for (const ob of objs) if (ob.paired && ob.o.group !== undefined) { if (!lead) lead = new Map(); if (!lead.has(ob.o.group)) lead.set(ob.o.group, ob); }
+        if (!lead) return;
+        for (const ob of objs) {
+            if (ob.o.group === undefined) continue;
+            const m = lead.get(ob.o.group); if (!m || m === ob) continue;          // every other part: one shift for the group (objMean too)
+            const dx = m.x - m.o.x, dy = m.y - m.o.y, ex = m.scr[0] - (m.o.x - tc[0]), ey = m.scr[1] - (m.o.y - tc[1]);
+            ob.x = ob.o.x + dx; ob.y = ob.o.y + dy; ob.scr = [ob.o.x - tc[0] + ex, ob.o.y - tc[1] + ey]; ob.grouped = true;
+            if (!ob.screen) { ob.sx = m.sx; ob.sy = m.sy; }                      // a screen part keeps drawing at scr - shifted as the lead
+        }
     }
     function frameCam(frames, item, fallback, key) { key = key || 'sprites'; for (const fr of frames) if (fr[key] && fr[key].indexOf(item) >= 0) return fr.cam; return fallback.cam; }
     /** The pair around time t without wb-takt: the two frames around t, f in [0, 1] (or > 1 past the newest). */

@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.14' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.15' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -681,3 +681,37 @@ def test_object_means_do_not_cross_a_jump_or_a_change_of_run():
            " return { mid: j.filter((x) => x > 140 && x < 300).length, plainMid: plain.filter((x) => x > 140 && x < 300).length, run, x1 }; })()" % OBJMEAN)
     assert r['mid'] == 0 and r['plainMid'] == 0                                           # nothing between 130 and 330: the jump is a jump
     assert r['run'] != r['x1']                                                            # the mark broke the window (the same steps otherwise)
+
+
+
+GROUP = """(() => { const win = { w: 320, h: 200, idx: new Uint8Array(64000), pal: new Uint8Array(200 * 128) }, lim = { x0: 0, x1: 0, y0: 0, y1: 2000 };
+  const fr = [];
+  for (let n = 0; n < 60; n++) {
+    const k = n >> 1, t = 20 * n, x = 40 + 3 * k, y = 300 + 2 * k, ob = (id, more) => Object.assign({ id, key: id, w: 4, h: 4, idx: new Uint8Array(16), x, y }, more || {});
+    const g = (more) => (globalThis.G ? Object.assign({ group: 7 }, more) : more);
+    const objects = [ob(1, g({})), ob(9, { screen: true, x: 100, y: 20 + k })];
+    if (k % 2) objects.push(ob(2, g({ oy: 4 })));                                      // a part every other pass (SWIV's blade)
+    if (k % 2) objects.push(ob(10, Object.assign({ screen: true, x: 100, y: 20 + k, oy: 4 }, globalThis.G ? { group: 8 } : {})));   // and one of a screen object
+    if (globalThis.G) objects[1].group = 8;
+    fr.push({ n, t, pass: 40 * k, cam: [0, 200 + k], limits: lim, window: win, objects });
+  }
+  const gap = (o) => { const out = []; for (let ts = 400; ts < 1100; ts += 1000 / 60) { const c = S.compose(fr, ts, { W: 320, H: 200, S: 1 }, o, null);
+      const a = c.objs.find((q) => q.o.id === 1), b = c.objs.find((q) => q.o.id === 2), sa = c.objs.find((q) => q.o.id === 9), sb = c.objs.find((q) => q.o.id === 10);
+      if (b) out.push([+(b.x - a.x).toFixed(3), +(b.y - a.y).toFixed(3)]); if (sb) out.push(['s', +(sb.scr[0] - sa.scr[0]).toFixed(3), +(sb.scr[1] - sa.scr[1]).toFixed(3)]); }
+    return out; };
+  return { gap };
+})()"""
+
+
+def test_parts_of_a_group_move_as_one_piece():
+    """2.15 (SWIV: a helicopter whose blade part is drawn every other pass; the part without a pair stood while the body slid
+    - 272 splits >= 0.5 px in 350 display frames, up to 5.3 px; 578 with objMean; then 0 with group = the node): every
+    part of a group takes the motion of the first paired part, on screen objects too."""
+    r = js("(() => { globalThis.G = false; const R0 = %s; const a = [R0.gap({}), R0.gap({ objMean: { tau: 50 } })];"
+           " globalThis.G = true; const R1 = %s; const b = [R1.gap({}), R1.gap({ objMean: { tau: 50 } })]; return { a, b }; })()" % (GROUP, GROUP))
+    flat = lambda xs: [tuple(x) for x in xs]
+    for split in r['a']:                                                                  # without a group the parts drift apart
+        assert len(set(flat(split))) > 2, split
+    for one in r['b']:                                                                    # with it: the same distance in every display frame
+        world = {tuple(x) for x in one if x[0] != 's'}; scr = {tuple(x) for x in one if x[0] == 's'}
+        assert world == {(0.0, 0.0)} and scr == {('s', 0.0, 0.0)}, one
