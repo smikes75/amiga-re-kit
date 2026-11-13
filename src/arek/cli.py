@@ -91,6 +91,19 @@ def wr(p, b):
 # ----------------------------------------------------------------- adf
 def cmd_adf(a):
     from . import adf
+    if a.what == 'build':                                 # 1.0.74: a bootable disk from one memory image
+        if not a.payload or a.load is None:
+            sys.exit('arek adf build OUT.adf --payload FILE --load ADDR [--entry ADDR] [--stack ADDR] [--memtop ADDR]')
+        num = lambda s: None if s is None else int(str(s).lstrip('$'), 16) if str(s).startswith('$') else int(str(s), 0)
+        try:
+            img = adf.build_boot(rd(a.payload), num(a.load), num(a.entry), num(a.stack), num(a.memtop))
+        except adf.ADFError as e:
+            sys.exit('arek ' + str(e))
+        wr(a.image, img)
+        n = len(rd(a.payload))
+        print('%s: boot block + %d bytes (%d sectors) from disk offset 1024 -> $%x, entry $%x' %
+              (a.image, n, (n + 511) // 512, num(a.load), num(a.entry) if a.entry is not None else num(a.load)))
+        return
     data = rd(a.image)
     if a.what == 'info':
         print(json.dumps(adf.inventory(data, Path(a.image).name), indent=2))
@@ -952,9 +965,14 @@ def build_parser():
     s.add_argument('--path', action='store_true', help='print the file path instead of the text')
     s.set_defaults(fn=cmd_docs)
 
-    s = sp.add_parser('adf', help='disk image: info, entropy map, regions, slicing')
-    s.add_argument('what', choices=['info', 'map', 'regions', 'track', 'sector', 'ls', 'cat', 'extract'])
+    s = sp.add_parser('adf', help='disk image: info, entropy map, regions, slicing; build = a bootable disk from one memory image')
+    s.add_argument('what', choices=['info', 'map', 'regions', 'track', 'sector', 'ls', 'cat', 'extract', 'build'])
     s.add_argument('image')
+    s.add_argument('--payload', help='build: the memory image the disk loads (one absolute binary)')
+    s.add_argument('--load', help='build: the address the image belongs at (chip RAM, $400 or above)')
+    s.add_argument('--entry', help='build: where to jump (default: the load address)')
+    s.add_argument('--stack', help='build: a7 at the entry (default: the load address; the memory\'s end when it is below $1000)')
+    s.add_argument('--memtop', default='0x80000', help='build: the end of the chip RAM the image must fit in (default $80000 = 512 KB)')
     s.add_argument('-n', type=int, default=0, help='track / sector number')
     s.add_argument('-o', '--out', default='out.bin', help='output file (cat) or directory (extract)')
     s.add_argument('-p', '--path', help='file path inside the AmigaDOS volume (cat)')

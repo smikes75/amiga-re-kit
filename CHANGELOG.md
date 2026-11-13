@@ -3,6 +3,20 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.74 (2026-11-13)
+
+- `arek adf build OUT.adf --payload FILE --load ADDR [--entry] [--stack] [--memtop]` (`adf.build_boot`): a bootable
+  880 KB disk that loads one absolute memory image and jumps to it - the boot block asks the trackdisk device for the
+  image (from disk offset 1024) into a temporary chip RAM buffer, switches the motor off, takes the machine over
+  (supervisor mode, SR $2700, INTENA / INTREQ / DMACON $7FFF), moves the image to its address (a mover run from
+  $100, either direction, so buffer and image may overlap) and jumps with a6 = $DFF000 and a7 as asked. No memory
+  or a read error: a red screen. The disk has no file system. Asked for by the Atari 8-bit port (part 3 of its
+  brief: Dan Strikes Back on the A500)
+  - measured in the emulator (Kickstart 1.3): images of 1 000 bytes, 300 KB at $1000 and at $35000, 400-460 KB at
+    $400 - loaded byte for byte, the padding zero, SR $2700, a6 / a7 right; on 512 KB chip + 512 KB slow and on
+    512 KB chip alone. 470 KB on 512 KB alone does not fit the temporary buffer (the red screen)
+  - the source is `headless/adf_boot.s`; a test checks that it assembles to the bytes the kit writes
+
 ## 1.0.73 (2026-11-13)
 
 Three rules of the emulator the models did not have, found on one pass of Turrican II's level 3-3 that took two

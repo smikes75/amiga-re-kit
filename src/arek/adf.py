@@ -163,3 +163,52 @@ def ascii_map(data, cols=22):
         t = (i // SECTORS_PER_TRACK)
         lines.append('trk %3d  %s' % (t, ''.join(chars[i:i + cols])))
     return '\n'.join(lines)
+
+
+# ---- a bootable disk from one memory image (1.0.74) -------------------------------------------------------------
+# The boot block's code (headless/adf_boot.s, assembled with m68k-elf-as): AllocMem of a temporary chip RAM buffer, one
+# trackdisk read from disk offset 1024, motor off, Supervisor(), SR = $2700, INTENA / INTREQ / DMACON = $7FFF, the
+# image moved to its address by a 28-byte mover run from $100 (up or down, so the buffer and the image may overlap),
+# a7 = the stack, jmp to the entry. A read error or no memory: a red background and a stop. The four longs at its end
+# are the image's length (a multiple of 512), its address, the entry and the stack.
+BOOT_CODE = bytes.fromhex(
+    '2849203a00b072024eaeff3a4a80673c2640224c337c0002001c237a00980024234b0028237c00000400002c4eaefe38'
+    '4a806618224c337c0009001c42a900244eaefe384bfa00104eaeffe233fc0f0000dff18060f646fc27004df900dff000'
+    '3d7c7fff009a3d7c7fff009c3d7c7fff009641fa002443f80100700d32d851c8fffc204b227a0032203a002a2e7a0032'
+    '247a002a4ef80100b3c8630ed1c0d3c0e4882320538066fa4ed2e48822d8538066fa4ed2')
+BOOT_PAYLOAD_AT = 1024
+BOOT_PAYLOAD_MAX = SIZE - BOOT_PAYLOAD_AT
+
+
+def build_boot(payload, load, entry=None, stack=None, memtop=0x80000):
+    """A bootable 880 KB disk image that loads ``payload`` (one absolute memory image) to ``load`` on an Amiga with
+    Kickstart 1.2 / 1.3 and jumps to ``entry`` (default: ``load``) in supervisor mode with interrupts and DMA off and
+    a7 = ``stack`` (default: ``load`` - the stack grows below the image - or ``memtop`` when the image starts below
+    $1000). The payload lies on the disk from byte 1024 on, padded with zeros to a multiple of 512 (the padding is
+    copied too). ``memtop``: the end of the chip RAM the image must fit in ($80000 = 512 KB). At the entry a6 =
+    $DFF000; nothing else is promised - the program sets its own vectors, CIAs and Copper list. The disk has no file
+    system (the root block is not written)."""
+    payload = bytes(payload)
+    if not payload:
+        raise ADFError('adf build: the payload is empty')
+    size = (len(payload) + SECTOR - 1) // SECTOR * SECTOR
+    if size > BOOT_PAYLOAD_MAX:
+        raise ADFError('adf build: the payload has %d bytes, a disk holds %d behind the boot block' % (len(payload), BOOT_PAYLOAD_MAX))
+    entry = load if entry is None else entry
+    stack = (load if load >= 0x1000 else memtop) if stack is None else stack
+    if load & 1 or entry & 1 or stack & 1:
+        raise ADFError('adf build: the load address, the entry and the stack must be even')
+    if load < 0x400:
+        raise ADFError('adf build: the load address $%x lies in the vectors (the mover runs at $100; $400 is the lowest)' % load)
+    if load + size > memtop:
+        raise ADFError('adf build: the image ends at $%x, behind the memory\'s end $%x (--memtop)' % (load + size, memtop))
+    if not load <= entry < load + size:
+        raise ADFError('adf build: the entry $%x is outside the image $%x-$%x' % (entry, load, load + size))
+    img = bytearray(SIZE)
+    img[0:4] = b'DOS\0'
+    struct.pack_into('>I', img, 8, 880)
+    code = BOOT_CODE + struct.pack('>IIII', size, load, entry, stack)
+    img[12:12 + len(code)] = code
+    struct.pack_into('>I', img, 4, bootblock_checksum(bytes(img[:1024])))
+    img[BOOT_PAYLOAD_AT:BOOT_PAYLOAD_AT + len(payload)] = payload
+    return bytes(img)

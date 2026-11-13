@@ -415,3 +415,17 @@ project carries an additional `spypeek`-based probe patch for cycle-exact
 mid-blit exports; it is not part of this kit yet.
 
 `--adf` of `arek shot` / `arek bpstate`: a number N = the image ADFN of local.conf (default 1), or a path to an image (1.0.6).
+
+## A bootable disk from one memory image: `arek adf build` (1.0.74)
+
+`arek adf build out.adf --payload image.bin --load 0x1000 --entry 0x1100` writes an 880 KB disk whose boot block loads
+`image.bin` (one absolute binary, on the disk from byte 1024 on, padded to 512) to $1000 and jumps to $1100. The boot
+code (`headless/adf_boot.s`) uses the Kickstart only to read: AllocMem of a chip RAM buffer for the whole image,
+trackdisk CMD_READ, motor off; then Supervisor(), SR $2700, INTENA / INTREQ / DMACON $7FFF, the image moved to `--load`
+by a mover copied to $100 (it copies down or up, so the buffer and the image may overlap), a7 = `--stack` (default: the
+load address; the memory's end for an image below $1000), a6 = $DFF000, jump to `--entry`. Vectors, CIAs, the Copper
+list and the stack's contents are the program's. A failure (no memory, a read error) shows a red screen.
+
+Limits, measured with Kickstart 1.3: the image must fit in the chip RAM the Kickstart has free at boot - 460 KB did on
+512 KB chip alone, 470 KB did not; `--load` from $400, the image's end at most `--memtop` ($80000). Slow RAM is not
+used. A program that needs more (several files, loading while it runs) brings its own track loader.

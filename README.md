@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.73 on PyPI, 2797 tests. Extracted from five game
+- **The kit:** version 1.0.74 on PyPI, 2807 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -47,7 +47,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2797 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2807 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -71,6 +71,7 @@ arek scan      disk.adf                # packer signatures, verified Bytekiller 
 arek adf track  disk.adf -n 1 -o trk1.bin
 arek adf ls     disk.adf                              # AmigaDOS files, if the disk has a filesystem
 arek adf cat    disk.adf -p LEVELS/L1 -o l1.atn       # one file, data blocks verified
+arek adf build  out.adf --payload image.bin --load 0x1000 --entry 0x1100   # a bootable disk that loads one memory image and jumps to it
 arek pp20       file.pp -o file.bin    # PowerPacker 2.0
 arek bytekiller trk1.bin --offset 0x200 -o main.bin
 arek t2         INTR -o intr.bin       # Turrican II three-stage
