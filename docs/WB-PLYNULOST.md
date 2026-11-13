@@ -97,6 +97,7 @@ The limits (checked by F in Chromium and WebKit, 60 Hz, no frame cap):
 |---|---|---|
 | dropped display frames in 30 s of play | 0 | |
 | the camera's and the objects' jitter (a step against the median of the 3 around it, within a moving stretch) | < 0.05 game px | 0.0001 (thread), 0.0002 (coroutine) |
+| the objects' steps against their motion (1.8, kit 1.0.78: against the mean of the 9 steps around, that mean over 0.3 px a frame) | <= 4 per mille of such moving steps | SWIV 1.9-2.6 (ahead 4, 50 / 76), 6.2-6.6 (ahead 2, 30 / 40) |
 | the next game frame / drawing pass missing for the interpolation | 0 % | |
 | key -> camera moves, median | <= 70 ms | 62-63 ms (thread), 96-97 ms (coroutine) |
 | sound dropouts over 10 stalls of the main thread of 150 ms | 0 | 0 (thread), 10 (coroutine) |
@@ -150,6 +151,7 @@ The page's hooks (`globalThis.WBLONGRUN` 1.1; `arek web longrun` reads the same 
 | `interp()` (optional, 1.4) | false when the page draws the game's frames as they are, without interpolation (an original mode); `--no-interp` says the same for a page without the hook |
 | `axis` (optional, 1.6, kit 1.0.27) | `'x'` (default) or `'y'`: the camera's axis that is judged and probed after a key (a vertical auto-scroller, Xenon 2); `--axis` |
 | `gameLatency` (optional, 1.7, kit 1.0.29) | ms, a number or a function: the original's own delay from a key to the screen, measured in the page's engine (the median over the phases of its input pass - Xenon 2 reads the joystick once per 3-frame pass and shows the double buffer a pass later: 60 / 80 / 100 ms); the latency limit applies to the measured value less this; `--game-latency` |
+| `late()` (optional, 1.8, kit 1.0.78) | `[median, max]` ms, how long after its time a game frame's record reached the page (wb-takt 1.7 `takt.late()`); reported |
 | `keysMove` (optional, 1.6) | `'camera'` (default) or `'player'`: when the keys move the player and not the camera, the key latency judged is key -> player (`player()` needed) and the camera is not probed; `--keys-move` |
 
 1.4 (kit 0.8.5, Superfrog KIT-GAPS 38): without interpolation a 50 Hz game on a 60 Hz display repeats every sixth
@@ -160,6 +162,20 @@ are. The canon's limits are for the interpolated mode. 1.6: there the camera's m
 either: an original camera that moves 1 px every few frames has no stretch of motion at all. 1.7.1 (kit 1.0.31, Xenon 2
 KIT-GAP 11): a camera step over 40 game px (a respawn at a checkpoint, shown at once by the scene's jumpMax) ends a moving
 stretch like a stop; before, one such step in a 20 s run put the camera jitter at 0.115-0.157 px.
+1.8 (kit 1.0.78, SWIV): the jitter leaves out a step further than 1 px from the median of its 3 (an animation frame's
+offset), so an object that runs past its newest pass and comes back 2.5-10 px was not in the number - SWIV's helicopters
+knocked at 0.139 px of jitter with 443 such steps and 89 against their motion in 2701 display frames. Every object of a
+stable id is now also counted on both axes for the steps AGAINST its motion (the sign against the mean of the 9 steps
+around, where that mean is over 0.3 px a frame - a turn, a stop, a drift and the steps around a jump over 40 px have no
+direction) and for the steps over 1 px; the back steps are judged, <= 4 per mille of the moving steps (at least 100 of
+them). An even or uneven motion that never turns back has none at any rounding to device pixels. Measured on SWIV's page
+(Chromium on the GPU, 60 Hz, 45 s, load 6-7, all objects, both axes): 1.9 and 2.6 per mille with ahead 4, latC 50, latO 76;
+6.2 and 6.6 with ahead 2, 30 / 40 - the limit lies between. The objects' jitter is also reported as the mean over the
+objects (`obj_jitter_mean`); the limit stays on the worst object, which a short track (30 display frames of an object in
+SWIV's band) can decide from run to run. A page whose `objs()` gives an object kept on the screen must give where it is
+drawn (wb-scene: `ob.scr` + the view's camera on that axis), not its world position - SWIV's hook judged the world against
+a camera of another time there. `--samples FILE` judges
+samples made without a browser (`wb-pagesim.js`, G 2.16) with the same measure, without the keys and the sound.
 
 Alien Breed II's baseline (kit 0.8.1, level 1, enhanced 522 x 357, headless 60 Hz, engine in a thread / coroutine,
 Chromium / WebKit): 0 dropped frames and 0 % missing passes in all four; jitter 0.0001-0.0002 px (max 0.25);
@@ -211,7 +227,10 @@ gives `allow(n)`, the module gives the permits, the times and the pairs:
 - `takt.reset(done)` for a restart, a jump or the end of frames allowed outside the clock (1.1, Alien Breed II: a
   jump to a level allows `done + 24`): it takes the permit back (`allow(done)`) and the page skips the frames it has
   not shown, otherwise they get times now + n frames and the timeline stays ahead for good (140-172 ms, the keys that
-  much later); `takt.stats()` for the hooks (`hz`, `k`, `fm`, `ahead`, `missing`).
+  much later); `takt.stats()` for the hooks (`hz`, `k`, `fm`, `ahead`, `missing`);
+- `takt.late()` (1.7, kit 1.0.78, SWIV): `[median, max]` ms of how long after its time a frame reached `stamp()`, over the
+  last 256 (also `stats().late`) - what the objects' latency has to cover (G 2.16); `create({ now })` gives the clock's
+  time source (default `performance.now`; wb-pagesim passes its simulated time).
 
 Superfrog on wb-takt (4a7244e, kit 0.9.10: fps 50, ahead 2, latC 28, latO 48 fixed, lock auto; its worker computes
 a frame without a permit under 15 ms of sound reserve, up to 12 past the permit, never under replay): `arek web
@@ -562,6 +581,33 @@ its shift from its own record's position, on both axes and for parts on the scre
 piece. SWIV with group = the node (the shadow apart): 0 splits, with and without `objMean`, with and without the band.
 A game that can merge the parts into one picture should; `group` is for parts that cannot be merged (the window's
 part and the band's part of one node).
+
+**2.16 (kit 1.0.78): the page's latencies and the loop without a browser (wb-takt 1.7, `wb-pagesim.js` 1.0).** The numbers
+of 2.13-2.15 were composed with every record present at its own time. A page never has that: a frame's record exists
+when the engine has computed it, and an engine thread in a browser is slower than the same wasm in Node. SWIV (Chromium
+headless, ANGLE Metal, 60 Hz): the engine thread 14-16 ms a game frame against 4.3 ms in Node (5.7 with the scene
+recorder; Node under `taskpolicy -b`, the efficiency cores, 12.7 ms); a frame's record reached the scene 26 ms (median,
+max 94) after `stamp(n + 1)`; with `ahead` 2 the game lost 133 frames' times; 620 of 2701 display frames drew the objects
+past their newest pass, and the helicopters stepped back 2.5-10 px - the knocking of "Enhanced", not `objMean`.
+
+The objects' latency has to cover the pass period and the record's lateness. With P the pass period, D the page's
+constant added to a pass time (2.13) and L how long after its pass time a pass reaches the page (its record's arrival -
+`takt.late()` measures it against the frame's time - less D, less where the logic ends inside its frame): between two
+passes the newest one is P + L old at most, so without extrapolation `latO >= P + L` at a high percentile of L, not its
+median; with `objMean` the window's future half (tau) is carried by the slope unless latO covers it as well. SWIV (P 40,
+D 30, records 46 ms after their frame's time) chose `ahead 4, latC 50, latO 76`. In its own simulation of the page's loop
+(set 4, the engine 5 ms / 15 ms / 15 ms with stalls) the objects' jitter went from 0.175 / 0.213 / 0.302 (ahead 2, 30 / 40)
+to 0.114 / 0.124 / 0.141, with 0-1 back steps. latC adds to the key latency: check `arek web smooth`'s 70 ms.
+
+`wb-pagesim.js` is that simulation for every game (taken from SWIV's tools/m9/page_sim.js, whose run of the same game
+with the browser's record arrivals put 48 386 object positions where the browser had them, 0 apart): the clock grants as
+in the page, an engine model computes a frame in the given ms (a number, a range, a function; occasional stalls), the
+page's own `feed(n, takt)` makes the record when frame n is done, and compose draws every display frame. Its samples are
+WBLONGRUN's, so `arek web smooth --samples` judges the browser's measure on them. In the kit's synthetic game (a pass
+every 2 frames, uneven 4 / 8 px steps, passTime + next, D 30; 1500 game frames at 60 Hz): an engine of 5 ms gives 0 frames past the newest pass and 0
+back steps at latO 40; 12-18 ms with 5 % stalls of 40 ms gives records 20 ms late (max 107), 243 of 1720 frames past the
+pass and 97 back steps; latO 76 with ahead 4 takes most of it back. Tune latC / latO / ahead there, then confirm in the
+browser.
 
 ## I. The scene recorder (`arek_scene.h` + `wb-scenerec.js`, kit 1.0.77) - one hint instead of a recorder per game
 

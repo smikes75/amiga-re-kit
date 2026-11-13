@@ -831,3 +831,21 @@ def test_host_tasks_switched_by_an_rts_inside_the_handler(tmp_path, vec='host_jm
             and recs[-1]['d'][0] > recs[10]['d'][0] > 0 and recs[-1]['d'][1] > recs[10]['d'][1] > 0
             and all(x['a'][7] == 0x5000 for x in recs))                     # this task on its own stack at every tick
     assert good == (vec == 'host_jmp_l3'), (vec, code, err[-300:], len(recs), frames[:8])
+
+
+def test_a_capture_without_the_audio_state_is_named(tmp_path, capsys):
+    """1.0.78 (SWIV KIT-GAP 11): a capture without Paula's state leaves the host's period latches at 0. Something before
+    SWIV's loader capture had written AUDxPER = 1; the game enabled three channels before writing their periods, they ran
+    at 1 in the original and at 65536 in the host, and 1 700 frames later the VBL came 2 colour clocks apart and a seed read
+    VHPOSR. `arek host state` names the missing state also when no channel is playing; with it, it says nothing."""
+    import json
+    cap = tmp_path / 'cap'
+    cap.mkdir()
+    (cap / 'ram.bin').write_bytes(bytes(1024))
+    meta = {'d': [0] * 8, 'a': [0] * 7 + [0x7f000], 'pc': 0x1000, 'ccr': {}, 'beam': {'clock': 1, 'frame': 790, 'position': [100, 50]},
+            'ram_file': 'ram.bin', 'chips': {'agnus': {'DMACON': 0x0200}}}
+    (cap / 'cpu.json').write_text(json.dumps(meta))
+    host.state(str(cap), str(tmp_path / 'st'))
+    err = capsys.readouterr().err
+    assert 'no audio state' in err and 'AUDxPER' in err and 'is playing' not in err
+    assert '@audio' not in (tmp_path / 'st' / 'state.txt').read_text()

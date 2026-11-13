@@ -153,11 +153,18 @@ def state(capture, out, trace=None):
         for line in audio_lines(meta):                   # 1.0.60: Paula's four channels where the original's stood
             f.write(line + '\n')
     playing = audio_playing(meta)
-    if playing and not meta.get('audio'):
+    if not meta.get('audio'):
         import sys
-        print('arek host state: channel %s is playing at the capture and the capture has no audio state - the host starts '
-              'with silent channels and without their DMA slots (capture with a build that has vamiga-audstate-899da5d.patch)'
-              % ', '.join(str(c) for c in playing), file=sys.stderr)
+        if playing:
+            print('arek host state: channel %s is playing at the capture and the capture has no audio state - the host starts '
+                  'with silent channels and without their DMA slots (capture with a build that has vamiga-audstate-899da5d.patch)'
+                  % ', '.join(str(c) for c in playing), file=sys.stderr)
+        else:   # 1.0.78 (SWIV KIT-GAP 11): even silent channels carry their period latch - something before the capture wrote
+                # AUDxPER = 1 and the game enabled the DMA of three channels before writing their periods: 1 in the original,
+                # 0 (= 65536) in the host, 1 700 frames later the VBL came 2 colour clocks apart and a seed read VHPOSR
+            print('arek host state: the capture has no audio state - the host starts Paula\'s period latches (AUDxPER) at 0; '
+                  'a game that enables a channel before writing its period runs it at 65536 there (capture with a build that '
+                  'has vamiga-audstate-899da5d.patch, or add the @audio lines)', file=sys.stderr)
     return {'sr': sr, 'frame': meta['beam']['frame'], 'time': v * 227 + h, 'pc': meta['pc'], 'dir': os.path.abspath(out)}
 
 

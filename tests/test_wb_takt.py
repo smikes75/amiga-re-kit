@@ -21,7 +21,7 @@ def js(expr):
 
 
 def test_lock_and_rate():
-    assert js('T.VERSION') == '1.6' and 'wb-takt.js' in web.FILES
+    assert js('T.VERSION') == '1.7' and 'wb-takt.js' in web.FILES
     assert js('[60, 100.3, 49.9, 150, 144, 200.5, 0].map((h) => T.lockOf(h, 50))') == [0, 2, 1, 3, 0, 4, 0]
     assert js('T.medianHz(Array(59).fill(16.7))') == 0 and abs(js('T.medianHz(Array(60).fill(16.667))') - 60) < 0.01
 

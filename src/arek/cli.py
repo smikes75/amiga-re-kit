@@ -722,6 +722,16 @@ def cmd_web(a):
         return 0 if res['equal'] else 1
     elif a.what == 'smooth':
         from . import websmooth
+        if a.samples:                                    # 1.0.78: samples made without a browser (wb-pagesim.js)
+            res = {}
+            for f in a.samples:
+                with open(f) as fh:
+                    res[f] = websmooth.judge_samples(json.load(fh), axis=a.axis, interp=False if a.no_interp else None)
+                if not a.json:
+                    print(websmooth.format_samples(f, res[f]))
+            if a.json:
+                print(json.dumps(res, indent=1))
+            return 0 if all(r['passed'] for r in res.values()) else 1
         if not a.target:
             raise ValueError('web smooth URL [--seconds S] [--browser chromium|webkit|all] [--stalls N] [--stall-ms M] [--json]')
         browsers = websmooth.BROWSERS if a.browser == 'all' else (a.browser,)
@@ -1353,7 +1363,7 @@ def build_parser():
     s = sp.add_parser('web', help='display contract: reference wb-obraz.js, demo page, Chromium tests (WB-OBRAZ-CRT.md)')
     s.add_argument('what', choices=['copy', 'demo', 'test', 'seal', 'check', 'payload', 'serve', 'strip', 'longrun', 'smooth', 'replay'])
     s.add_argument('target', nargs='?', help='copy: destination folder (writes wb-obraz.js, wb-seal.js, wb-nastaveni.js, '
-                   'wb-zvuk.js, wb-atn.js, wb-bytekiller.js, wb-content.js, wb-touch.js, wb-takt.js, wb-zvuk-out.js, wb-zvuk-worklet.js, wb-scene.js, wb-scenerec.js, wb-datadisk.js); serve: the bundle folder (default .); demo: nothing - it serves the package\'s demo.html on http://127.0.0.1:PORT/demo.html '
+                   'wb-zvuk.js, wb-atn.js, wb-bytekiller.js, wb-content.js, wb-touch.js, wb-takt.js, wb-zvuk-out.js, wb-zvuk-worklet.js, wb-scene.js, wb-scenerec.js, wb-pagesim.js, wb-datadisk.js); serve: the bundle folder (default .); demo: nothing - it serves the package\'s demo.html on http://127.0.0.1:PORT/demo.html '
                    '(the file itself is arek/web/demo.html in the installed package); test: URL of a page with window.wbObrazTest; '
                    'seal: the first file; check: a presentation bundle folder; strip: the source file; longrun / smooth: the URL of a page with globalThis.WBLONGRUN')
     s.add_argument('rest', nargs='*', help='seal: more files; strip: the output file')
@@ -1378,6 +1388,8 @@ def build_parser():
                    "phases, measured in the engine); the limit applies to what the page adds (default: the page's WBLONGRUN.gameLatency)")
     s.add_argument('--no-interp', action='store_true', help="smooth: the page draws the game's frames without interpolation (an original "
                    "mode): the camera's and the objects' jitter and the missing passes are reported, not judged (else WBLONGRUN.interp())")
+    s.add_argument('--samples', action='append', metavar='FILE.json', help='smooth: judge samples made without a browser (wb-pagesim.js run() '
+                   'written as JSON, or a list [[ts, cam, objs, missing, ahead], ...]) with the browser\'s measure, no URL; repeat for more files')
     s.add_argument('--json', action='store_true', help='smooth: the metrics as JSON')
     s.add_argument('--set', action='append', metavar='DISK.adf[,DISK2.adf]',
                    help='seal: a disk set that opens the files (repeat for other versions)')

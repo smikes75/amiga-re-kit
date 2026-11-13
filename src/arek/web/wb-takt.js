@@ -20,12 +20,16 @@
 //   const takt = WBTAKT.create({ fps: 50, ahead: 2, latC: 30, latO: 40, lock: 'auto', allow: (n) => engine.allow(n) });
 //   rAF loop: takt.tick(ts, engine.done(), paused); for every new frame n: f.t = takt.stamp(n); takt.pass(t) when a
 //   drawing pass completes; const { tv, tvO } = takt.view(ts); const p = takt.pair(frames, tv); camera = lerp(p.a, p.b, p.f)
-//   takt.stats() -> { hz, k, fm, granted, ahead, missing, latC, latO } for the page's WBLONGRUN hooks.
+//   takt.stats() -> { hz, k, fm, granted, ahead, missing, latC, latO, late } for the page's WBLONGRUN hooks.
 //   takt.timeOf(n) -> the permit's time of frame n, or null when n was not granted (1.3.1, Superfrog KIT-GAPS 51: an
 //   engine in a worker stamps its scene packet inside allow(g), before the page calls stamp(n)); no side effect.
+// 1.7 (kit 1.0.78, SWIV): stats().late = [median, max] ms, how long after its time a frame reached stamp() (the last 256):
+//   what the objects' latency must cover (WB-PLYNULOST.md 2.16) - an engine thread in a browser computes a frame 3x
+//   slower than in Node (SWIV: 14-16 ms against 4-6) and its record comes 20-40 ms after the clock's expectation;
+//   create({ now }) gives the clock's time source (default performance.now; the page loop simulator wb-pagesim passes its own).
 'use strict';
 const WBTAKT = (() => {
-    const VERSION = '1.6';
+    const VERSION = '1.7';
     const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
     /** The display's rate from the last intervals: the median (Hz), 0 before 60 samples. */
     function medianHz(dts) {
@@ -48,6 +52,7 @@ const WBTAKT = (() => {
             this.dts = []; this.last = 0; this.cnt = 0; this.hz = 0; this.k = 0;
             this.clock = 0; this.granted = 0; this.tg = new Float64Array(256); this.tgN = new Int32Array(256).fill(-1); this.lastT = 0;
             this.latO = this.LATO; this.lens = []; this.lastPass = -1; this.missing = 0; this.granting = 0;
+            this.now = typeof o.now === 'function' ? o.now : nowMs; this.lateR = new Float64Array(256); this.lateN = 0;   // 1.7
         }
         /** The display's interval (ms) of one game frame: locked k / hz, else 1000 / fps. */
         fm() { return this.k ? 1000 * this.k / this.hz : 1000 / this.fps; }
@@ -81,9 +86,11 @@ const WBTAKT = (() => {
          *  frame's + one frame when it was made without a permit; never earlier than the previous. */
         stamp(n) {
             const ix = n & 255;
-            let t = this.tgN[ix] === n ? this.tg[ix] : (this.lastT ? this.lastT + this.fm() : nowMs());
+            const w = this.now();
+            let t = this.tgN[ix] === n ? this.tg[ix] : (this.lastT ? this.lastT + this.fm() : w);
             if (this.lastT && t < this.lastT + 1) t = this.lastT + 1;
             this.lastT = t;
+            this.lateR[this.lateN++ & 255] = w - t;                                    // 1.7: how late the frame came
             return t;
         }
         /** A drawing pass of the objects completed at time t (ms, the frame's time): its length feeds latO. 1.2 (Alien Breed
@@ -132,12 +139,18 @@ const WBTAKT = (() => {
          *  that much later). The page skips the frames it has not shown (its read position = done). */
         reset(done) {
             done = done || 0;
-            this.clock = 0; this.granted = done; this.lastT = 0; this.tgN.fill(-1); this.lens = []; this.lastPass = -1; this.latO = this.LATO; this.missing = 0;
+            this.clock = 0; this.granted = done; this.lastT = 0; this.tgN.fill(-1); this.lens = []; this.lastPass = -1; this.latO = this.LATO; this.missing = 0; this.lateN = 0;
             this.allow(done);
+        }
+        /** 1.7: [median, max] ms of how long after its time a frame reached stamp(), over the last 256; null before one. */
+        late() {
+            const k = Math.min(this.lateN, 256); if (!k) return null;
+            const s = Array.from(this.lateR.subarray(0, k)).sort((a, b) => a - b);
+            return [+s[k >> 1].toFixed(1), +s[k - 1].toFixed(1)];
         }
         stats() {
             return { version: VERSION, hz: this.hz ? +this.hz.toFixed(2) : 0, k: this.k, fm: +this.fm().toFixed(3), granted: this.granted,
-                     ahead: this.lastT ? this.lastT - nowMs() : 0, missing: this.missing, latC: this.k ? this.fm() - 2 : this.LATC, latO: this.latO };
+                     ahead: this.lastT ? this.lastT - this.now() : 0, missing: this.missing, latC: this.k ? this.fm() - 2 : this.LATC, latO: this.latO, late: this.late() };
         }
     }
     /** The keys as bits, changed at the event: map = { KeyCode: bit }; onchange(bits) runs at once (the game takes

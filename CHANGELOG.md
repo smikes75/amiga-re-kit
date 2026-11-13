@@ -3,6 +3,20 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.78 (2026-11-13)
+
+- The page's latencies measured and simulated (SWIV: the helicopters' knocking in Enhanced was the page's timing, not
+  objMean - an engine thread in Chromium 14-16 ms a game frame against 4-6 ms in Node, records 20-40 ms after the clock's
+  expectation, objects past their newest pass and 2.5-10 px back). `arek web smooth` 1.8 counts the objects' steps
+  against their motion and judges them (<= 4 per mille of the moving steps; SWIV's page 1.9 / 2.6 with ahead 4, latC 50,
+  latO 76, 6.2 / 6.6 with ahead 2, 30 / 40), reports the steps over 1 px, the mean jitter over the objects and the page's
+  `late()`; `--samples FILE` judges samples made without a browser. wb-takt 1.7: `takt.late()` (how long after its time
+  a frame reached `stamp()`), `create({ now })`. New `wb-pagesim.js` 1.0: the page's loop without a browser (the clock, an
+  engine of the given ms a frame, the page's own feed, compose every display frame), from SWIV's page_sim.js.
+  WB-PLYNULOST.md 2.16: latO >= the pass period + how late a pass reaches the page (a high percentile), + objMean's tau
+- `arek host state` says when a capture has no audio state (SWIV KIT-GAP 11: the host started Paula's period latches at
+  0, the original had 1 - a channel enabled before its period ran at 65536 and the run left the original at f2503)
+
 ## 1.0.77 (2026-11-13)
 
 - The host's scene recorder `arek_scene.h` + `wb-scenerec.js` 1.0: wb-scene's record from what the game does to the

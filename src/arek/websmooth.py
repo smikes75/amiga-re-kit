@@ -42,14 +42,25 @@ buffer a pass later: 60-100 ms by the phase); the limit then applies to what the
 State the median over the phases, not the worst. ``--game-latency MS`` says the same for a page without the hook.
 1.7.1 (kit 1.0.31, Xenon 2 KIT-GAP 11): a camera step over CAM_JUMP game px (a respawn at a checkpoint, as wb-scene's
 jumpMax shows it at once) ends a moving stretch like a stop, so it and its neighbours are not judged as jitter.
+1.8 (kit 1.0.78, SWIV): the objects' steps AGAINST their motion - a step whose sign is against the mean of the 9 steps around
+it while that mean is over BACK_MEAN (an object of a stable id, on the screen, either axis) - are counted and judged per mille
+of such moving steps (a page whose objects run past their newest pass and come back: SWIV's helicopters 2.5-10 px back,
+which the jitter left out as jumps over OBJ_JUMP; SWIV's page in Chromium, 45 s: 1.9 / 2.6 per mille with ahead 4, latC 50,
+latO 76, 6.2 / 6.6 with ahead 2, 30 / 40 - the limit 4 between); the steps over OBJ_JUMP are counted too (reported); the
+objects' jitter is reported also as the mean over the objects (obj_jitter_mean; the limit stays on the worst object - a
+short track can decide it, SWIV). late() -> [median,
+max] ms, how long after its time a frame's record reached the page (wb-takt 1.7 takt.late(); optional, reported).
+``--samples FILE`` judges samples made without a browser (wb-pagesim.js: the page's loop with the engine's time a frame
+as a parameter) with the same measure: dropped frames, jitter, back steps, missing passes - no keys, no sound.
 """
 import json
 import statistics
 
-LIMITS = {'dropped': 0, 'cam_jitter': 0.05, 'obj_jitter': 0.05, 'missing_pct': 0.0, 'latency_ms': 70, 'dropouts': 0}
+LIMITS = {'dropped': 0, 'cam_jitter': 0.05, 'obj_jitter': 0.05, 'missing_pct': 0.0, 'latency_ms': 70, 'dropouts': 0, 'obj_back_pm': 4.0}
 BROWSERS = ('chromium', 'webkit')
 OBJ_JUMP = 1.0                     # game px: a larger step of an object against the screen is a jump (animation, a new place), not jitter
 CAM_JUMP = 40.0                    # game px: a larger camera step is a jump (wb-scene's jumpMax), it ends a moving stretch
+BACK_MEAN = 0.3                    # game px a display frame: an object whose 9 steps around a step average more has a direction (1.8)
 
 SAMPLE_START_JS = """() => { const H = globalThis.WBLONGRUN; const S = globalThis.__wbSmooth = { out: [], on: true };
     const f = (ts) => { if (!S.on) return;
@@ -107,6 +118,30 @@ def jitter(steps, window=3, jump=None, grid=0.0):
     return (statistics.fmean(devs), max(devs)) if devs else (0.0, 0.0)
 
 
+def backsteps(steps):
+    """1.8 (kit 1.0.78, SWIV): ``(back, moving)`` - the steps whose mean of the 9 steps around them is over BACK_MEAN (the
+    object has a direction there; a turn, a stop and a slow drift do not; nor do the 9 steps around a jump over CAM_JUMP) and
+    of them those against it. An even or an uneven motion that does not turn back has none, at any rounding to device
+    pixels (rounding keeps the order)."""
+    back = moving = 0
+    for i in range(4, len(steps) - 4):
+        w = steps[i - 4:i + 5]
+        if max(abs(v) for v in w) > CAM_JUMP:          # a jump (an object placed anew, a wrap) is no motion: no direction there
+            continue
+        m = sum(w) / 9.0
+        if abs(m) > BACK_MEAN:
+            moving += 1
+            if steps[i] * m < 0 and abs(steps[i]) > 0.01:
+                back += 1
+    return back, moving
+
+
+def overjumps(steps, window=3, jump=OBJ_JUMP):
+    """1.8: the steps further than ``jump`` from the median of the ``window`` steps around them (left out of the jitter)."""
+    h = window // 2
+    return sum(1 for i in range(h, len(steps) - h) if abs(steps[i] - statistics.median(steps[i - h:i + h + 1])) > jump)
+
+
 def analyse(samples, scale=None, axis=0):
     """``[[ts, cam, objs, missing, ahead], ...]`` of one run -> the metrics; ``scale``: S, device px per game px, when
     the page draws its objects on whole device pixels (their steps on the screen are then judged within 1/S); ``axis``:
@@ -146,7 +181,8 @@ def analyse(samples, scale=None, axis=0):
     jm = [jitter(r) for r in runs]
     cam_jit = max((m for m, _ in jm), default=0.0)
     cam_jit_max = max((x for _, x in jm), default=0.0)
-    obj_dev = obj_jit = 0.0
+    obj_dev = obj_jit = obj_jit_mean = 0.0
+    obj_back = obj_moving = obj_over = 0
     if samples_in and samples_in[0][2] is not None:
         # 1.2 (G44): an object is judged on the screen (its world position less the camera): its steps there are within
         # 1/S of each other when the page draws on whole device pixels (scale), a step over OBJ_JUMP game px (an
@@ -166,32 +202,45 @@ def analyse(samples, scale=None, axis=0):
                 devs.append(max(_dev(sx[1:-1]), _dev(sy[1:-1])))
                 g = 1.0 / scale if scale else 0.0
                 jits.append(max(jitter(sx, jump=OBJ_JUMP, grid=g)[0], jitter(sy, jump=OBJ_JUMP, grid=g)[0]))
+                for st in (sx, sy):                       # 1.8: steps against the motion, steps over OBJ_JUMP
+                    b, m = backsteps(st)
+                    obj_back += b
+                    obj_moving += m
+                    obj_over += overjumps(st)
         obj_dev = max(devs) if devs else 0.0
         obj_jit = max(jits) if jits else 0.0
+        obj_jit_mean = statistics.fmean(jits) if jits else 0.0
     miss = [s[3] for s in samples_in if s[3] is not None]
     missing_pct = 100.0 * (miss[-1] - miss[0]) / max(1, len(samples_in) - 1) if len(miss) > 1 else None
     ahead = [s[4] for s in samples_in if s[4] is not None]
     return {'frames': len(samples_in), 'gaps': gaps, 'refresh_hz': round(1000.0 / nominal, 1) if nominal else None, 'dropped': dropped,
             'cam_dev': round(cam_dev, 4), 'cam_jitter': round(cam_jit, 4), 'cam_jitter_max': round(cam_jit_max, 4), 'cam_moving': len(moving),
-            'obj_dev': round(obj_dev, 4), 'obj_jitter': round(obj_jit, 4), 'missing_pct': missing_pct,
+            'obj_dev': round(obj_dev, 4), 'obj_jitter': round(obj_jit, 4), 'obj_jitter_mean': round(obj_jit_mean, 4), 'obj_back': obj_back, 'obj_moving': obj_moving,
+            'obj_back_pm': round(1000.0 * obj_back / obj_moving, 2) if obj_moving else 0.0, 'obj_over': obj_over, 'missing_pct': missing_pct,
             'ahead': statistics.median(ahead) if ahead else None, 'axis': 'xy'[axis]}
 
 
-def verdict(r):
+def verdict(r, keys=True):
     """The limits applied: ``(passed, fails)``. 1.4: without interpolation (``r['interp']`` false) the jitter and the
-    missing passes are not judged."""
+    missing passes are not judged. 1.8: ``keys`` false - samples without a browser (``--samples``): no key latency, no
+    sound, and a camera that did not move is not judged (the run had no scrolling)."""
     fails = []
     interp = r.get('interp', True) is not False
     if r.get('dropped', 0) > LIMITS['dropped']:
         fails.append('dropped frames %d' % r['dropped'])
     if interp and r.get('cam_moving', 0) < 10:              # 1.6: without interpolation reported, not judged
-        fails.append('the camera hardly moved (%d steps): hold a key, set keys, or axis' % r.get('cam_moving', 0))
+        if keys:
+            fails.append('the camera hardly moved (%d steps): hold a key, set keys, or axis' % r.get('cam_moving', 0))
     elif interp and r['cam_jitter'] >= LIMITS['cam_jitter']:
         fails.append('camera jitter %.3f px' % r['cam_jitter'])
     if interp and r.get('obj_jitter', 0) >= LIMITS['obj_jitter']:
         fails.append('object jitter %.3f px' % r['obj_jitter'])
+    if interp and r.get('obj_moving', 0) >= 100 and r.get('obj_back_pm', 0) > LIMITS['obj_back_pm']:   # 1.8
+        fails.append('objects stepped back %d times against their motion (%.1f per mille of %d moving steps)' % (r['obj_back'], r['obj_back_pm'], r['obj_moving']))
     if interp and r.get('missing_pct') is not None and r['missing_pct'] > LIMITS['missing_pct']:
         fails.append('missing passes %.1f %%' % r['missing_pct'])
+    if not keys:
+        return not fails, fails
     on = r.get('latency_on', 'camera')                       # 1.6: the keys move the player, not the camera
     lat = r.get('player_ms') if on == 'player' else r.get('latency_ms')
     own = r.get('game_latency_ms') or 0                      # 1.7: the original's own delay is not the page's
@@ -292,6 +341,7 @@ def measure(page, seconds=30.0, stalls=10, stall_ms=150, reps=5, log=None, inter
     else:
         r['audio'] = None
     r['status'] = page.evaluate('globalThis.WBLONGRUN.status ? String(WBLONGRUN.status()) : ""')
+    r['late'] = page.evaluate('typeof globalThis.WBLONGRUN.late === "function" ? WBLONGRUN.late() : null')   # 1.8
     r['passed'], r['fails'] = verdict(r)
     return r
 
@@ -341,6 +391,38 @@ def run(url, seconds=30.0, browsers=BROWSERS, stalls=10, stall_ms=150, log=print
     return out
 
 
+def _back(r):
+    return (' (mean over objects %.3f; back %d of %d moving steps = %.1f per mille, over %g px %d)' % (
+        r.get('obj_jitter_mean', 0.0), r['obj_back'], r['obj_moving'], r['obj_back_pm'], OBJ_JUMP, r['obj_over']) if r.get('obj_moving') else '')
+
+
+def judge_samples(data, scale=None, axis=None, interp=None):
+    """1.8: samples made without a browser - a list ``[[ts, cam, objs, missing, ahead], ...]`` or ``{samples, scale, axis,
+    interp, late, extrapolated, shown}`` (what wb-pagesim's run() returns, written as JSON) - judged as ``measure`` judges
+    a page, without the keys and the sound. Returns the metrics dict."""
+    if isinstance(data, list):
+        data = {'samples': data}
+    sc = scale if scale is not None else data.get('scale')
+    ax = axis or data.get('axis') or 'x'
+    r = analyse(data['samples'], sc, 1 if ax == 'y' else 0)
+    r['interp'] = bool(data.get('interp', True)) if interp is None else bool(interp)
+    for k in ('late', 'extrapolated', 'shown', 'lost'):
+        if data.get(k) is not None:
+            r[k] = data[k]
+    r['passed'], r['fails'] = verdict(r, keys=False)
+    return r
+
+
+def format_samples(name, r):
+    """1.8: one line of a ``--samples`` judgement."""
+    return ('%s: %s - %d frames at %s Hz, %d dropped; camera%s jitter %.3f px (%d steps), objects jitter %.3f px%s, missing passes %s%s%s; %s' % (
+        name, 'PASSED' if r['passed'] else 'FAILED', r['frames'], r['refresh_hz'], r['dropped'], ' (y)' if r.get('axis') == 'y' else '',
+        r['cam_jitter'], r['cam_moving'], r['obj_jitter'], _back(r), '%.1f %%' % r['missing_pct'] if r['missing_pct'] is not None else 'n/a',
+        (', objects past their newest pass in %d of %d frames' % (r['extrapolated'], r['shown'])) if r.get('shown') else '',
+        (', records late %s / %s ms' % tuple(r['late'])) if r.get('late') else '',
+        '; '.join(r['fails']) if r['fails'] else 'every limit met'))
+
+
 def format_result(name, r):
     if 'error' in r:
         return '%s: %s' % (name, r['error'])
@@ -348,13 +430,14 @@ def format_result(name, r):
     fmt = lambda v: ('%.0f' % v) if isinstance(v, (int, float)) else str(v)
     nj = '' if r.get('interp', True) is not False else ' (not judged: no interpolation)'
     aud = ('sound reserve %s ms, latency %s ms, dropouts %d over %s%s' % (fmt(a['reserve_ms']), fmt(a['latency_ms']), a['dropouts'], a['stalls'], ' (simulated by the page)' if a['simulated'] else '')) if a else 'no sound hook'
-    return ('%s: %s - %d frames at %s Hz, %d dropped; camera%s jitter %.3f px (max %.3f; %d steps, speed deviation %.3f), objects jitter %.3f px, missing passes %s%s; '
+    return ('%s: %s - %d frames at %s Hz, %d dropped; camera%s jitter %.3f px (max %.3f; %d steps, speed deviation %.3f), objects jitter %.3f px%s, missing passes %s%s; '
             'key -> camera %s ms %s%s; %s; %s' % (
                 name, 'PASSED' if r['passed'] else 'FAILED', r['frames'], r['refresh_hz'], r['dropped'], ' (y)' if r.get('axis') == 'y' else '',
-                r['cam_jitter'], r['cam_jitter_max'], r['cam_moving'], r['cam_dev'], r['obj_jitter'],
+                r['cam_jitter'], r['cam_jitter_max'], r['cam_moving'], r['cam_dev'], r['obj_jitter'], _back(r),
                 '%.1f %%' % r['missing_pct'] if r['missing_pct'] is not None else 'n/a', nj, r['latency_ms'], r['latency_all'],
                 ((', key -> player %s ms %s' % (r['player_ms'], r['player_all'])) if r.get('player_ms') is not None else '')
                 + (' (the game\'s own %.0f ms)' % r['game_latency_ms'] if r.get('game_latency_ms') else ''), aud,
                 ('; '.join(r['fails']) if r['fails'] else 'every limit met') + (' · ' + r['status'] if r.get('status') else '')
+                + (' · records late %s / %s ms' % tuple(r['late']) if r.get('late') else '')
                 + (' · WebGL %s' % r['renderer'] if r.get('renderer') else '') + (' · load %s -> %s' % tuple(r['load']) if r.get('load') else '')
                 + ''.join(' · ' + n for n in r.get('notes', []))))
