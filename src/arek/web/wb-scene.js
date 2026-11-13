@@ -44,6 +44,7 @@
 // 2.12 kit 1.0.44 - camMean's carried-on window stops where a stopped camera stands (Turrican II KIT-GAP 33: 2.9's slope ran on
 // for a frame after the camera stopped or turned, 0.2-0.8 px forth and back); stopped = the newest value held as long as the one
 // before it, so a camera that moves every few frames is carried within its own cadence as before.
+// 2.14 kit 1.0.75 - objMean: an object's world position as the mean over its passes (SWIV: the game's own uneven steps)
 // 2.13 kit 1.0.68 - passTime and rec.next (SWIV: a pass computed every 2 frames and shown after 3, 1, 3, 1 frames - an object's even
 // steps came out as a double step and a stand): the objects' passes on the axis of the game's computation, and the pass the game
 // has computed but not shown yet as one more pass, so the objects neither wait for the swap nor guess by the last velocity.
@@ -97,6 +98,7 @@
 //                                        scale (2.10, optional) = [sx, sy], default 1: drawn at that size, interpolated between
 //                                        the pair; anchor (2.10, optional) = [ax, ay] in the object's own pixels, default [0, 0],
 //                                        the point of the image that stays at (x + ox, y + oy)
+//                                        run (2.14, optional, any value) = objMean's window does not cross a change of it
 //     sprites: [{ k, h, idx, x, y, screen, id }],   hardware sprites of this frame: k = sprite number (lower on top), idx =
 //                                        Uint8Array(16*h), x, y = the HARDWARE position of the occurrence (hs, vs) in screen px
 //                                        relative to the window, the image carrying its blank columns and rows - not the box of
@@ -138,6 +140,8 @@
 // the shifted picture by steady as in 1.6, the sprites by the pair);
 // palAnchor (2.3): 'window' (default) - a window row's palette row moves with frame B's picture; 'screen' - the palette
 // rows stay on the screen rows of the game's camera between the frames (a copper gradient fixed to the screen).
+// objMean { tau, step, shape } (2.14, off unless set): every object's world position as the mean over its own passes within
+// tau ms of the objects' time - see objTracks below.
 // passTime (2.13, off unless set): the objects are paired on rec.pass as a time - the game's computation, which comes evenly
 // when the buffer swaps do not - and rec.next adds the pass not shown yet (the last pass's pictures at next's positions; an
 // object next does not name stays where it is, an id without a picture draws nothing). The camera, the window, the sprites
@@ -156,7 +160,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '2.13';
+    const VERSION = '2.14';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -313,6 +317,7 @@ const WBSCENE = (() => {
             spriteCam[0] = cl[0]; spriteCam[1] = cl[1];                             // the sprites: the original's screen position plus the hard stop at an edge
         }
         const history = passes.filter((fr) => fr.t < (OA ? OA.t : 0));
+        const tracks = o.objMean && o.objMean.tau > 0 ? objTracks(passes) : null;   // 2.14
         const objs = pairById(OA, OB, of, (fr) => fr.objects || [], o.pairOlder || 0, history, 1 + extO).map((pr) => {
             const from = pr.from && !jumped([pr.from.x, pr.from.y], [pr.to.x, pr.to.y]) ? pr.from : null;
             const fc = from ? frameCam(passes, from, OA, 'objects') : null, tc = OB.cam;   // 2.4: the anchor per axis - the same screen position (and not the same world one) = on the screen
@@ -320,7 +325,16 @@ const WBSCENE = (() => {
             const sx = screen || !!pr.to.steady || (!!from && from.x !== pr.to.x && from.x - fc[0] === pr.to.x - tc[0]), sy = screen || !!pr.to.steady || (!!from && from.y !== pr.to.y && from.y - fc[1] === pr.to.y - tc[1]);
             const scr = from ? [lerp(from.x - fc[0], pr.to.x - tc[0], pr.f), lerp(from.y - fc[1], pr.to.y - tc[1], pr.f)] : [pr.to.x - tc[0], pr.to.y - tc[1]];   // 2.7: on the screen, between its own frames
             const al = (o) => (o.alpha === undefined ? 1 : Math.min(Math.max(o.alpha, 0), 1)), alpha = from ? lerp(al(from), al(pr.to), Math.min(Math.max(pr.f, 0), 1)) : al(pr.to);
-            return { o: pr.to, x: from ? lerp(from.x, pr.to.x, pr.f) : pr.to.x, y: from ? lerp(from.y, pr.to.y, pr.f) : pr.to.y, sx, sy, scr, screen, a: Math.round(alpha * 256), sc: scaleOf(from, pr.to, pr.f) }; });   // 2.8: a /256; 2.10: the size
+            let x = from ? lerp(from.x, pr.to.x, pr.f) : pr.to.x, y = from ? lerp(from.y, pr.to.y, pr.f) : pr.to.y;
+            if (tracks && !screen && !pr.to.steady && (!sx || !sy)) {               // 2.14: the object's world position as a mean over its passes
+                const run = trackRun(tracks.get(pr.to.id), passes.indexOf(OB), jumped);
+                if (run && run.length > 1) {
+                    const sh = { shape: o.objMean.shape || 'box', step: o.objMean.step };
+                    if (!sx) x = windowMean(run, tvO, o.objMean.tau, (e) => e.x, sh);
+                    if (!sy) y = windowMean(run, tvO, o.objMean.tau, (e) => e.y, sh);
+                }
+            }
+            return { o: pr.to, x, y, sx, sy, scr, screen, a: Math.round(alpha * 256), sc: scaleOf(from, pr.to, pr.f) }; });   // 2.8: a /256; 2.10: the size
         const shist = frames.filter((fr) => fr.t < A.t);
         const sprs = pairById(A, B, f, (fr) => (fr.sprites || []).map((s) => Object.assign({ id: s.id !== undefined ? s.id : s.k, _cam: fr.cam }, s)), o.pairOlder || 0, shist, 1 + extC).map((pr) => {
             if (pr.to.screen) return { s: pr.to, x: vcam[0] + ext.x + pr.to.x, y: vcam[1] + ext.y + pr.to.y, screen: true, sx: true, sy: true };   // 1.1: fixed on the screen
@@ -393,6 +407,27 @@ const WBSCENE = (() => {
         }
         out.push(v.pass);
         return out;
+    }
+    /** 2.14 (SWIV: helicopters that step 0, 1, 1, 2, 1, 2 px a pass - the game's own unevenness, visible as a knock):
+     *  objMean { tau, step, shape } = an object's WORLD position as the mean over the passes within tau ms of the objects'
+     *  time (windowMean on the pass axis, rec.next included), as camMean does for the camera. Per object: only the passes
+     *  that carry its id in an unbroken row - the row ends where the id is missing, where it jumps farther than jumpMax and
+     *  where its `run` changes (optional, any value the page gives: another picture set, a new life). A ground target
+     *  stands (the mean of one position); an axis anchored on the screen, screen and steady objects are not touched. */
+    function objTracks(passes) {
+        const m = new Map();
+        passes.forEach((fr, k) => { for (const ob of fr.objects || []) { let a = m.get(ob.id); if (!a) m.set(ob.id, a = []); a.push({ k, t: fr.t, x: ob.x, y: ob.y, run: ob.run }); } });
+        return m;
+    }
+    function trackRun(tr, k, jumped) {
+        if (!tr) return null;
+        let i = tr.length - 1; while (i >= 0 && tr[i].k > k) i--;
+        if (i < 0 || tr[i].k !== k) return null;
+        const brk = (u, v) => v.k !== u.k + 1 || v.run !== u.run || jumped([u.x, u.y], [v.x, v.y]);
+        let lo = i, hi = i;
+        while (lo > 0 && !brk(tr[lo - 1], tr[lo])) lo--;
+        while (hi < tr.length - 1 && !brk(tr[hi], tr[hi + 1])) hi++;
+        return tr.slice(lo, hi + 1);
     }
     function frameCam(frames, item, fallback, key) { key = key || 'sprites'; for (const fr of frames) if (fr[key] && fr[key].indexOf(item) >= 0) return fr.cam; return fallback.cam; }
     /** The pair around time t without wb-takt: the two frames around t, f in [0, 1] (or > 1 past the newest). */

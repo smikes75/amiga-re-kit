@@ -3,6 +3,18 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.75 (2026-11-13)
+
+- wb-scene 2.14, `objMean: { tau, step }`: every object's world position as the mean over its own passes within tau ms
+  of the objects' time (`rec.next` included) - `camMean` for each object, off unless set. Only an unbroken row of the
+  object's passes counts: it ends where the id is missing, where it jumps farther than `jumpMax` and where its new
+  optional `run` changes. Ground targets stand; screen-anchored axes, `screen` and `steady` objects are not touched
+  - SWIV (the user saw the helicopters knock with passTime + next): the game moves them by whole pixels a pass,
+    unevenly. 60 Hz, latency 40 ms, tau 50: world-anchored objects y / x 0.198 / 0.102 -> 0.133 / 0.059 (frames
+    4100-4400) and 0.258 / 0.128 -> 0.212 / 0.087 (4200-5200), the helicopter of set 4 0.215 / 0.134 -> 0.158 / 0.083;
+    the player unchanged. A line fitted through the passes was measured too (better on the short stretch, worse on the
+    long one) and is not offered
+
 ## 1.0.74 (2026-11-13)
 
 - `arek adf build OUT.adf --payload FILE --load ADDR [--entry] [--stack] [--memtop]` (`adf.build_boot`): a bootable

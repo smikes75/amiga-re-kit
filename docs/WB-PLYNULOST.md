@@ -531,6 +531,27 @@ on the ground stayed at 0.000 px against the background in every variant. `passT
 that covers the wait for the swap and was worse than before. The synthetic rhythm in the tests (a pass every 2 frames,
 shown after 3, 1, 3, 1): before -2.33 .. 5.00 px a frame, `passTime` + `next` 2.50 flat.
 
+**2.14 (kit 1.0.75): the objects' own unevenness (`objMean`).** With the passes on their time SWIV's helicopters still
+knock: the game itself moves them by whole pixels a pass, unevenly (dy 0, -1, 1, -1, 1, 0, 1, 0, 1, 0, 2 ... while
+accelerating, dx 1, 1, 1, 1, 2 in a cycle of 5). `objMean: { tau, step }` takes every object's WORLD position as the
+mean over its own passes within tau ms of the objects' time (`windowMean` on the pass axis, `rec.next` included) - the
+camera's `camMean` for each object. Per object only an unbroken row of passes counts: the row ends where its id is
+missing, where it jumps farther than `jumpMax`, and where its `run` changes (optional, any value the page sets: another
+picture set, a new life). A ground target stands (the mean of one position); an axis anchored on the screen, `screen`
+and `steady` objects are left alone. Measured in SWIV (60 Hz, latency 40 ms, passTime, D = 30 ms; mean change of the
+step in px a frame of the objects anchored to the world, y / x; the camera's own 0.009):
+
+| | 4100-4400 | 4200-5200 | helicopter (set 4) |
+|---|---|---|---|
+| without | 0.198 / 0.102 | 0.258 / 0.128 | 0.215 / 0.134 |
+| tau 33 ms | 0.137 / 0.071 | | 0.158 / 0.095 |
+| tau 50 ms | 0.133 / 0.059 | 0.212 / 0.087 | 0.158 / 0.083 |
+| a line fitted through the passes, 100 ms | 0.091 / 0.062 | 0.234 / 0.103 | 0.165 / 0.090 |
+
+tau 50 (a little over one pass each side) is the setting to start from; the fitted line won the short stretch and lost
+the long one (turns), so it is not offered. The player (on the screen) is unchanged. A wider window lags behind a
+turn: past the newest pass the mean is carried by the last slope, as `camMean` does.
+
 ## H. The display never touches the game (`arek web replay`, kit 0.9.6) - done
 
 A page replayed under a virtual clock: `requestAnimationFrame` and `performance.now` are replaced before the page's

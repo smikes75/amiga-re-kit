@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.13' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.14' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -636,3 +636,48 @@ def test_the_camera_stays_on_the_frames_under_pass_time():
            " return { cam: [c0.cam, cp.cam], sprite: [c0.spriteCam, cp.spriteCam], pair: [c0.A.n, c0.B.n, c0.f, cp.A.n, cp.B.n, cp.f], next: cp.OB.cam[1] - fr[39].cam[1], ob: [c0.OB.t, cp.OB.t] }; })()" % RHYTHM)
     assert r['cam'][0] == r['cam'][1] and r['sprite'][0] == r['sprite'][1] and r['pair'][:3] == r['pair'][3:]
     assert r['next'] == 1 and r['ob'][1] > r['ob'][0]                                    # the objects' newest pass is the one not shown yet, with its own camera
+
+
+
+OBJMEAN = """(() => { const win = { w: 320, h: 200, idx: new Uint8Array(64000), pal: new Uint8Array(200 * 128) }, lim = { x0: 0, x1: 0, y0: 0, y1: 0 };
+  const steps = [1, 2, 1, 2, 2, 1, 1, 2, 0, 3, 1, 2, 2, 1, 2, 1];               // integer steps a pass, 1.5 on average (SWIV's helicopters)
+  const fr = []; let x = 50, x5 = 10;
+  for (let n = 0; n < 160; n++) {
+    const k = n >> 1, t = 20 * n;                                                 // a pass every 2 frames of 20 ms
+    if (n && !(n & 1)) { x += steps[(k - 1) % steps.length]; x5 += k === 40 ? 200 : 3; }
+    const ob = (id, ox, oy, more) => Object.assign({ id, key: id, w: 4, h: 4, idx: new Uint8Array(16), x: ox, y: oy }, more || {});
+    fr.push({ n, t, pass: 40 * k, cam: [0, 0], limits: lim, window: win,
+              objects: [ob(1, x, 60), ob(2, 100, 100), ob(3, x, 120, { screen: true }), ob(4, x, 140, { run: k < 40 ? 'a' : 'b' }), ob(5, x5, 160)] });
+  }
+  const at = (o, id, from, to) => { const out = []; for (let ts = from; ts < to; ts += 1000 / 60) { const c = S.compose(fr, ts, { W: 320, H: 200, S: 1 }, o, null);
+    const ob = c.objs.find((q) => q.o.id === id); out.push(ob.x); } return out; };
+  const dev = (xs) => { const s = []; for (let i = 1; i < xs.length; i++) s.push(xs[i] - xs[i - 1]); const m = s.reduce((a, b) => a + b, 0) / s.length; return s.reduce((a, b) => a + Math.abs(b - m), 0) / s.length; };
+  return { at, dev, fr };
+})()"""
+
+
+def test_object_means_over_their_own_passes():
+    """2.14 (SWIV: helicopters that step 1, 2, 1, 2, 2, 1, 0, 3 px a pass - the game's own unevenness, a knock on the
+    screen): objMean { tau } = the object's world position as the mean over its passes within tau ms. Measured on SWIV's
+    scene (frames 4100-4400 / 4200-5200, 60 Hz, latency 40 ms, passTime): the world-anchored objects' jitter y / x 0.198 /
+    0.102 -> 0.133 / 0.059 and 0.258 / 0.128 -> 0.212 / 0.087 at tau 50; the helicopter of set 4 0.215 / 0.134 -> 0.158 /
+    0.083; a line fitted through the passes instead of the mean was worse on the long run and is not offered."""
+    r = js("(() => { const R = %s; const o = { objMean: { tau: 50 } };"
+           " const raw = R.at({}, 1, 400, 2400), sm = R.at(o, 1, 400, 2400);"
+           " return { raw: R.dev(raw), sm: R.dev(sm), mean: [(raw[raw.length - 1] - raw[0]) / raw.length, (sm[sm.length - 1] - sm[0]) / sm.length],"
+           " ground: [...new Set(R.at(o, 2, 400, 2400))], screen: R.at(o, 3, 400, 1400).join() === R.at({}, 3, 400, 1400).join(),"
+           " off: R.at({ objMean: { tau: 0 } }, 1, 400, 1400).join() === R.at({}, 1, 400, 1400).join() }; })()" % OBJMEAN)
+    assert r['sm'] < 0.5 * r['raw'], r                                                    # the steps evened out
+    assert abs(r['mean'][0] - r['mean'][1]) < 0.05                                        # the same speed, no drift
+    assert r['ground'] == [100]                                                           # a ground target stands
+    assert r['screen'] and r['off']                                                       # an object fixed on the screen, and tau 0: untouched
+
+
+def test_object_means_do_not_cross_a_jump_or_a_change_of_run():
+    """2.14: the window ends where the object jumps farther than jumpMax (a teleport is shown, not smeared) and where its
+    `run` changes (a page's mark: another picture set, a new life) - there the mean starts again from the new pass."""
+    r = js("(() => { const R = %s; const o = { objMean: { tau: 50 } };"
+           " const j = R.at(o, 5, 1500, 1700), plain = R.at({}, 5, 1500, 1700), run = R.at(o, 4, 1560, 1640), x1 = R.at(o, 1, 1560, 1640);"
+           " return { mid: j.filter((x) => x > 140 && x < 300).length, plainMid: plain.filter((x) => x > 140 && x < 300).length, run, x1 }; })()" % OBJMEAN)
+    assert r['mid'] == 0 and r['plainMid'] == 0                                           # nothing between 130 and 330: the jump is a jump
+    assert r['run'] != r['x1']                                                            # the mark broke the window (the same steps otherwise)
