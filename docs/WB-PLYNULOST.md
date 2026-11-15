@@ -658,6 +658,28 @@ Chrome the engine thread kept up - records 6-7 ms after their time (max 15-16), 
 during play, key -> drawn player 66-83 ms (the game's own 80) - so SWIV's latO 76 has a wide margin there; the 14-16 ms
 a game frame was headless Chromium's.
 
+**2.19 (kit 1.0.83, SWIV): the view's own camera (wb-scene 2.18).** SWIV's scroll is 16.16 in RAM ($25A6 = (3530,a6), $4000
+= 0.25 line less every frame); the scene record carried only the whole lines of the shown buffer (written at the swap
+that starts the buffer's drawing, so a pass old) - the view stood 3 frames and stepped a line, and the JS rewrite of SWIV
+that interpolates the fraction showed 0.000 where the recomp's page showed 0.032 (max 0.29) in the same real-Chrome run.
+`rec.camView` (optional, fractions allowed) is the camera the view interpolates - pair lerp, clamp, camMean, the jump
+check, extrapolation; `rec.cam` stays the window's position and the camera the objects and sprites are anchored to on the
+screen (moving those to a fractional camera cost the player 0.365 -> 0.398). The view then leads the shown buffer by up
+to 2 px: `window.origin` puts idx's top-left above cam with idx.length / w rows (h stays the band's height; over, or and
+the palette rows stay on cam). Measured in SWIV's page loop (its camera simulator, kit session's copy, 4100 + 1100
+frames, takt ahead 4 / latC 50 / latO 76, camView = the long $25A6 read at every frame's record):
+
+| | camera jitter / max | set 4 objects y | back steps | player | view - window top |
+|---|---|---|---|---|---|
+| 60 Hz, cam (whole lines) | 0.0185 / 0.170 | 0.114 | 0 | 0.365 | -0.68..+0.91 |
+| 60 Hz, camView | 0.0000 / 0.000 | 0.110 | 0 | 0.357 | -1.97..+0.75 |
+| 50 Hz, cam | 0.160 / 0.539 | 0.156 | 2 | 0.667 | -0.29..+1.21 |
+| 50 Hz, camView | 0.0000 / 0.000 | 0.130 | 0 | 0.658 | -1.78..+0.73 |
+| 144 Hz, cam / camView | 0.0041 / 0.0000 | 0.037 / 0.032 | 2 / 2 | 0.084 / 0.081 | |
+
+`arek web smooth --headed --channel chrome --init JS` measures in the real Chrome with a window (not throttled behind
+other windows) and runs a script before the page's own (its mode button).
+
 ## I. The scene recorder (`arek_scene.h` + `wb-scenerec.js`, kit 1.0.77) - one hint instead of a recorder per game
 
 Until 1.0.77 every game wrote its own scene record for G: SWIV's `src/swiv_scene.c` (307 lines: its buffers, its node list,

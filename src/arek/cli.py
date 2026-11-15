@@ -763,7 +763,8 @@ def cmd_web(a):
             raise ValueError('web smooth URL [--seconds S] [--browser chromium|webkit|all] [--stalls N] [--stall-ms M] [--json]')
         browsers = websmooth.BROWSERS if a.browser == 'all' else (a.browser,)
         res = websmooth.run(a.target, a.seconds, browsers, a.stalls, a.stall_ms, log=(lambda *x: None) if a.json else print, gpu=a.gpu,
-                            interp=False if a.no_interp else None, axis=a.axis, keys_move=a.keys_move, game_latency=a.game_latency)
+                            interp=False if a.no_interp else None, axis=a.axis, keys_move=a.keys_move, game_latency=a.game_latency,
+                            headed=a.headed, channel=a.channel, init=(open(a.init[1:]).read() if a.init and a.init.startswith('@') else a.init))
         if a.json:
             print(json.dumps(res, indent=1))
         return 0 if all(r.get('passed') for r in res.values() if 'error' not in r) and any('error' not in r for r in res.values()) else 1
@@ -1429,6 +1430,9 @@ def build_parser():
     s.add_argument('--stalls', type=int, default=10, help='smooth: artificial stalls of the main thread (default 10)')
     s.add_argument('--stall-ms', type=int, default=150, help='smooth: length of a stall (default 150 ms)')
     s.add_argument('--gpu', action='store_true', help='smooth: Chromium on the GPU (macOS: ANGLE on Metal) instead of headless SwiftShader')
+    s.add_argument('--headed', action='store_true', help='smooth: a window, not headless (with --channel chrome: the real Chrome; not throttled behind other windows)')
+    s.add_argument('--channel', help='smooth: an installed browser for Chromium, e.g. chrome')
+    s.add_argument('--init', help='smooth: a script run in the page before its own (JS text, or @FILE) - e.g. a click on the page\'s mode button')
     s.add_argument('--hz', help='replay: the display rates to replay at (default 50,60,120,144)')
     s.add_argument('--frames', type=int, default=300, help='replay: game frames to compute at every rate (default 300)')
     s.add_argument('--route', help='replay: inputs by game frame as mask:frames pairs, e.g. 1:120,2:60,0:120 (the page\'s key bits)')

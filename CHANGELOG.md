@@ -3,6 +3,18 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.83 (2026-11-15)
+
+- wb-scene 2.18, `rec.camView` (SWIV's request): the camera the view interpolates, fractions allowed; `rec.cam` stays the
+  window's position and the objects' / sprites' screen anchor. `window.origin`: idx's top-left in the world with
+  idx.length / w rows (rows above cam for a view that leads the shown buffer); over, or and palette rows stay on cam.
+  SWIV's page loop with camView = its 16.16 scroll read at every frame: camera jitter 0.0185 -> 0.0000 at 60 Hz,
+  0.160 -> 0.0000 at 50 Hz, 0.0041 -> 0.0000 at 144 Hz; objects 0.114 -> 0.110 / 0.156 -> 0.130; player 0.365 -> 0.357
+  (WB-PLYNULOST.md 2.19). A page may edit a composition's objs[].a and draw it with scene.draw(..., c)
+- `arek web smooth --headed --channel chrome --init JS|@FILE` (websmooth 1.8): the real Chrome with a window, not
+  throttled behind other windows; a script before the page's own
+- `arek discover`: a scenario's own `roots` / `module_roots` (Xenon 2: a module of its own per level)
+
 ## 1.0.82 (2026-11-15)
 
 - The start from the disks without a Kickstart, measured: `-DAREK_FIRSTREAD` logs every byte a run reads before it

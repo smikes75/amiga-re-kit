@@ -48,9 +48,9 @@ function palette() {
 }
 const PAL = palette();
 // the window's clean picture at a camera: the map, plus decorations the map does not have (drawn once by "the game") and holes (255)
-function cleanWindow(cx, cy) {
-  const idx = new Uint8Array(W0 * H0);
-  for (let y = 0; y < H0; y++) for (let x = 0; x < W0; x++) {
+function cleanWindow(cx, cy, h) {
+  h = h || H0; const idx = new Uint8Array(W0 * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < W0; x++) {
     const wx = cx + x, wy = cy + y, c = cells[(wy >> 4) * COLS + (wx >> 4)];
     idx[y * W0 + x] = ((wx >> 3) + (wy >> 3)) % 23 === 0 ? 255 : atlas[c * 256 + (wy & 15) * 16 + (wx & 15)];
     if (((wx - 100) % 160) < 12 && ((wy - 60) % 120) < 12 && wx >= 100 && wy >= 60) idx[y * W0 + x] = 20;   // a decoration every 160 x 120 world px
@@ -83,6 +83,7 @@ const opts = { pairOlder: parseInt(Q.get('pair') || '0', 10) };
 if (Q.get('mean') === '1') opts.camMean = { tau: 20 };
 if (Q.get('palscreen') === '1') opts.palAnchor = 'screen';                // 2.3 (KIT-GAP 27): the palette rows on the screen rows
 if (Q.get('fine') === '1') opts.subpixel = true;                          // 1.5: the playfield shifted by the fraction of a device pixel
+const VIEWC = Q.get('view') === '1';                                      // 2.18: rec.camView leading cam by a fraction, window.origin 4 rows above
 const UNDER = Q.get('under') === '1';                                     // 1.4: the sprites above the HUD rows; the frog's head reaches into the top HUD
 const screen = document.getElementById('screen'), O = WBOBRAZ;
 const pr = new O.Presenter(screen, { gl: Q.get('gl') === '0' ? 'off' : 'auto' });
@@ -100,7 +101,7 @@ function step() {
   if (pass !== null) for (const o of objs) { const d = OBJ[o.id - 1]; o.x += d.vx * 2; o.y += d.vy * 2; if (o.x < 0 || o.x > COLS * 16 - 24) d.vx = -d.vx; if (o.y < 0 || o.y > ROWS * 16 - 16) d.vy = -d.vy; }
   if (pass !== null) { takt.pass(t); scene.lastPass = t; }
   // 2.4: a third sprite standing in the world at (400, 150) (KIT-GAP 29), only while the hardware would show it
-  scene.frame({ n: done, t, pass: scene.lastPass || t, cam: cam.slice(), limits, window: { w: W0, h: H0, idx: cleanWindow(cam[0], cam[1]), pal: PAL, palTop: PALTOP === null ? undefined : PALTOP, over: overLayer(done), or: BACK ? orLayer(cam[0], cam[1]) : undefined }, map: BACK ? undefined : map,   // the back layer shows where window and map leave a hole
+  scene.frame({ n: done, t, pass: scene.lastPass || t, cam: cam.slice(), camView: VIEWC ? [cam[0] - 0.375, cam[1] - 0.625 - (done & 1) * 0.5] : undefined, limits, window: { w: W0, h: H0, idx: VIEWC ? cleanWindow(cam[0], cam[1] - 4, H0 + 4) : cleanWindow(cam[0], cam[1]), origin: VIEWC ? [cam[0], cam[1] - 4] : undefined, pal: PAL, palTop: PALTOP === null ? undefined : PALTOP, over: overLayer(done), or: BACK ? orLayer(cam[0], cam[1]) : undefined }, map: BACK ? undefined : map,   // the back layer shows where window and map leave a hole
     back: BACK ? { cam: [Math.floor(cam[0] / 2), Math.floor(cam[1] / 2) - (done >> 2)], w: 64, h: 48, idx: BACKIMG, origin: [0, 0], wrap: 'xy' } : undefined,
     objects: objs.filter((o) => !(OBJ[o.id - 1].blink && (done & 1))).map((o) => ({ id: o.id, w: OBJ[o.id - 1].w, h: OBJ[o.id - 1].h, idx: OBJ[o.id - 1].idx, x: o.x, y: o.y, steady: o.id === 2, alpha: ALPHA ? (o.id === 1 ? ((done >> 3) % 5) / 4 : o.id === 3 ? 0.5 : 1) : undefined,
       scale: SCALE && o.id === 1 ? [0.25 + ((done >> 2) % 12) / 8, 0.5 + ((done >> 3) % 6) / 4] : undefined, anchor: SCALE && o.id === 1 ? [8, 8] : undefined }))

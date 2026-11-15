@@ -178,3 +178,23 @@ def test_a_register_source_and_the_ea_rules(tmp_path):
     for prog in ('b141', 'd150'):                                                       # eor.w d0,d1 ; add.w d0,(a0)
         with pytest.raises(Unsupported, match='no immediate or register source'):
             recomp.generate(bytes.fromhex(prog + '4e75'), 0x1000, auto=[0x1000], flow=recomp.flow_from_specs(b'', 0, operand=['1000=1']))
+
+
+def test_a_scenario_with_roots_files_of_its_own(tmp_path):
+    """1.0.83 (Xenon 2: a module of its own per level, src/modN_roots_extra.txt): a scenario's "roots" / "module_roots"
+    take the targets it meets; the config's files stay as they were."""
+    import sys
+    from arek import discover
+    run = tmp_path / 'run.py'
+    run.write_text('import json, os, sys\n'
+                   'roots = open(sys.argv[1]).read().split() if os.path.exists(sys.argv[1]) else []\n'
+                   'if "002010" in roots: print("frames 10 done"); sys.exit(0)\n'
+                   'open(os.environ["AREK_UNKNOWN"], "a").write(json.dumps({"kind": "routine", "target": "002010", "file": "r.c", "fn": "call_addr", "line": 1}) + "\\n")\n'
+                   'sys.exit(40)\n')
+    conf = {'build': 'true', 'run': '%s run.py {name}.txt' % sys.executable, 'roots': 'roots.txt', 'module_roots': 'mod.txt',
+            'code': [['1000', '3000']], 'areas': [['2000', '100']], 'clean': 'frames 10',
+            'scenarios': [{'name': 'L1', 'module_roots': 'L1.txt'}, {'name': 'L2'}]}
+    (tmp_path / 'D.json').write_text(json.dumps(conf))
+    res = discover.run(tmp_path / 'D.json', only=['L1'], log=lambda *a: None)
+    assert res[0]['status'] == 'clean' and res[0]['module_roots'] == ['002010']
+    assert (tmp_path / 'L1.txt').read_text() == '002010\n' and not (tmp_path / 'mod.txt').exists()

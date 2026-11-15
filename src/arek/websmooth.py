@@ -371,6 +371,10 @@ RENDERER_JS = """() => { try { const c = document.createElement('canvas'), g = c
     if (!g) return 'no WebGL'; const e = g.getExtension('WEBGL_debug_renderer_info');
     return String(e ? g.getParameter(e.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER)); } catch (x) { return 'unknown'; } }"""
 GPU_ARGS = {'chromium': ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist']}   # 1.3 (G45): the Mac's GPU, not SwiftShader
+# 1.8 (kit 1.0.83): a headed browser (the real Chrome with channel='chrome') keeps its timers and frames when its window is not
+# in front - without these Chromium throttles an occluded window and the run measures the throttling
+HEADED_ARGS = {'chromium': ['--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling',
+                            '--autoplay-policy=no-user-gesture-required']}
 
 
 def load_average():
@@ -383,21 +387,30 @@ def load_average():
 
 
 def run(url, seconds=30.0, browsers=BROWSERS, stalls=10, stall_ms=150, log=print, viewport=(1280, 800), gpu=False, interp=None,
-        axis=None, keys_move=None, game_latency=None):
+        axis=None, keys_move=None, game_latency=None, headed=False, channel=None, init=None):
     """The measurement in every browser of ``browsers`` that is installed: ``{browser: metrics}``. Every result carries
     the WebGL renderer (headless Chromium draws WebGL in software, SwiftShader) and the load average before and after;
-    ``gpu``: launch Chromium on the GPU (``GPU_ARGS``; macOS: ANGLE on Metal); ``interp``: see ``measure``."""
+    ``gpu``: launch Chromium on the GPU (``GPU_ARGS``; macOS: ANGLE on Metal); ``interp``: see ``measure``. 1.8: ``headed``
+    = a window (with ``HEADED_ARGS``: not throttled behind other windows), ``channel`` = an installed browser for Chromium
+    ('chrome' = the real Google Chrome - SWIV's first real numbers came from there: records 6-7 ms late where headless
+    Chromium showed 14-16 ms engine frames), ``init`` = a script run in the page before its own (a mode button to click,
+    localStorage to set)."""
     from playwright.sync_api import sync_playwright
     out = {}
     with sync_playwright() as pw:
         for name in browsers:
             try:
-                br = getattr(pw, name).launch(args=GPU_ARGS.get(name, []) if gpu else [])
+                kw = {'headless': not headed, 'args': (GPU_ARGS.get(name, []) if gpu else []) + (HEADED_ARGS.get(name, []) if headed else [])}
+                if channel and name == 'chromium':
+                    kw['channel'] = channel
+                br = getattr(pw, name).launch(**kw)
             except Exception as e:                      # not installed: say so, go on
                 out[name] = {'error': str(e).splitlines()[0][:160]}
                 log('%s: not available (%s)' % (name, out[name]['error']))
                 continue
             page = br.new_page(viewport={'width': viewport[0], 'height': viewport[1]})
+            if init:
+                page.add_init_script(init)
             page.goto(url)
             la0 = load_average()
             try:

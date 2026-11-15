@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.17' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.18' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -97,6 +97,36 @@ def test_reference_composition_rules():
         return [c.f, c.cam, c.objs[0].x, c.sprs[0].x, S.reference(c).length]; })()"""))
     assert r == [0.5, [2, 0], 2, 4, 4 * 2 * 2 * 2 * 4]                                  # half way: camera, object and the sprite's world x interpolated
 
+
+
+
+def test_view_camera_of_its_own_and_a_window_above_it():
+    """2.18 (SWIV): rec.camView is the camera the view interpolates - a 16.16 scroll read at every frame (0.25 px a frame)
+    moves the view evenly while rec.cam (whole lines of the shown buffer, a pass old: the window's position and the objects'
+    anchor) stands and steps;
+    window.origin puts the window's top-left above cam, so the rows a leading view needs come from the window, not the
+    map. Without either nothing changes."""
+    body = """(() => { const pal = new Uint8Array(4 * 32 * 4); for (let r = 0; r < 4; r++) for (let i = 0; i < 32; i++) { pal[(r * 32 + i) * 4] = i * 10; pal[(r * 32 + i) * 4 + 1] = r; pal[(r * 32 + i) * 4 + 3] = 255; }
+        const map = { gen: 1, atlas: new Uint8Array(256).fill(2), nslots: 1, dirty: null, cols: 8, rows: 8, cells: new Uint16Array(64).fill(0), origin: [0, 0] };
+        const VIEW = %s, ORIGIN = %s;
+        const rec = (n, t, cv) => { const cam = [0, Math.floor(cv) + 1], w = ORIGIN ? { w: 4, h: 3, idx: new Uint8Array([5, 5, 5, 5, 1, 1, 1, 1, 1, 1, 1, 1]), pal, origin: [0, cam[1] - 1], palTop: 0 }
+            : { w: 4, h: 2, idx: new Uint8Array(8).fill(1), pal };
+          return Object.assign({ n, t, cam, limits: { x0: 0, x1: 0, y0: 0, y1: 100 }, window: w, map, objects: [{ id: 7, w: 1, h: 1, idx: new Uint8Array([3]), x: 1, y: cam[1] + 1 }], sprites: [] }, VIEW ? { camView: [0, cv] } : {}); };
+        const fr = []; for (let i = 0; i < 8; i++) fr.push(rec(i + 1, i * 20, 20 - i * 0.25));
+        const cams = [], ys = [], rows = [];
+        for (let t = 100; t <= 140; t += 5) { const c = S.compose(fr, t, { S: 4, extX: 0, extY: 0 }, {}, null); cams.push(c.cam[1]); ys.push(c.winAt[1]); }
+        const c = S.compose(fr, 140, { S: 4, extX: 0, extY: 0 }, {}, null), px = S.reference(c);
+        for (const dy of [0, 1, 2, 3]) rows.push(px[(dy * c.W * 4) * 4]);   // S = 4: a device row is W * S pixels
+        return [cams, ys, rows, c.objs[0].y]; })()"""
+    cams, ys, rows, oy = js(body % ('false', 'false'))
+    assert cams == [19] * len(cams) and ys == [19] * len(ys)       # whole lines only: the view stands on the shown buffer's line
+    cams, ys, rows, oy = js(body % ('true', 'false'))
+    steps = [b - a for a, b in zip(cams, cams[1:])]
+    assert all(abs(d + 0.0625) < 1e-9 for d in steps), cams         # 0.25 px per 20 ms: -0.0625 every 5 ms, evenly
+    assert ys == [19] * len(ys) and oy == 20                       # the window and the object stay on the game's camera
+    assert rows[0] == 20 and rows[3] == 10                         # the view leads the window (as SWIV's shown buffer, a pass old): the map shows through above it
+    cams, ys, rows, oy = js(body % ('true', 'true'))
+    assert ys == [18] * len(ys) and rows[0] == 50 and rows[3] == 10   # window.origin one row up: the row above comes from the window (idx 5)
 
 
 def test_margin_palette_rows_with_pal_top():
@@ -361,7 +391,7 @@ def _run_page(url_tail, fn, browser='chromium'):
         srv.shutdown()
 
 
-@pytest.mark.parametrize('tail', ['?s=2&scale=1&pair=2', '?s=1.9943&fine=1&scale=1&alpha=1&mean=1', '?s=2&alpha=1&pair=2', '?s=1.9943&fine=1&alpha=1&mean=1', '?s=2.5&scrobj=1&mean=1', '?s=1.9943&fine=1&scrobj=1&mean=1', '?s=2&back=1', '?s=1.9943&fine=1&back=1&mean=1', '?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1', '?s=2&paltop=1&palscreen=1', '?s=1.9943&fine=1&paltop=1&palscreen=1'])
+@pytest.mark.parametrize('tail', ['?s=2&scale=1&pair=2', '?s=1.9943&fine=1&scale=1&alpha=1&mean=1', '?s=2&alpha=1&pair=2', '?s=1.9943&fine=1&alpha=1&mean=1', '?s=2.5&scrobj=1&mean=1', '?s=1.9943&fine=1&scrobj=1&mean=1', '?s=2&back=1', '?s=1.9943&fine=1&back=1&mean=1', '?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1', '?s=2&paltop=1&palscreen=1', '?s=1.9943&fine=1&paltop=1&palscreen=1', '?s=2&view=1&pair=2', '?s=1.9943&fine=1&view=1&mean=1'])
 def test_gpu_equals_the_reference(tail):
     """The GPU band against the CPU reference of the same composition, pixel for pixel, while the camera moves and the
     objects interpolate (as Alien Breed II checked its WebGL path: 0 of 60 M pixels)."""

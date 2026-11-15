@@ -50,6 +50,10 @@
 // last 8 intervals between passes + half a frame - the game paused (SWIV's P: the helicopters ran 5-9 px past the last pass on
 // extrapolateObjects and objMean's carried window, then stepped back at passMax); the objects then stop at the newest pass.
 // On by default; passStop: false keeps the old behaviour. A late engine brings no frames either, so it is not taken for a stop.
+// 2.18 kit 1.0.83 - rec.camView (SWIV: the original's scroll is 16.16, the record's cam only its whole lines - the view stood
+// 3 frames and stepped a line; 0.018-0.16 px of jitter, the JS rewrite that interpolates the fraction 0.000): the camera the view
+// interpolates, cam stays the window's position and the objects' / sprites' screen anchor; window.origin: the window's top-left
+// in the world when it holds rows outside the camera's (a view that leads the shown buffer). Without them nothing changes.
 // 2.14 kit 1.0.75 - objMean: an object's world position as the mean over its passes (SWIV: the game's own uneven steps)
 // 2.13 kit 1.0.68 - passTime and rec.next (SWIV: a pass computed every 2 frames and shown after 3, 1, 3, 1 frames - an object's even
 // steps came out as a double step and a stand): the objects' passes on the axis of the game's computation, and the pass the game
@@ -68,8 +72,15 @@
 //                                        where the game's logic is DONE, not at the frame's end: a half-moved RAM gave 1.9 %
 //                                        wrong positions in SWIV); in the records from then until the pass is shown
 //     cam: [x, y],                       the game's camera: world position of the window's top-left
+//     camView: [x, y],                   2.18, optional: the camera the VIEW interpolates (fractions allowed - SWIV's 16.16
+//                                        scroll read at each frame); cam stays the window's position and the camera the
+//                                        objects and sprites are anchored to on the screen; without it the view takes cam
 //     limits: { x0, x1, y0, y1},         the game's own camera range (the window never leaves it)
 //     window: { w, h, idx, pal, over },  the window's CLEAN picture (no moving objects): idx = Uint8Array(w*h) colour
+//                                        (2.18: window.origin = [x, y], optional: the world position of idx's top-left,
+//                                        idx then holds idx.length / w rows - rows above cam for a view that leads the
+//                                        shown buffer; over, or and the palette rows stay on cam - the rows above take
+//                                        their palette rows through palTop; default cam and h rows)
 //                                        indices (255 = none, the map shows through), pal = Uint8Array(h*32*4) RGBA per row;
 //                                        2.2: pal may hold rows = pal.length / 128 >= h rows with palTop (default 0) of
 //                                        them above the window - the device row of game row wy takes palette row
@@ -168,10 +179,13 @@
 //   const scene = new WBSCENE.Scene({ takt, camMean: { tau: 20 }, pairOlder: 2, extrapolateObjects: 1 });
 //   scene.attach(presenter);   per game frame: scene.frame(rec);   per display frame: presenter.present({ draw: scene.drawer(ts, view) })
 //   scene.compose(ts, view) -> the composition the GPU draws, also as a CPU reference (WBSCENE.reference(c)) for a 0-mismatch test.
+//   2.18: a page may change a composition's display-only values before drawing it in the same display frame - objs[i].a (the
+//   alpha 0-256, an integer both paths draw; SWIV's rotor blade by its phase at this frame's objects' time) - and draw it with
+//   presenter.present({ draw: (gl, fbo, d) => scene.draw(ts, view, fbo, d, c) }); positions and pairs stay the scene's.
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '2.17';
+    const VERSION = '2.18';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -314,18 +328,18 @@ const WBSCENE = (() => {
         const jumped = (u, v) => jumpMax > 0 && (Math.abs(u[0] - v[0]) > jumpMax || Math.abs(u[1] - v[1]) > jumpMax);
         const A = p.a, B = p.b || p.a;
         let f = Math.min(Math.max(p.f, 0), p.b ? 1 + extC : 0);
-        if (p.b && jumped(A.cam, B.cam)) f = 1;                                   // 1.2 (KIT-GAPS 44): a jump is shown, not crossed
+        if (p.b && jumped(viewCam(A), viewCam(B))) f = 1;                         // 1.2 (KIT-GAPS 44): a jump is shown, not crossed
         const OA = q ? q.a : A, OB = q ? (q.b || q.a) : B, of = q ? Math.min(Math.max(q.f, 0), q.b ? 1 + (stopped ? 0 : extO) : 0) : 0;
         const win = B.window, lim = B.limits;
         // the game's camera between the frames, the view's camera clamped; soft clamp and vertical smoothing as means over frames
-        const gcam = [lerp(A.cam[0], B.cam[0], f), lerp(A.cam[1], B.cam[1], f)];
+        const VA = viewCam(A), VB = viewCam(B), gcam = [lerp(VA[0], VB[0], f), lerp(VA[1], VB[1], f)];   // 2.18: rec.camView when given
         let vcam = clampCam(gcam[0], gcam[1], lim, win, ext);
         if (o.fixedAxis) { if (o.fixedAxis.axis === 'y') vcam[1] = o.fixedAxis.value; else vcam[0] = o.fixedAxis.value; }
         const spriteCam = vcam.slice();
-        const clampedOf = (fr, i) => clampCam(fr.cam[0], fr.cam[1], fr.limits, fr.window, ext)[i];
+        const clampedOf = (fr, i) => { const v = viewCam(fr); return clampCam(v[0], v[1], fr.limits, fr.window, ext)[i]; };
         if (o.camMean && o.camMean.tau > 0) {                                       // 1.2 (KIT-GAPS 46): the symmetric mean on both axes, always
             const sh = { shape: o.camMean.shape || 'box', step: o.camMean.step }, cl = clampCam(gcam[0], gcam[1], lim, win, ext);
-            const run = runOf(frames, B, (u, v) => jumped(u.cam, v.cam));          // 2.6: not across a jump
+            const run = runOf(frames, B, (u, v) => jumped(viewCam(u), viewCam(v)));   // 2.6: not across a jump
             const mx = windowMean(run, tv, o.camMean.tau, (fr) => clampedOf(fr, 0), sh), my = windowMean(run, tv, o.camMean.tau, (fr) => clampedOf(fr, 1), sh);
             if (mx !== null) { vcam = [o.fixedAxis && o.fixedAxis.axis === 'x' ? vcam[0] : mx, o.fixedAxis && o.fixedAxis.axis === 'y' ? vcam[1] : my]; }
             spriteCam[0] = cl[0]; spriteCam[1] = cl[1];                             // the sprites: the original's screen position plus the hard stop at an edge
@@ -372,7 +386,7 @@ const WBSCENE = (() => {
             return { s: pr.to, x: from ? lerp(from[0], tw[0], pr.f) : tw[0], y: from ? lerp(from[1], tw[1], pr.f) : tw[1], sx, sy };
         });
         const sub = subOf(vcam, view.S || 1, o);
-        return { A, B, f, OA, OB, of, cam: vcam, spriteCam, gcam, win, map: B.map || null, limits: lim, objs, sprs, hud: B.hud || null, back: backOf(frames, A, B, f, tv, o, ext, view.S || 1, sub, jumped),
+        return { A, B, f, OA, OB, of, cam: vcam, spriteCam, gcam, win, winAt: winOrigin(B), winRows: winRowsOf(B.window), map: B.map || null, limits: lim, objs, sprs, hud: B.hud || null, back: backOf(frames, A, B, f, tv, o, ext, view.S || 1, sub, jumped),
                  W: win.w + 2 * ext.x, H: win.h + 2 * ext.y, S: view.S || 1, ext, fixed: o.fixedAxis || null, n: B.n, sub,
                  palScreen: o.palAnchor === 'screen' ? Math.round(gcam[1] - vcam[1]) : null };   // 2.3 (KIT-GAP 27): the band row of the game's screen row 0
     }
@@ -443,7 +457,8 @@ const WBSCENE = (() => {
         if (!v || v.of !== last) {
             const at = new Map(); for (const p of nx.objects || []) at.set(p.id, p);
             const objects = (last.objects || []).map((ob) => { const p = at.get(ob.id); return p && (p.x !== ob.x || p.y !== ob.y) ? Object.assign({}, ob, { x: p.x, y: p.y }) : ob; });
-            v = { of: last, pass: Object.create(last, { t: { value: nx.pass }, cam: { value: nx.cam || last.cam }, objects: { value: objects } }) };
+            v = { of: last, pass: Object.create(last, { t: { value: nx.pass }, cam: { value: nx.cam || last.cam },
+                camView: { value: nx.camView || nx.cam || last.camView || last.cam }, objects: { value: objects } }) };   // 2.18
             NEXT.set(nx, v);
         }
         out.push(v.pass);
@@ -488,6 +503,9 @@ const WBSCENE = (() => {
             if (!ob.screen) { ob.sx = m.sx; ob.sy = m.sy; }                      // a screen part keeps drawing at scr - shifted as the lead
         }
     }
+    function viewCam(fr) { return fr.camView || fr.cam; }                       // 2.18: the camera the view interpolates
+    function winOrigin(fr) { return (fr.window && fr.window.origin) || fr.cam; }   // 2.18: the window picture's top-left in the world
+    function winRowsOf(win) { return win.origin ? Math.floor(win.idx.length / win.w) : win.h; }   // 2.18: its rows (h without origin)
     function frameCam(frames, item, fallback, key) { key = key || 'sprites'; for (const fr of frames) if (fr[key] && fr[key].indexOf(item) >= 0) return fr.cam; return fallback.cam; }
     /** The pair around time t without wb-takt: the two frames around t, f in [0, 1] (or > 1 past the newest). */
     function pairOf(frames, t) {
@@ -574,8 +592,9 @@ const WBSCENE = (() => {
      *  such pixels (a diagnostic: how well the model knows the game). */
     function unexplained(rec, gameIdx) {
         const win = rec.window, map = rec.map, cam = rec.cam, W = win.w, H = win.h, model = new Uint8Array(W * H);
+        const org = winOrigin(rec), kx = cam[0] - org[0], ky = cam[1] - org[1], rows = winRowsOf(win);   // 2.18: idx through window.origin
         for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-            let v = win.idx[y * W + x]; const hole = v === 255;
+            const qx = x + kx, qy = y + ky; let v = qx >= 0 && qx < W && qy >= 0 && qy < rows ? win.idx[qy * W + qx] : 255; const hole = v === 255;
             if (v === 255 && map) {
                 const wx = cam[0] + x - map.origin[0], wy = cam[1] + y - map.origin[1], cx = Math.floor(wx / 16), cy = Math.floor(wy / 16);
                 if (cx >= 0 && cy >= 0 && cx < map.cols && cy < map.rows) { const sl = map.cells[cy * map.cols + cx]; if (sl !== 0xffff) v = map.atlas[sl * 256 + (wy & 15) * 16 + (wx & 15)]; }
@@ -606,7 +625,7 @@ const WBSCENE = (() => {
     /** The playfield alone (the window's clean picture, the map, black outside) at camera cam, Wd x Hd device pixels. */
     function playfield(c, camd, Wd, Hd) {
         const S = c.S, out = new Uint8Array(Wd * Hd * 4), bandWd = Math.round(c.W * S), bandHd = Math.round(c.H * S), bandH = c.H;
-        const win = c.win, winX = c.B.cam[0], winY = c.B.cam[1], map = c.map, back = c.back;
+        const win = c.win, winX = c.B.cam[0], winY = c.B.cam[1], map = c.map, back = c.back, ix = c.winAt[0], iy = c.winAt[1], irows = c.winRows;
         const fixed = c.fixed, lim = c.limits;
         // 2.0.1 (Alien Breed II G59): the device pixel (dx, dy) with the camera camd (whole device pixels) shows game pixel
         // floor((dx + camd) * W / Wd) - whole numbers only on both paths, so no GPU's float rounding (WebKit fused a multiply-add
@@ -622,8 +641,8 @@ const WBSCENE = (() => {
             if (fixed && (fixed.axis === 'y' ? (wy < lim.y0 || wy >= lim.y1 + win.h) : (wx < lim.x0 || wx >= lim.x1 + win.w))) idx = -1;
             else {
                 const bx = wx - winX, by = wy - winY;
-                const inWin = bx >= 0 && bx < win.w && by >= 0 && by < win.h;
-                if (inWin) { const v = win.idx[by * win.w + bx]; if (v !== 255) idx = v; }
+                const inWin = bx >= 0 && bx < win.w && by >= 0 && by < win.h, qx = wx - ix, qy = wy - iy;   // 2.18: idx from window.origin, irows rows
+                if (qx >= 0 && qx < win.w && qy >= 0 && qy < irows) { const v = win.idx[qy * win.w + qx]; if (v !== 255) idx = v; }
                 if (idx < 0 && map) {
                     const cx = Math.floor((wx - map.origin[0]) / 16), cy = Math.floor((wy - map.origin[1]) / 16);
                     if (cx >= 0 && cy >= 0 && cx < map.cols && cy < map.rows) { const sl = map.cells[cy * map.cols + cx];
@@ -649,7 +668,7 @@ const WBSCENE = (() => {
     uniform sampler2D u_tex; uniform sampler2D u_pal; uniform int u_mode; uniform ivec2 u_camd; uniform ivec4 u_ratio; uniform vec2 u_band;
     uniform ivec2 u_qpos; uniform ivec2 u_qsize; uniform ivec2 u_qimg; uniform int u_alpha;   // 2.8: mode 4 blends by u_alpha / 256 with u_mid = the pixels below
     int fdiv(int a, int b) { int q = a / b; return (a % b != 0 && a < 0) ? q - 1 : q; }   // floor division, b > 0
-    uniform ivec2 u_winpos; uniform ivec2 u_winsize; uniform ivec4 u_palrows; uniform highp usampler2D u_grid; uniform sampler2D u_atlas; uniform ivec4 u_map; uniform ivec4 u_fixed; uniform sampler2D u_over; uniform int u_hasover;
+    uniform ivec2 u_winpos; uniform ivec2 u_winsize; uniform ivec4 u_winidx; uniform ivec4 u_palrows; uniform highp usampler2D u_grid; uniform sampler2D u_atlas; uniform ivec4 u_map; uniform ivec4 u_fixed; uniform sampler2D u_over; uniform int u_hasover;
     uniform sampler2D u_mid; uniform ivec2 u_w; uniform int u_midh;
     uniform sampler2D u_back; uniform sampler2D u_or; uniform ivec4 u_bk; uniform ivec2 u_bcamd; uniform ivec3 u_bflags; uniform int u_hasor;   // 2.5
     int ix8(sampler2D t, ivec2 p) { return int(texelFetch(t, p, 0).r * 255.0 + 0.5); }
@@ -678,7 +697,8 @@ const WBSCENE = (() => {
         else {
           ivec2 b = w - u_winpos;
           bool inWin = b.x >= 0 && b.x < u_winsize.x && b.y >= 0 && b.y < u_winsize.y;
-          if (inWin) { int v = ix8(u_tex, b); if (v != 255) idx = v; }
+          ivec2 bi = w - u_winidx.xy;                         // 2.18: the window's picture from window.origin, u_winidx.w rows
+          if (bi.x >= 0 && bi.x < u_winidx.z && bi.y >= 0 && bi.y < u_winidx.w) { int v = ix8(u_tex, bi); if (v != 255) idx = v; }
           if (idx < 0 && u_map.z > 0) { ivec2 m = w - u_map.xy; ivec2 c = m >> 4;
             if (m.x >= 0 && m.y >= 0 && c.x < u_map.z && c.y < u_map.w) { uint sl = texelFetch(u_grid, c, 0).r;
               if (sl != 0xffffu) idx = ix8(u_atlas, ivec2(int(sl % 32u) * 16 + (m.x & 15), int(sl / 32u) * 16 + (m.y & 15))); } }
@@ -760,7 +780,7 @@ const WBSCENE = (() => {
                 const prog = this.prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog);
                 if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
                 gl.useProgram(prog); this.u = {};
-                for (const n of ['u_size', 'u_tex', 'u_pal', 'u_mode', 'u_camd', 'u_ratio', 'u_band', 'u_winpos', 'u_winsize', 'u_palrows', 'u_grid', 'u_atlas', 'u_map', 'u_fixed', 'u_over', 'u_hasover', 'u_qpos', 'u_qsize', 'u_qimg', 'u_mid', 'u_w', 'u_midh', 'u_back', 'u_or', 'u_bk', 'u_bcamd', 'u_bflags', 'u_hasor', 'u_alpha']) this.u[n] = gl.getUniformLocation(prog, n);
+                for (const n of ['u_size', 'u_tex', 'u_pal', 'u_mode', 'u_camd', 'u_ratio', 'u_band', 'u_winpos', 'u_winsize', 'u_winidx', 'u_palrows', 'u_grid', 'u_atlas', 'u_map', 'u_fixed', 'u_over', 'u_hasover', 'u_qpos', 'u_qsize', 'u_qimg', 'u_mid', 'u_w', 'u_midh', 'u_back', 'u_or', 'u_bk', 'u_bcamd', 'u_bflags', 'u_hasor', 'u_alpha']) this.u[n] = gl.getUniformLocation(prog, n);
                 this.vao = gl.createVertexArray(); gl.bindVertexArray(this.vao); this.vbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
                 const aPos = gl.getAttribLocation(prog, 'a_pos'), aUv = gl.getAttribLocation(prog, 'a_uv');
                 gl.enableVertexAttribArray(aPos); gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0); gl.enableVertexAttribArray(aUv); gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
@@ -798,7 +818,7 @@ const WBSCENE = (() => {
             gl.bindFramebuffer(gl.FRAMEBUFFER, fbo); gl.useProgram(this.prog); gl.bindVertexArray(this.vao); gl.disable(gl.BLEND); gl.disable(gl.DEPTH_TEST); gl.disable(gl.SCISSOR_TEST); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
             const camd = c.sub ? c.sub.d : [Math.floor(c.cam[0] * S), Math.floor(c.cam[1] * S)];   // 2.0.1 (G59): the camera in whole device pixels, the ratios W / Wd and H / Hd as whole numbers
             gl.viewport(x0, vy, Wd, Hd); gl.uniform2f(u.u_size, Wd, Hd); gl.uniform2i(u.u_camd, camd[0], camd[1]); gl.uniform4i(u.u_ratio, c.W, Wd, c.H, Hd); gl.uniform2f(u.u_band, x0, vy + Hd);
-            gl.uniform2i(u.u_winpos, c.B.cam[0], c.B.cam[1]); gl.uniform2i(u.u_winsize, win.w, win.h); const palRows = win.palTop == null ? win.h : Math.max(1, (win.pal.length / 128) | 0); gl.uniform4i(u.u_palrows, win.palTop | 0, palRows, c.palScreen == null ? 0 : 1, c.palScreen | 0);
+            gl.uniform2i(u.u_winpos, c.B.cam[0], c.B.cam[1]); gl.uniform4i(u.u_winidx, c.winAt[0], c.winAt[1], win.w, c.winRows); gl.uniform2i(u.u_winsize, win.w, win.h); const palRows = win.palTop == null ? win.h : Math.max(1, (win.pal.length / 128) | 0); gl.uniform4i(u.u_palrows, win.palTop | 0, palRows, c.palScreen == null ? 0 : 1, c.palScreen | 0);
             const fx = c.fixed; gl.uniform4i(u.u_fixed, fx ? (fx.axis === 'y' ? 1 : 2) : 0, fx ? (fx.axis === 'y' ? c.limits.y0 : c.limits.x0) : 0, fx ? (fx.axis === 'y' ? c.limits.y1 + win.h : c.limits.x1 + win.w) : 0, 0);
             gl.uniform1i(u.u_tex, 0); gl.uniform1i(u.u_pal, 1); gl.uniform1i(u.u_grid, 2); gl.uniform1i(u.u_atlas, 3); gl.uniform1i(u.u_over, 4); gl.uniform1i(u.u_mid, 5);
             gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, this.texOver);
@@ -821,7 +841,7 @@ const WBSCENE = (() => {
             gl.activeTexture(gl.TEXTURE7);
             if (win.or) this._r8(this.texOr, win.w, win.h, win.or); else gl.bindTexture(gl.TEXTURE_2D, this.texOr);
             gl.uniform1i(u.u_hasor, win.or ? 1 : 0);
-            gl.activeTexture(gl.TEXTURE0); this._r8(this.texWin, win.w, win.h, win.idx);
+            gl.activeTexture(gl.TEXTURE0); this._r8(this.texWin, win.w, c.winRows, win.idx);
             if (c.sub) this._subpixel(c, fbo, x0, vy, Wd, Hd); else { gl.uniform1i(u.u_mode, 2); this._quad(0, 0, Wd, Hd); }
             const under = !!(c.hud && c.hud.under), topD = under && c.hud.top ? Math.round(c.hud.top.h * S) : 0, botD = under && c.hud.bottom ? Math.round(c.hud.bottom.h * S) : 0;
             if (under) { this._hud(c, view, d, x0, y0); gl.viewport(x0, vy, Wd, Hd); gl.uniform2f(u.u_size, Wd, Hd); gl.activeTexture(gl.TEXTURE0); }   // 1.4: the HUD first, the sprites over it

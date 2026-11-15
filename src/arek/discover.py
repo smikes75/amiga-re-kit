@@ -21,7 +21,8 @@ The project keeps its build: the driver only appends to its files and runs its c
       "rounds": 40,                              # per scenario
       "clean": "records",                        # optional: a regex the clean run's output must show (it reached its end)
       "scenarios": [{"name": "level1", "state": "cap/l1", "frames": 3000,
-                     "inputs": {"fuzz": {"seed": 7, "start": 300, "keys": "RLUDF"}}, "env": {"GAME_LEVEL": "1"}}]
+                     "inputs": {"fuzz": {"seed": 7, "start": 300, "keys": "RLUDF"}}, "env": {"GAME_LEVEL": "1"},
+                     "module_roots": "src/mod1_roots.txt"}]   # optional per scenario (1.0.83): "roots" / "module_roots" of its own
     }
 
 A run ends one of four ways: exit 0 (clean when the output matches "clean", if given), exit 40 with a routine record,
@@ -139,6 +140,8 @@ class Project:
         """Run one scenario until clean. Returns {name, status, rounds, roots, module_roots, modules, wild, last}."""
         out = {'name': sc['name'], 'status': None, 'rounds': 0, 'roots': [], 'module_roots': [], 'modules': [], 'wild': None, 'last': None}
         added = set()
+        roots = self.root / sc['roots'] if sc.get('roots') else self.roots                       # 1.0.83: a level's module of its own
+        module_roots = self.root / sc['module_roots'] if sc.get('module_roots') else self.module_roots
         for n in range(1, self.rounds + 1):
             out['rounds'] = n
             d, rc, recs, text = self.run_once(sc, n, log)
@@ -159,7 +162,7 @@ class Project:
                     out['status'], out['wild'] = 'wild jump', r
                     log('%s: a wild jump to %06x from %s (%s line %s) - not a root; stopped' % (sc['name'], t, r['fn'], r['file'], r['line']))
                     return out
-                path = self.module_roots if where == 'area' else self.roots
+                path = module_roots if where == 'area' else roots
                 if t in added or t in self.known(path):
                     out['status'], out['wild'] = 'not taken', r
                     log('%s: %06x again after it was added - the build did not take it; stopped' % (sc['name'], t))

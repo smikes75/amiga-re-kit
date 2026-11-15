@@ -244,3 +244,17 @@ def test_a_camera_jump_ends_a_stretch():
     smp = [[i * 16.67, [0, v], None, None, None] for i, v in enumerate(ys)]
     r = websmooth.analyse(smp, axis=1)
     assert r['cam_jitter'] < 0.01 and r['cam_jitter_max'] < 0.01 and r['cam_moving'] >= 290
+
+
+def test_init_script_runs_before_the_page_and_headed_options_parse(tmp_path):
+    """1.8 (kit 1.0.83): `init` runs in the page before its own scripts (a page's mode button to click, localStorage to
+    set); --headed / --channel / --init reach run() (a headed Chrome is not run here)."""
+    pytest.importorskip('playwright')
+    init = "addEventListener('load', () => { const st = WBLONGRUN.status; WBLONGRUN.status = () => 'init ran: ' + st(); });"
+    r = _run(True, 'scene-demo.html?s=2', seconds=2, stalls=1, stall_ms=50, init=init)
+    assert 'error' not in r and r['status'].startswith('init ran: frames'), r.get('status')
+    f = tmp_path / 'init.js'
+    f.write_text(init)
+    a = cli.build_parser().parse_args(['web', 'smooth', 'http://x/', '--headed', '--channel', 'chrome', '--init', '@' + str(f)])
+    assert a.headed and a.channel == 'chrome' and a.init == '@' + str(f)
+    assert websmooth.HEADED_ARGS['chromium'][0] == '--disable-backgrounding-occluded-windows'
