@@ -167,6 +167,15 @@ uint8_t WRLOG[MEMSZ];
 uint8_t SLOW[SLOWSZ];
 uint8_t SLOWLOG[SLOWSZ];
 #endif
+#ifdef AREK_FIRSTREAD                    /* 1.0.82: the bytes a run reads before it wrote them (arek host boot: what a start from the disks must provide) */
+static uint8_t FR_R[MEMSZ + SLOWSZ];     /* per byte: bit 0 the CPU, bit 1 the blitter, bit 2 DMA (Copper, sprites, Paula) */
+static uint8_t FR_KIND = 1;
+#define FR_MARK(i, written) do { if (!(written)) FR_R[i] |= FR_KIND; } while (0)
+#define FR_SET(k) (FR_KIND = (uint8_t)(k))
+#else
+#define FR_MARK(i, written) ((void)0)
+#define FR_SET(k) ((void)0)
+#endif
 
 typedef struct { uint32_t d[8], a[8]; int x, n, z, v, c; uint32_t srhi; } M68;
 void host_spend(M68 *m, double cck, double access_every);   /* arek_host.h 1.0.8: an --extern routine spends the original's elapsed time (its interrupt handlers inside it); defined by the host, unused elsewhere */
@@ -283,7 +292,7 @@ static void hw_write(uint32_t off, uint32_t v) {
     case 0x058:                          /* BLTSIZE: zapis spousti blit */
         CREG[off >> 1] = v;
         BUS_BLIT(CREG[0x040 >> 1], CREG[0x042 >> 1], v);
-        run_blit();
+        FR_SET(2); run_blit(); FR_SET(1);
         return;
     default:
         if (off < 0x040 || off > 0x077) HW_UNMODELLED[off >> 1] = 1;
@@ -298,20 +307,40 @@ static uint32_t rd8_raw(uint32_t a) {
 #ifdef CIA_HOOK
     if (CIA(a)) return cia_read_hook(a);
 #endif
-    if (a < MEMSZ) return MEM[a];
+    if (a < MEMSZ) { FR_MARK(a, WRLOG[a]); return MEM[a]; }
     uint32_t c = chip_at(a);
-    if (c != 0xffffffffu) return MEM[c];
+    if (c != 0xffffffffu) { FR_MARK(c, WRLOG[c]); return MEM[c]; }
     uint8_t *p = slow_at(a);
     if (!p) { oob(a); return OOB_READ & 0xff; }
+#if SLOWSZ
+    FR_MARK(MEMSZ + (uint32_t)(p - SLOW), SLOWLOG[p - SLOW]);
+#endif
     return *p;
 }
 static uint32_t rd8(uint32_t a) { BUS_ACCESS(a); return rd8_raw(a); }
 static uint32_t rd16_raw(uint32_t a) {   /* the blitter's own reads (run_blit) go through here: they are not CPU accesses */
     a = ADDR24(a);
     if (CUSTOM(a)) return hw_read(a & 0x1fe);
-    if (a + 1 < MEMSZ) return (MEM[a] << 8) | MEM[a + 1];
+    if (a + 1 < MEMSZ) { FR_MARK(a, WRLOG[a]); FR_MARK(a + 1, WRLOG[a + 1]); return (MEM[a] << 8) | MEM[a + 1]; }
     return (rd8_raw(a) << 8) | rd8_raw(a + 1);
 }
+#ifdef AREK_FIRSTREAD
+static void arek_fr_dump(void) {          /* "lo hi kinds" per run of bytes with the same readers, hex, hi exclusive */
+    const char *path = getenv("AREK_FIRSTREAD"); FILE *f = path ? fopen(path, "w") : NULL;
+    if (!f) return;
+    fprintf(f, "# arek firstread 1: lo hi kinds - bytes read before the run wrote them (c the CPU, b the blitter, d DMA)\n");
+    for (uint32_t i = 0, n = MEMSZ + SLOWSZ; i < n; ) {
+        if (!FR_R[i]) { i++; continue; }
+        uint32_t j = i + 1, end = i < MEMSZ ? MEMSZ : n;
+        while (j < end && FR_R[j] == FR_R[i]) j++;
+        uint32_t lo = i < MEMSZ ? i : SLOWBASE + (i - MEMSZ);
+        fprintf(f, "%06x %06x %s%s%s\n", (unsigned)lo, (unsigned)(lo + (j - i)), FR_R[i] & 1 ? "c" : "", FR_R[i] & 2 ? "b" : "", FR_R[i] & 4 ? "d" : "");
+        i = j;
+    }
+    fclose(f);
+}
+__attribute__((constructor)) static void arek_fr_init(void) { if (getenv("AREK_FIRSTREAD")) atexit(arek_fr_dump); }
+#endif
 static uint32_t rd16(uint32_t a) { BUS_ACCESS(a); return rd16_raw(a); }
 static uint32_t rd32(uint32_t a) { return (rd16(a) << 16) | rd16(a + 2); }
 static void wr8_raw(uint32_t a, uint32_t v) {

@@ -111,7 +111,10 @@ static void (*h_sample_cb)(int ch, double t, int value) = 0;
 static ArekPaula H_PAULA;
 static char *H_SHOT_PREFIX = 0; static long H_SHOT_FIRST = 0, H_SHOT_LAST = -1;
 
-static uint16_t h_rd16cb(void *ctx, uint32_t a) { (void)ctx; return (uint16_t)rd16_raw(a & 0x7fffe); }
+#ifndef FR_SET
+#define FR_SET(k) ((void)0)                 /* a translation from before 1.0.82 */
+#endif
+static uint16_t h_rd16cb(void *ctx, uint32_t a) { (void)ctx; FR_SET(4); uint16_t v = (uint16_t)rd16_raw(a & 0x7fffe); FR_SET(1); return v; }   /* DMA: Copper, sprites, Paula */
 static inline double h_now(void) { return arek_glue_time(); }
 static inline double h_abs(void) { return H_PAULA.frame_base + h_now(); }
 /* 1.0.55: the absolute colour clock of the chip-bus access a register hook is called for - its own slot; the model's time
@@ -596,7 +599,13 @@ HOST_ACK_HANDLER(host_ack_audio, 0x0780)
 /* 1.0.6: HOST_VECTOR_HANDLER(name, vec) = a handler that jumps through the game's own vector in RAM (the game changes
  * $6c / $70 / $74 at run time - an intro and a level with different handlers): call_addr() of the translation reaches
  * the handler as any other entry; the handler's rte returns here (Turrican II). -DHOST_L3=host_vec_l3 etc. */
-#define HOST_VECTOR_HANDLER(name, vec) void name(M68 *m) { call_addr(m, ((uint32_t)rd16_raw((uint32_t)(vec)) << 16) | rd16_raw((uint32_t)(vec) + 2)); }
+/* 1.0.82: a vector that still points into the Kickstart ROM ($F80000-$FFFFFF: a start from the disks before the game set
+ * its own - the state at the loader's entry, arek host boot) is answered as the ROM's handler would leave it for a game
+ * without servers: the level's INTREQ bits acknowledged, rte - not a call of an address the translation cannot have. */
+#define H_VEC_ROM(v) (((v) & 0xffffffu) >= 0xf80000u)
+#define HOST_VECTOR_HANDLER(name, vec) void name(M68 *m) { uint32_t v_ = ((uint32_t)rd16_raw((uint32_t)(vec)) << 16) | rd16_raw((uint32_t)(vec) + 2); \
+    if (H_VEC_ROM(v_)) { H_INTREQ &= (uint16_t)~H_LEVEL_MASK[((vec) - 0x60) >> 2]; h_rte(m); return; } \
+    call_addr(m, v_); }
 HOST_VECTOR_HANDLER(host_vec_l1, 0x64)
 HOST_VECTOR_HANDLER(host_vec_l2, 0x68)             /* 1.0.12: CIA-A / PORTS - the keyboard (Turrican II KIT-GAPS 19) */
 HOST_VECTOR_HANDLER(host_vec_l3, 0x6c)
@@ -616,8 +625,10 @@ HOST_VECTOR_HANDLER(host_vec_l6, 0x78)
 #define H_IN_IRQ (H_IRQ_DEPTH || H_JDEPTH)
 #ifdef AREK_RESUME
 #define HOST_VECTOR_JUMP(name, vec) void name(M68 *m) { \
+    uint32_t v_ = ((uint32_t)rd16_raw((uint32_t)(vec)) << 16) | rd16_raw((uint32_t)(vec) + 2); \
+    if (H_VEC_ROM(v_)) { H_INTREQ &= (uint16_t)~H_LEVEL_MASK[((vec) - 0x60) >> 2]; h_rte(m); return; } \
     if (H_JDEPTH < 8) H_JLEV[H_JDEPTH++] = (uint8_t)((m->srhi >> 8) & 7); \
-    task_jump(m, ((uint32_t)rd16_raw((uint32_t)(vec)) << 16) | rd16_raw((uint32_t)(vec) + 2)); }
+    task_jump(m, v_); }
 HOST_VECTOR_JUMP(host_jmp_l1, 0x64)
 HOST_VECTOR_JUMP(host_jmp_l2, 0x68)
 HOST_VECTOR_JUMP(host_jmp_l3, 0x6c)

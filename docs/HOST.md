@@ -45,7 +45,10 @@ goes before or after the call. `host_trace --reglog-regs 040-076,09c` chooses th
 
 `HOST_VECTOR_HANDLER(name, vec)` makes a handler that jumps through the game's own vector in RAM
 (`host_vec_l1/l2/l3/l4/l5/l6` for $64-$78 are ready: `-DHOST_L2=host_vec_l2` for the keyboard's CIA-A, 1.0.12) - for a game that changes its
-handlers at run time, an intro and a level (1.0.6, Turrican II). With `recomp --resume`, `host_jmp_l1..l6` (`HOST_VECTOR_JUMP(name, vec)`, 1.0.48) enter the
+handlers at run time, an intro and a level (1.0.6, Turrican II). A vector that still points into the Kickstart ROM
+($F80000-$FFFFFF - a start from the disks at the loader's entry, before the game set its own) is answered as the ROM would
+leave it for a game without servers: the level's INTREQ bits acknowledged, `rte` (1.0.82; before, a call of an address
+the translation cannot have). With `recomp --resume`, `host_jmp_l1..l6` (`HOST_VECTOR_JUMP(name, vec)`, 1.0.48) enter the
 handler by a JUMP, as the 68000 does: no C frame waits for its `rte`. Use them when a handler leaves on another stack by
 other means than its own `rte` - a scheduler called by `jsr` that ends in `rts` on the next task's stack, a sound handler
 that moves a7 from channel to channel (S.W.I.V.). Called from C (`host_vec_lN`), such an `rts` onto a higher stack reads as a plain

@@ -78,6 +78,21 @@ The web page must start from the visitor's disks only: no captured RAM, no state
    code with `--live ADDR` per instruction (1.0.67), not an extern that reads them: with the timing model an extern's
    TICKs have no rows in the bus table (its accesses stand in other slots beside DMA) and an interrupt inside it has no
    address to resume at. SWIV with such an extern left the original in two landscapes and stopped in a third.
+   **Measured instead of written (kit 1.0.82)**: steps 1-3 for the memory are `arek host boot`. Build the host with
+   `-DAREK_FIRSTREAD` and `HOST_ENTRY` = the translated entry, run the game's scenarios from the original's state at the
+   entry (`arek host state` of the capture) with `AREK_FIRSTREAD=LOG` each: every byte read before the run wrote it, by
+   the CPU (c), the blitter (b) or DMA (d: Copper, sprites, Paula). `arek host boot STATE OUT --reads LOG... --disk
+   DF0.adf` takes, of their union, the bytes the state does not hold as zero, finds them on the disks (copy rules with
+   an FNV-1a: another version of the disk is refused) and keeps the rest as the residue in `OUT/arek_boot.h`, beside
+   `OUT/state` (the state with zero RAM). `-DAREK_BOOT_GO=f_xxxxxx` and `HOST_ENTRY=arek_boot` (natively the disks from
+   `$AREK_DF0..3`); a project with more to do (a trainer extern) calls `arek_boot_mem()` in its own entry. Measured on
+   SWIV from its capture at $152, seven landscapes x 30 000 frames: 1 648 bytes, 483 of them from the disk in 3 copies
+   (the loader at $D95E6 -> $10E, split exactly at the crack's three fixes), 1 307 in the build - the TRAP #0 vector,
+   the trainer's bytes at $EE and $7FF00, the memory list at $102 (all four as SWIV's hand-written `game_boot` has
+   them) and 1 253 bytes of the crack's screen at $40000-$50000 that the game reads before it clears it (SWIV zeroes
+   them; without them the records are equal too - the screen, not the logic); every record of the 137 485 equal to the
+   run from the full state (registers, SR, PC, frame, beam). More than 4 KB in the build = data the boot chain
+   unpacked: take the entry earlier or port the unpacker.
 5. **The disk routine as an extern** (`--extern ADDR=game_read`, `engine_set_disk` images), the game's unpacker as a C
    port when it is self-modifying, and the **load times of the original** for every read and unpack (measured with
    `arek trace`, by arguments, not by a formula): `host_spend(m, cck, 0)` in the extern keeps the main program in the same

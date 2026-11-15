@@ -558,6 +558,18 @@ def cmd_host(a):
             raise ValueError('arek host pack STATE_DIR OUT.bin')
         print('%s: %d bytes' % (a.out, host.pack(a.target, a.out)))
         return
+    if a.what == 'boot':
+        from . import hostboot
+        if not (a.out and a.reads and a.disk):
+            raise ValueError('arek host boot STATE_OR_CAPTURE OUT --reads FIRSTREAD.log [...] --disk DF0.adf [--disk DF1.adf]')
+        p = hostboot.boot(a.target, a.out, a.reads, a.disk, min_copy=a.min_copy, slow_base=int(a.slow_base, 16))
+        if a.json:
+            print(json.dumps({k: v for k, v in p.items() if k not in ('residue', 'low')} | {
+                'residue': [{'to': '%06x' % r['to'], 'len': len(r['bytes']), 'kinds': r['kinds']} for r in p['residue']]}, indent=1))
+        else:
+            print(hostboot.format_report(p))
+            print('wrote %s/state and %s/arek_boot.h' % (a.out, a.out))
+        return
     if a.what == 'engine':
         if not (a.game and a.l3 and a.entry):
             raise ValueError('arek host engine OUT_DIR --game game.c --l3 f_xxxxxx --entry f_xxxxxx [--native] [--dynamic] [--ovl F] [--src F] [--run]')
@@ -570,7 +582,7 @@ def cmd_host(a):
             cmd = host.engine_command(a.target, a.game, a.l3, a.entry, **kw)
         print(' '.join(shlex.quote(x) for x in cmd))
         return
-    raise ValueError('arek host copy DIR | state CAPTURE OUT | pack STATE OUT.bin | engine OUT_DIR --game ... --l3 ... --entry ...')
+    raise ValueError('arek host copy DIR | state CAPTURE OUT | pack STATE OUT.bin | boot STATE OUT --reads LOG --disk ADF | engine OUT_DIR --game ... --l3 ... --entry ...')
 
 
 def cmd_cover(a):
@@ -1326,9 +1338,15 @@ def build_parser():
     s.add_argument('--json', help='write {address: [kinds]} here')
     s.set_defaults(fn=cmd_roots)
     s = sp.add_parser('host', help='the host of a translation (C sources: time, interrupts, CIAs, Paula, picture) and its state')
-    s.add_argument('what', choices=['copy', 'state', 'pack', 'engine'])
-    s.add_argument('target', help='copy: destination folder; state: a bpstate capture folder; pack: the state folder; engine: the output folder')
-    s.add_argument('out', nargs='?', help='state: the state folder to write; pack: the file to write')
+    s.add_argument('what', choices=['copy', 'state', 'pack', 'boot', 'engine'])
+    s.add_argument('target', help='copy: destination folder; state: a bpstate capture folder; pack: the state folder; '
+                   'boot: the state (or capture) at the main program\'s entry; engine: the output folder')
+    s.add_argument('out', nargs='?', help='state: the state folder to write; pack: the file to write; boot: the folder for state/ and arek_boot.h')
+    s.add_argument('--reads', nargs='+', help='boot: AREK_FIRSTREAD logs of runs from that state (a translation built with -DAREK_FIRSTREAD); their union')
+    s.add_argument('--disk', action='append', help='boot: a disk image in drive order (repeatable)')
+    s.add_argument('--min-copy', type=int, default=16, help='boot: the shortest stretch taken from a disk (bytes)')
+    s.add_argument('--slow-base', default='c00000', help='boot: where slow RAM starts (hex)')
+    s.add_argument('--json', action='store_true', help='boot: the plan as JSON')
     s.add_argument('--trace', help='state: a trace armed at the same stop (its record 0 gives SR when cpu.json has none)')
     s.add_argument('--game', help='engine: the translation (arek recomp --timing --bus-table, no --main)')
     s.add_argument('--l3', help='engine: the translated level-3 handler (HOST_L3)')

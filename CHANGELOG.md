@@ -3,6 +3,21 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.82 (2026-11-15)
+
+- The start from the disks without a Kickstart, measured: `-DAREK_FIRSTREAD` logs every byte a run reads before it
+  wrote it ($AREK_FIRSTREAD: "lo hi kinds", c the CPU, b the blitter, d DMA - Copper, sprites, Paula);
+  `arek host boot STATE OUT --reads LOG... --disk ADF...` (arek.hostboot) takes, of their union, the bytes the state at
+  the entry does not hold as zero, finds them on the disks (copy rules with an FNV-1a - another version of the disk is
+  refused) and keeps the rest as the residue: OUT/state (zero RAM, the registers, CIAs, drive as captured) and
+  OUT/arek_boot.h (`arek_boot_mem()`, `arek_boot_check()`, with `-DAREK_BOOT_GO=f_xxx` the HOST_ENTRY `arek_boot`).
+  SWIV from its capture at $152, seven landscapes x 30 000 frames: 1 648 bytes - 483 from the disk in 3 copies (the
+  loader split at the crack's three fixes), in the build the TRAP #0 vector, the trainer's bytes, the memory list (as
+  SWIV's hand-written game_boot has them) and 1 253 bytes of the crack's screen the game reads before it clears it;
+  all 137 485 records equal to the run from the full state (registers, SR, PC, frame, beam)
+- A vector still in the Kickstart ROM ($F80000-$FFFFFF) is acknowledged by `host_vec_lN` / `host_jmp_lN` (the level's
+  INTREQ bits, rte) instead of calling an address the translation cannot have
+
 ## 1.0.81 (2026-11-15)
 
 - `-DAREK_DISCOVER`: the first target a translation does not know ends the run with one JSON line in `$AREK_UNKNOWN`
