@@ -46,6 +46,10 @@
 // before it, so a camera that moves every few frames is carried within its own cadence as before.
 // 2.15 kit 1.0.76 - objects[].group: a part without a pair moves with its group (SWIV: a helicopter drawn in one or two parts split)
 // 2.16 kit 1.0.79 - objects[].lead: an object composed at tvO + lead (SWIV: latO 76 for the enemies' smoothness cost the player 41 ms)
+// 2.17 kit 1.0.80 - passes that stopped: frames still come and no new pass (also as rec.next) for longer than the longest of the
+// last 8 intervals between passes + half a frame - the game paused (SWIV's P: the helicopters ran 5-9 px past the last pass on
+// extrapolateObjects and objMean's carried window, then stepped back at passMax); the objects then stop at the newest pass.
+// On by default; passStop: false keeps the old behaviour. A late engine brings no frames either, so it is not taken for a stop.
 // 2.14 kit 1.0.75 - objMean: an object's world position as the mean over its passes (SWIV: the game's own uneven steps)
 // 2.13 kit 1.0.68 - passTime and rec.next (SWIV: a pass computed every 2 frames and shown after 3, 1, 3, 1 frames - an object's even
 // steps came out as a double step and a stand): the objects' passes on the axis of the game's computation, and the pass the game
@@ -167,7 +171,7 @@
 // Pure functions (Node too): lerp, clampCam, windowMean, pairById, fnv1a, x17, reference. No game data.
 'use strict';
 const WBSCENE = (() => {
-    const VERSION = '2.16';
+    const VERSION = '2.17';
     const lerp = (a, b, f) => a + (b - a) * f;
 
     /** The camera of a view extX / extY wider than the window, inside the game's limits: the game's camera minus the
@@ -214,6 +218,7 @@ const WBSCENE = (() => {
                 let k = frames.length - 2; while (k > 0 && frames[k].t > last.t - 2 * tau + 1e-6) k--;
                 const v = last.t > frames[k].t ? (pick(last) - pick(frames[k])) / (last.t - frames[k].t) : 0;
                 const r = windowMean(frames, t - d, tau, pick, Object.assign({}, opts, { held: true })) + v * d;
+                if (opts && opts.stopped) { const pl = pick(last); return v > 0 ? Math.min(r, pl) : v < 0 ? Math.max(r, pl) : r; }   // 2.17: the passes stopped - carried up to the newest value, not past it
                 // 2.12 (Turrican II KIT-GAP 33): a camera that stopped is not carried past where it stands (it ran on by the
                 // slope for a frame and came back, 0.2-0.8 px; after a single 16 px step 1-2 px). Stopped = the newest value
                 // has been held as long as the one before it was, or for the window's 2 tau (to half a frame); a shorter hold
@@ -228,11 +233,12 @@ const WBSCENE = (() => {
             }
         }
         let sum = 0, wsum = 0;
+        const ve = opts && opts.stopped ? 0 : tau;          // 2.17: a series that stopped is not run on past its newest value
         for (let s = t - tau; s <= (past ? t : t + tau) + 1e-9; s += step) {
             const w = past ? (s - (t - tau)) / tau : 1; if (w <= 0) continue;
-            sum += w * valueAt(frames, s, pick, tau); wsum += w;
+            sum += w * valueAt(frames, s, pick, ve); wsum += w;
         }
-        return wsum ? sum / wsum : valueAt(frames, t, pick, tau);
+        return wsum ? sum / wsum : valueAt(frames, t, pick, ve);
     }
     /** 2.6 (Xenon 2 KIT-GAP 10): the run of frames around B with no jump between neighbours - a mean over a time window is
      *  taken on B's side of a jump only, as the pair interpolation never crosses one. */
@@ -298,6 +304,7 @@ const WBSCENE = (() => {
         const passMax = o.passMax === undefined ? 100 : o.passMax;
         if (frames.length && passMax > 0 && frames[frames.length - 1].t - passes[passes.length - 1].t > passMax) passes = frames;   // 1.1: no new pass for a while: every frame is one
         else if (o.passTime && passes.length) passes = passAxis(frames, passes);   // 2.13: the passes at the times the game computed them, and the pass it has computed but not shown yet
+        const stopped = o.passStop !== false && passesStopped(frames);   // 2.17
         const extC = o.extrapolate || 0, extO = o.extrapolateObjects !== undefined ? o.extrapolateObjects : extC;   // 1.7
         if (takt) { const v = takt.view(ts); tv = v.tv; tvO = v.tvO; }
         if (takt) { p = takt.pair(frames, tv, extC > 0 ? true : undefined); q = takt.pair(passes, tvO, extO > 0 ? true : undefined); }
@@ -308,7 +315,7 @@ const WBSCENE = (() => {
         const A = p.a, B = p.b || p.a;
         let f = Math.min(Math.max(p.f, 0), p.b ? 1 + extC : 0);
         if (p.b && jumped(A.cam, B.cam)) f = 1;                                   // 1.2 (KIT-GAPS 44): a jump is shown, not crossed
-        const OA = q ? q.a : A, OB = q ? (q.b || q.a) : B, of = q ? Math.min(Math.max(q.f, 0), q.b ? 1 + extO : 0) : 0;
+        const OA = q ? q.a : A, OB = q ? (q.b || q.a) : B, of = q ? Math.min(Math.max(q.f, 0), q.b ? 1 + (stopped ? 0 : extO) : 0) : 0;
         const win = B.window, lim = B.limits;
         // the game's camera between the frames, the view's camera clamped; soft clamp and vertical smoothing as means over frames
         const gcam = [lerp(A.cam[0], B.cam[0], f), lerp(A.cam[1], B.cam[1], f)];
@@ -337,7 +344,7 @@ const WBSCENE = (() => {
             if (tracks && !screen && !pr.to.steady && (!sx || !sy)) {               // 2.14: the object's world position as a mean over its passes
                 const run = trackRun(tracks.get(pr.to.id), passes.indexOf(OB), jumped);
                 if (run && run.length > 1) {
-                    const sh = { shape: o.objMean.shape || 'box', step: o.objMean.step };
+                    const sh = { shape: o.objMean.shape || 'box', step: o.objMean.step, stopped };
                     if (!sx) x = windowMean(run, tO, o.objMean.tau, (e) => e.x, sh);
                     if (!sy) y = windowMean(run, tO, o.objMean.tau, (e) => e.y, sh);
                 }
@@ -349,7 +356,7 @@ const WBSCENE = (() => {
         const leads = new Set(); for (const ob of objs) if (ob.o.lead > 0) leads.add(+ob.o.lead);
         for (const L of leads) {
             const pq = pairOf(passes, tvO + L); if (!pq) continue;
-            const lA = pq.a, lB = pq.b || pq.a, lf = Math.min(Math.max(pq.f, 0), pq.b ? 1 + extO : 0);
+            const lA = pq.a, lB = pq.b || pq.a, lf = Math.min(Math.max(pq.f, 0), pq.b ? 1 + (stopped ? 0 : extO) : 0);
             const at = new Map(); for (const e of objsAt(tvO + L, lA, lB, lf)) if (e.o.lead === L) at.set(e.o.id, e);
             for (let i = 0; i < objs.length; i++) if (+objs[i].o.lead === L) { const e = at.get(objs[i].o.id); if (e) objs[i] = e; }
         }
@@ -411,6 +418,21 @@ const WBSCENE = (() => {
      *  does not name where it is - so the objects need not wait for the swap nor guess by the last velocity. The frames
      *  themselves are not changed (the entries inherit from them); the camera, the window and the sprites stay on rec.t. */
     const NEXT = new WeakMap();
+    /** 2.17 (SWIV: the game's own pause): the passes stopped while the frames still come - the newest pass the frames know (as
+     *  rec.pass or rec.next.pass) first came longer ago than the longest of the last 8 intervals between passes, + half a frame.
+     *  A record that is late (the engine behind) brings no frame either, so it is not taken for a stop. */
+    function passesStopped(frames) {
+        const n = frames.length; if (n < 3 || frames[n - 1].pass === undefined) return false;
+        const tF = frames[n - 1].t, fm = (tF - frames[0].t) / (n - 1), tol = fm / 4;   // a pass shown after it came as rec.next has its time again, give or take the stamps
+        const first = []; let lastV = -Infinity;
+        for (const fr of frames) {
+            if (fr.pass !== undefined && fr.pass > lastV + tol) { first.push(fr.t); lastV = fr.pass; }
+            if (fr.next && fr.next.pass !== undefined && fr.next.pass > lastV + tol) { first.push(fr.t); lastV = fr.next.pass; }
+        }
+        if (first.length < 3) return false;
+        let gap = 0; for (let i = Math.max(1, first.length - 8); i < first.length; i++) gap = Math.max(gap, first[i] - first[i - 1]);
+        return tF - first[first.length - 1] > gap + fm / 2;
+    }
     function passAxis(frames, passes) {
         const out = passes.map((fr) => (fr.pass === undefined || fr.pass === fr.t ? fr : Object.create(fr, { t: { value: fr.pass } })));
         const last = passes[passes.length - 1], lt = out[out.length - 1].t;

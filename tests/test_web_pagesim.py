@@ -98,3 +98,31 @@ def test_cli_judges_samples_without_a_browser(tmp_path, capsys):
     assert cli.main(['web', 'smooth', '--samples', str(g), '--json']) == 0
     res = json.loads(capsys.readouterr().out)
     assert res[str(g)]['passed'] and res[str(g)]['obj_back'] == 0 and res[str(g)]['obj_moving'] > 100
+
+
+def test_a_paused_game_stops_the_objects_at_its_last_pass():
+    """wb-scene 2.17 (kit 1.0.80, SWIV's own pause key P): the frames keep coming in time, the pass and its positions stay and
+    there is no rec.next - the scene used to take the next pass for late and ran the objects on by extrapolateObjects and by
+    objMean's carried window (5-9 px in the browser), then stepped them back at passMax. Now they stop at the last pass;
+    passStop: false is the old behaviour."""
+    r = run_js("""(() => { const PZ = 600, X = (k) => 40 + 5 * k, passT = {};
+        const feed = (n, takt) => { const t = takt.stamp(n + 1), fm = takt.fm(), m = Math.min(n, PZ);
+          const sh = Math.floor((m - 2) / 2), cp = n < PZ ? Math.floor(m / 2) : sh; if (sh < 0) return null;
+          const pt = (k) => t - (n + 1 - (2 * k + 2) - 0.25) * fm + 30;
+          if (passT[sh] === undefined) { passT[sh] = pt(sh); takt.pass(t); }
+          const rec = { n, t, cam: [0, 0], limits: lim, window: win, pass: passT[sh], objects: [{ id: 1, x: X(sh), y: 50, w: 1, h: 1, idx: new Uint8Array(1) }] };
+          if (cp > sh) rec.next = { pass: pt(cp), cam: [0, 0], objects: [{ id: 1, x: X(cp), y: 50 }] };
+          return rec; };
+        const o = {};
+        for (const [k, sc] of [['on', {}], ['off', { passStop: false }], ['onExt', { objMean: undefined }]]) {
+          for (const q in passT) delete passT[q];
+          const v = P.run({ WBTAKT: T, WBSCENE: S, from: 0, count: 900, feed, hz: 60, engine: 5, takt: { fps: 50, ahead: 4, latC: 50, latO: 76 },
+            scene: Object.assign({ passTime: true, extrapolateObjects: 1, objMean: { tau: 50, step: 1 }, jumpMax: 40, passMax: 200 }, sc) });
+          const xs = v.samples.map((s) => (s[2].length ? s[2][0][1] : null)).filter((x) => x !== null);
+          let back = 0; for (let i = 1; i < xs.length; i++) if (xs[i] < xs[i - 1] - 1e-6) back++;
+          o[k] = { fin: xs[xs.length - 1], max: Math.max(...xs), back, moving: xs.filter((x, i) => i && x > xs[i - 1]).length }; }
+        return o; })()""")
+    last = 40 + 5 * ((600 - 2) // 2)
+    for k in ('on', 'onExt'):
+        assert r[k]['fin'] == last and r[k]['max'] == last and r[k]['back'] == 0 and r[k]['moving'] > 400, (k, r[k])
+    assert r['off']['max'] - r['off']['fin'] > 4 and r['off']['back'] >= 1, r['off']

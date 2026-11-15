@@ -634,6 +634,30 @@ The player with a lead is the player of the old latency - its response and its k
 smoothness; the trade is the page's (SWIV: a Debug switch). A player's shots drawn without the player's lead start up to
 the lead's motion behind its nose; give them the same lead.
 
+**2.18 (kit 1.0.80, SWIV): passes that stopped (wb-scene 2.17).** SWIV's own pause key (P, the game's, not the page's
+pause) stops the game's passes while its frames still come in time. The scene took the next pass for late: the objects
+ran on past the last pass by `extrapolateObjects` and by objMean's window carried on by the slope (and `valueAt` past
+the newest pass), then stepped back when `passMax` made every frame a pass. Measured in the real Chrome with a window
+(Apple M5, 60 Hz, SWIV's page as the project has it, kit 1.0.76 modules; the game's P pressed 4 times in play, every
+display frame's drawn objects): every moving object ran 12-35 px on for 0.2-0.3 s after the key - the game's own
+reaction, the camera stopped as long - and then 58 of 60 moving object axes stepped back 1.7-8.7 px, about one pass.
+The same in `wb-pagesim` with a synthetic game (`tests/test_web_pagesim.py`): 6.25 px back with objMean, 5 px with
+`extrapolateObjects` alone. Now: the passes stopped = the newest pass the frames know (as `rec.pass` or `rec.next.pass`)
+first came longer ago than the longest of the last 8 intervals between passes + half a frame; the pair is then not
+extrapolated, objMean's window is carried up to the newest value and not past it, and `valueAt` holds the newest value.
+A late engine brings no frames either, so it is not taken for a stop. `passStop: false` keeps the old behaviour.
+
+| SWIV's page, real Chrome, 30 s of play + 4 pauses | objects jitter (mean) | back steps | camera jitter | pause: axes stepped back |
+|---|---|---|---|---|
+| wb-scene 2.15 (the project's), 2 runs | 0.026 / 0.034 (0.002 / 0.003) | 2.6 / 1.9 per mille | 0.041 / 0.021 | 58 of 60, up to 8.7 px |
+| wb-scene 2.17, 3 runs | 0.075 / 0.024 / 0.028 (0.003 / 0.003 / 0.002) | 1.3 / 2.3 / 1.6 per mille | 0.029 / 0.316 / 0.029 | 0 of 64 |
+
+(The camera's 0.316 came with 0.9 % missing passes at a load rising from 3.1 to 5.1 - the camera's composition does not
+use the stop; the objects' 0.075 is one object's track.) The same runs answered 2.16's open question: in the real
+Chrome the engine thread kept up - records 6-7 ms after their time (max 15-16), 0 % of the display frames extrapolated
+during play, key -> drawn player 66-83 ms (the game's own 80) - so SWIV's latO 76 has a wide margin there; the 14-16 ms
+a game frame was headless Chromium's.
+
 ## I. The scene recorder (`arek_scene.h` + `wb-scenerec.js`, kit 1.0.77) - one hint instead of a recorder per game
 
 Until 1.0.77 every game wrote its own scene record for G: SWIV's `src/swiv_scene.c` (307 lines: its buffers, its node list,

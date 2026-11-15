@@ -3,6 +3,15 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.80 (2026-11-15)
+
+- wb-scene 2.17: passes that stopped - frames still coming in time and no new pass (also as `rec.next`) for longer than
+  the longest of the last 8 intervals between passes + half a frame - stop the objects at the newest pass: no
+  extrapolation, objMean's window not carried past it (SWIV's own pause key P: every moving helicopter ran on and stepped
+  back 1.7-8.7 px, about one pass; now 0 of 64 in the real Chrome, play unchanged - back steps 1.3-2.3 per mille against
+  1.9-2.6). `passStop: false` keeps the old behaviour. WB-PLYNULOST.md 2.18 with the first measurement in the real Chrome
+  with a window: SWIV's records 6-7 ms after their time (max 15-16), none extrapolated in play
+
 ## 1.0.79 (2026-11-13)
 
 - wb-scene 2.16, `objects[].lead` (ms, optional): an object composed at the objects' time + lead from its own pair of
