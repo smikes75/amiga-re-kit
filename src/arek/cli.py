@@ -331,7 +331,8 @@ def cmd_recomp(a):
     funcs = [recomp.parse_func_spec(s) for s in a.func or []]
     flow = recomp.flow_from_specs(data, a.base, a.jtab or [], a.indirect or [], a.stop or [],
                                   a.exitat or [], a.extern or [], a.ret or [], a.prefix, a.lib,
-                                  a.inline or [], a.overlay or [], a.dynamic or [], a.overlay_module, a.smc or [], a.live or [])
+                                  a.inline or [], a.overlay or [], a.dynamic or [], a.overlay_module, a.smc or [], a.live or [],
+                                  a.hook or [], a.operand or [], a.declare or [])
     impl = None
     if a.stub_impl:
         impl = 'notes' if a.stub_impl == 'notes' else Path(a.stub_impl).read_text()
@@ -584,6 +585,20 @@ def cmd_cover(a):
         print(json.dumps(r, indent=1))
     else:
         print(cover.format_report(r))
+
+
+def cmd_discover(a):
+    from . import discover
+    res = discover.run(a.config, only=a.scenario, rounds=a.rounds, build_first=not a.no_build,
+                       log=(lambda *x: None) if a.json else print)
+    if a.json:
+        print(json.dumps(res, indent=1))
+    else:
+        for r in res:
+            print('%s: %s, %d run(s); roots %s; module roots %s; modules %s' % (
+                r['name'], r['status'], r.get('rounds', 0), ' '.join(r.get('roots', [])) or '-',
+                ' '.join(r.get('module_roots', [])) or '-', ' '.join(r.get('modules', [])) or '-'))
+    return 0 if res and all(r['status'] == 'clean' for r in res) else 1
 
 
 def cmd_fuzz(a):
@@ -1127,6 +1142,16 @@ def build_parser():
                         'an = An known only at run time (slot = (An - TABLE + Dn) / STRIDE)')
     s.add_argument('--indirect', nargs='*', metavar='SITE=T1,T2',
                    help='possible targets of jsr/jmp (An), or of a jmp abs the program rewrites')
+    s.add_argument('--hook', nargs='*', action='extend', metavar='ADDR=NAME[:KIND]',
+                   help='1.0.81: the project\'s C at the instruction at ADDR, kept by its address instead of a patch of the '
+                        'generated text: KIND before (default) / after: void NAME(M68 *m) around it, instead: its body '
+                        'replaced, skip: int NAME(M68 *m) before it skips it when nonzero; an address inside the translation '
+                        'that is not an instruction\'s start fails the translation; repeatable')
+    s.add_argument('--operand', nargs='*', action='extend', metavar='ADDR=EXPR',
+                   help='1.0.81: the immediate or register source operand of the instruction at ADDR read as the C '
+                        'expression EXPR (the project\'s variable or function), masked to the size; repeatable')
+    s.add_argument('--declare', nargs='*', action='extend', metavar='TEXT',
+                   help='1.0.81: C declarations put before the functions (what --operand EXPR uses); repeatable')
     s.add_argument('--live', nargs='*', action='extend', metavar='ADDR',
                    help='the instruction at ADDR has an immediate operand the program rewrites (move.w #n,... of a trainer): '
                         'it is read from RAM when the instruction runs; repeatable')
@@ -1327,6 +1352,14 @@ def build_parser():
     s.add_argument('--top', type=int, default=20, help='least covered routines to list (0 = all)')
     s.add_argument('--json', action='store_true')
     s.set_defaults(fn=cmd_cover)
+    s = sp.add_parser('discover', help='run a translation built with -DAREK_DISCOVER through the game\'s scenarios until every one '
+                      'runs clean: each unknown routine or overlay module goes where the project\'s build reads it (arek.discover)')
+    s.add_argument('config', help='DISCOVER.json (build, run, roots, modules, code, areas, scenarios)')
+    s.add_argument('--scenario', nargs='*', help='only these scenarios')
+    s.add_argument('--rounds', type=int, help='runs per scenario (default the config\'s, 40)')
+    s.add_argument('--no-build', action='store_true', help='do not build before the first run')
+    s.add_argument('--json', action='store_true')
+    s.set_defaults(fn=cmd_discover)
     s = sp.add_parser('fuzz', help='random joystick input (R L U D F S per frame) for the emulator and a rebuild alike')
     s.add_argument('--seed', type=int, required=True)
     s.add_argument('--frames', type=int, required=True)

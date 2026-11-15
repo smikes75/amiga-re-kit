@@ -13,6 +13,7 @@ capture RAM + registers at the routine's call and at its return with
 state and diff registers, CCR and every written address against the second.
 """
 import re
+import sys
 
 from . import decoder
 from .decoder import (SZ_B, SZ_W, SZ_L, SZNAME, FLOW_MODES, NOFLOW, Flow, Inline, JumpTable,
@@ -635,11 +636,31 @@ static int cond(M68 *m, int c) {
 #define NO_RET 0xffffffffu
 static uint32_t RET_PC = NO_RET, RET_SP = 0;
 static void push32(M68 *m, uint32_t v) { m->a[7] -= 4; wr32(m->a[7], v); RET_PC = NO_RET; }
+#ifdef AREK_DISCOVER
+/* 1.0.81 (arek discover, -DAREK_DISCOVER): the first run-time target the translation does not know ends the run with one
+   JSON line in $AREK_UNKNOWN (stderr without it) - the target, and the C file, function (the 68000 routine) and line of the
+   place that met it (a call's target, an --indirect / --jtab default, an --smc site, an --inline return, a --stop) - and
+   exit 40; with --cover the coverage first goes to $AREK_COVER. Only the first unknown counts: a run that went on past it
+   would run garbage. An unknown overlay module: arek_unknown_module (overlay_call), exit 41. */
+static void arek_unknown_at(uint32_t a, const char *file, const char *fn, int line) {
+    const char *p = getenv("AREK_UNKNOWN"); FILE *f = p ? fopen(p, "a") : NULL;
+    fprintf(f ? f : stderr, "{\"kind\": \"routine\", \"target\": \"%06x\", \"file\": \"%s\", \"fn\": \"%s\", \"line\": %d}\n",
+            (unsigned)a, file, fn, line);
+    if (f) fclose(f);
+    fprintf(stderr, "unknown routine %06x (%s, %s line %d)\n", (unsigned)a, file, fn, line);
+#ifdef COV_LO
+    { const char *c = getenv("AREK_COVER"); FILE *cf = c ? fopen(c, "w") : NULL; if (cf) { cov_dump(cf); fclose(cf); } }
+#endif
+    exit(40);
+}
+#define unknown_call(a) arek_unknown_at((a), __FILE__, __func__, __LINE__)
+#else
 #ifdef UNKNOWN_HOOK
 void unknown_hook(uint32_t a);          /* the host's: a run-time target the translation does not know (no exit) */
 static void unknown_call(uint32_t a) { RET_PC = NO_RET; unknown_hook(a); }
 #else
 static void unknown_call(uint32_t a) { fprintf(stderr, "unknown routine %06x\n", a); exit(4); }
+#endif
 #endif
 #define RD32_RAW(a) (((uint32_t)rd16_raw(a) << 16) | rd16_raw((a) + 2))
 /* After a call. 1.0.40: the callee's rts says where the 68000 went - to this call's return address: go on here,
@@ -757,9 +778,34 @@ static uint64_t overlay_fp(uint32_t base, uint32_t n) {
     for (uint32_t i = 0; i < n; i++) { h ^= rd8_raw(base + i); h *= 0x100000001b3ull; }   /* 1.0.7: the fingerprint is the host's look, not a CPU access (it cost emulated time at every overlay_call - Turrican II KIT-GAPS 9) */
     return h;
 }
+#ifdef AREK_DISCOVER
+/* 1.0.81 (arek discover): an overlay module nobody registered - its area [base, base + size) as the RAM holds it now into
+   ovl_<entry>_<fp>.bin beside $AREK_UNKNOWN (the current directory without it), one JSON line, exit 41. */
+static void arek_unknown_module(uint32_t base, uint32_t size, uint32_t entry, uint32_t key, uint64_t fp) {
+    const char *p = getenv("AREK_UNKNOWN"); char dump[1024]; const char *sl = p ? strrchr(p, '/') : NULL;
+    snprintf(dump, sizeof dump, "%.*sovl_%06x_%016llx.bin", sl ? (int)(sl - p + 1) : 0, sl ? p : "", (unsigned)entry, (unsigned long long)fp);
+    FILE *d = fopen(dump, "wb");
+    if (d) { for (uint32_t i = 0; i < size; i++) fputc((int)rd8_raw(base + i), d); fclose(d); }
+    FILE *f = p ? fopen(p, "a") : NULL;
+    fprintf(f ? f : stderr, "{\"kind\": \"module\", \"base\": \"%06x\", \"size\": \"%x\", \"entry\": \"%06x\", \"key\": %u, \"fp\": \"%016llx\", \"dump\": \"%s\"}\n",
+            (unsigned)base, (unsigned)size, (unsigned)entry, (unsigned)key, (unsigned long long)fp, d ? dump : "");
+    if (f) fclose(f);
+    fprintf(stderr, "overlay_call: unknown module at %06x (entry %06x, %u bytes there %016llx) - arek discover\n", (unsigned)base, (unsigned)entry, (unsigned)key, (unsigned long long)fp);
+#ifdef COV_LO
+    { const char *c = getenv("AREK_COVER"); FILE *cf = c ? fopen(c, "w") : NULL; if (cf) { cov_dump(cf); fclose(cf); } }
+#endif
+    exit(41);
+}
+#endif
 '''
 RUNTIME = RUNTIME.replace('%%TIMING%%', TIMING_RT + WAIT_RT)
 PROFILE_OFF = '#define PROF_WRITE(a) ((void)0)\n'
+
+
+# 1.0.81 (--operand): the instructions whose <ea> is their source when it is a register (add/sub/cmp/and/or <ea>,Dn: a
+# Dn,<ea> form has a memory <ea>; eor Dn,<ea> may write a Dn and is not here), and the stand-in for an immediate kept in i.imm
+EA_SOURCE = {'add', 'adda', 'sub', 'suba', 'cmp', 'cmpa', 'and', 'or', 'tst', 'mulu', 'muls', 'divu', 'divs', 'btst'}
+OPERAND_SENT = 0x7fffeeed
 
 
 class Gen:
@@ -788,6 +834,7 @@ class Gen:
         self.out = []
         self.stats = {}
         self.cur = None                     # entry of the routine being generated
+        self.used_flow = set()              # 1.0.81: (kind, address) of the hooks and operands placed
 
     def emit(self, s=''):
         self.out.append(s)
@@ -808,6 +855,10 @@ class Gen:
                 self.emit('#ifndef AREK_RESUME\n#error "a --resume module needs a --resume main translation"\n#endif')
         for name in sorted(set(self.flow.externs.values())):
             self.emit('void %s(M68 *m);' % name)
+        for text in self.flow.declare:                    # 1.0.81: what the hooks' and operands' C uses
+            self.emit(text)
+        for name, kind in sorted({h for hs in self.flow.hooks.values() for h in hs}):
+            self.emit('%s %s(M68 *m);' % ('int' if kind == 'skip' else 'void', name))
         for entry in self.all_entries():
             self.emit('void %s(M68 *m);' % self.flow.fname(entry))
             if self.profile:
@@ -986,6 +1037,9 @@ class Gen:
         self.emit('    for (int i = 0; i < OVL_N; i++)')
         self.emit('        if (OVL[i].base - base < size && OVL[i].fp == overlay_fp(OVL[i].base, OVL[i].key)) { OVL[i].stamp = ++OVL_GEN; OVL[i].fn(m, a); return; }')
         self.emit('    uint64_t fp = overlay_fp(a, key);')
+        self.emit('#ifdef AREK_DISCOVER')
+        self.emit('    arek_unknown_module(base, size, a, key, fp);')
+        self.emit('#endif')
         self.emit('#ifdef OVERLAY_HOOK')
         self.emit('    overlay_unknown_hook(m, base, a, fp); return;')
         self.emit('#else')
@@ -1168,7 +1222,28 @@ class Gen:
                 raise Unsupported('--live $%x: %s has no immediate operand in an extension word' % (i.addr, i.text))
             for e in eas:
                 e.live = True
+        sent = None
+        if i.addr in self.flow.operands:                   # 1.0.81: the source operand as the project's expression
+            expr, mn = self.flow.operands[i.addr], i.text.split()[0].split('.')[0]
+            e = getattr(i, 'src', None) or (i.ea if mn in EA_SOURCE and hasattr(i, 'ea') else None)
+            if e is not None and getattr(e, 'kind', None) in ('imm', 'd', 'a'):
+                e.expr = expr
+            elif e is None and isinstance(getattr(i, 'imm', None), int) and not isinstance(i.imm, bool):
+                sent, i.imm = i.imm, OPERAND_SENT                # addi / cmpi / moveq / addq ...: the number in the text, replaced below
+            else:
+                raise Unsupported('--operand $%x: %s has no immediate or register source operand' % (i.addr, i.text))
+            self.used_flow.add(('operand', i.addr))
         own = ([self.tick(i)] if self.timing and self.tick(i) else []) + self.body(i, start, end, ins)
+        if sent is not None:
+            i.imm = sent
+            mask = {SZ_B: 0xff, SZ_W: 0xffff, SZ_L: 0xffffffff}.get(getattr(i, 'sz', SZ_L), 0xffffffff)
+            v = '((uint32_t)(%s) & 0x%xu)' % (expr, mask)
+            new = [re.sub(r'0x%xu|%du?\b' % (OPERAND_SENT, OPERAND_SENT), lambda _m: v, x) for x in own]
+            if new == own:
+                raise Unsupported('--operand $%x: %s folds its immediate into the code' % (i.addr, i.text))
+            own = new
+        if i.addr in self.flow.hooks:                      # 1.0.81: the project's C at this instruction, by its address
+            own = self.hooked(i, own)
         alts = self.flow.smc_alts(self.data, self.base, i.addr)
         if not alts:
             return own
@@ -1190,6 +1265,29 @@ class Gen:
         L.extend('    ' + ln for ln in own)
         L.append('} else { unknown_call(0x%xu); return; }   /* --smc: words nobody named */' % i.addr)
         return L
+
+    def hooked(self, i, own):
+        """1.0.81 (Flow.hooks): the lines of instruction i with the project's hooks - before / after it, instead of its
+        body, or a skip; the TICK (the instruction's time) stays first."""
+        tick = own[:1] if self.timing and self.tick(i) else []
+        body = own[len(tick):]
+        goes_on = i.end in successors(i)
+        flows = len(successors(i)) != 1 or not goes_on
+        for name, kind in self.flow.hooks[i.addr]:
+            if kind in ('after', 'instead') and flows:
+                raise Unsupported('--hook $%x=%s:%s: %s changes the flow (only before / skip there)' % (i.addr, name, kind, i.text))
+            if kind == 'before':
+                body = ['%s(m);   /* --hook */' % name] + body
+            elif kind == 'after':
+                body = body + ['%s(m);   /* --hook */' % name]
+            elif kind == 'instead':
+                body = ['%s(m);   /* --hook: instead of %s */' % (name, i.text)]
+            elif kind == 'skip':
+                body = ['if (!%s(m)) {   /* --hook: skips %s when nonzero */' % (name, i.text)] + ['    ' + x for x in body] + ['}']
+            else:
+                raise Unsupported('--hook $%x: kind %r (before, after, instead, skip)' % (i.addr, kind))
+            self.used_flow.add(('hook', i.addr))
+        return tick + body
 
     def br(self, target, start, end, ins=None):
         fl = self.flow
@@ -1780,7 +1878,8 @@ def _hex(x):
 
 
 def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern=(), ret=(),
-                    prefix=None, lib=False, inline=(), overlay=(), dynamic=(), module=None, smc=(), live=()):
+                    prefix=None, lib=False, inline=(), overlay=(), dynamic=(), module=None, smc=(), live=(),
+                    hook=(), operand=(), declare=()):
     """Build a decoder.Flow from the command-line spellings (all addresses hex):
 
     jtab     'SITE[,SITE..]:TABLE:COUNT:STRIDE:bra|ptr[:AN|an]' - jsr/jmp (d8,An,Dn) into a table;
@@ -1796,6 +1895,9 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
     live     'ADDR' - the instruction at ADDR has an immediate operand the program rewrites: read from RAM at run time
     smc      'ADDR=WORDS[,WORDS..]' - the instruction at ADDR is rewritten by the program: the other contents, each as
              hex words from ADDR (the opcode word will do when the extension words stay)
+    hook     'ADDR=NAME[:before|after|instead|skip]' - 1.0.81: the project's C at the instruction (default before)
+    operand  'ADDR=EXPR' - 1.0.81: the instruction's immediate / register source operand read as the C expression EXPR
+    declare  'TEXT' - 1.0.81: C declarations put before the functions (what EXPR uses)
     """
     jtabs = {}
     for spec in jtab:
@@ -1837,9 +1939,18 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
     for spec in smc:
         a, _, alts = spec.partition('=')
         rew.setdefault(_hex(a), []).extend(bytes.fromhex(x) for x in alts.split(',') if x)
+    hk = {}
+    for spec in hook:
+        a, _, rest = spec.partition('=')
+        name, _, kind = rest.partition(':')
+        hk.setdefault(_hex(a), []).append((name, kind or 'before'))
+    ops = {}
+    for spec in operand:
+        a, _, expr = spec.partition('=')
+        ops[_hex(a)] = expr
     return Flow(stops=map(_hex, stop), rets=map(_hex, ret), exits=map(_hex, exitat), externs=ext,
                 jtabs=jtabs, indirect=ind, prefix=pf, lib=lib, inline=inl, overlays=ovl,
-                dynamic=map(_hex, dynamic), module=mod, smc=rew, live=map(_hex, live))
+                dynamic=map(_hex, dynamic), module=mod, smc=rew, live=map(_hex, live), hooks=hk, operands=ops, declare=declare)
 
 
 def _ranges(pcs):
@@ -1857,6 +1968,21 @@ def refusal_json(e):
     """An Unsupported as JSON-ready data: the message and every frontier, addresses as hex strings."""
     return {'message': str(e), 'frontiers': [{k: ('%x' % v if k in ('routine', 'site', 'target') else v)
                                               for k, v in f.items()} for f in e.frontiers]}
+
+
+def unplaced(g, flow):
+    """1.0.81: a hook or an operand at an address inside a translated function that is not an instruction's start there
+    is a mistake to say aloud (a patch of the generated text missed silently when the code generator changed; an address
+    cannot miss that way, but it can be wrong). One outside every translated function belongs to another translation (a
+    module): a note only."""
+    want = {('hook', a) for a in getattr(flow, 'hooks', {})} | {('operand', a) for a in getattr(flow, 'operands', {})}
+    missing = sorted(want - g.used_flow, key=lambda x: x[1])
+    inside = [(k, a) for k, a in missing if any(s <= a < e for s, e, _ in g.funcs) or
+              any(min(c) <= a <= max(c) for c in g.cfg.values() if c)]
+    if inside:
+        raise Unsupported('--%s $%x: not the start of an instruction of the translation' % inside[0])
+    for k, a in missing:
+        sys.stderr.write('arek recomp: --%s $%x is not in this translation (another module?)\n' % (k, a))
 
 
 def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow=NOFLOW,
@@ -1957,6 +2083,7 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
         raise ValueError('--profile counts through the C frames that --resume drops')
     g = Gen(data, base, list(funcs), cfg, flow, timing, profile, cover is not None, cover_in_tick, bus_table, resume)
     src = g.gen()
+    unplaced(g, flow)
     if cover is not None:
         cover['lo'] = base
         cover['routines'] = {'%x' % e: _ranges(pcs) for e, pcs in sorted(g.cov_pcs.items())}

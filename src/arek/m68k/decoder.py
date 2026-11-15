@@ -91,6 +91,8 @@ class EA:
         self.mode, self.areg, self.disp, self.absval = mode, areg, disp, absval
 
     def read(self, sz):
+        if getattr(self, 'expr', None) is not None and self.kind in ('imm', 'd', 'a'):   # 1.0.81 (Flow.operands)
+            return '((uint32_t)(%s) & 0x%xu)' % (self.expr, {SZ_B: 0xff, SZ_W: 0xffff, SZ_L: 0xffffffff}[sz])
         if self.kind == 'd':
             return {SZ_B: '(uint8_t)m->d[%d]' % self.reg,
                     SZ_W: '(uint16_t)m->d[%d]' % self.reg,
@@ -536,11 +538,22 @@ class Flow:
     smc       {address: [bytes, ...]} - an instruction the program REWRITES (a trainer that turns a ``subq`` into a
               ``tst``): the other bytes it may hold. The translation holds every variant and takes the one whose
               words are in RAM when the place runs (``smc_alts``)
+    hooks     {address: [(name, kind)]} - 1.0.81: the project's C at an instruction, kept by its address instead of a
+              patch of the generated text: kind 'before' / 'after' (``void name(M68 *m)`` around it; 'after' only behind
+              an instruction that goes on behind itself), 'instead' (the instruction's body replaced, its time kept),
+              'skip' (``int name(M68 *m)`` before it - nonzero skips the instruction, its time kept)
+    operands  {address: C expression} - 1.0.81: the instruction's source operand (an immediate, a register) is read as
+              the expression (the project's variable or function), masked to the operand's size
+    declare   [C text] - 1.0.81: declarations put before the functions (what the hooks' expressions use)
     """
 
     def __init__(self, stops=(), rets=(), exits=(), externs=None, jtabs=None, indirect=None,
-                 prefix=None, lib=False, inline=None, overlays=(), dynamic=(), module=None, smc=None, live=()):
+                 prefix=None, lib=False, inline=None, overlays=(), dynamic=(), module=None, smc=None, live=(),
+                 hooks=None, operands=None, declare=()):
         self.stops, self.rets, self.exits = set(stops), set(rets), set(exits)
+        self.hooks = {a: list(h) for a, h in (hooks or {}).items()}
+        self.operands = dict(operands or {})
+        self.declare = list(declare)
         self.live = set(live)
         self.smc = {a: [bytes(b) for b in alts] for a, alts in (smc or {}).items()}
         self._smc = {}

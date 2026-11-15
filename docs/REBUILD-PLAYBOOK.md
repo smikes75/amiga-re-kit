@@ -114,6 +114,32 @@ found every module of Turrican II (its `tools/modules.py`, 160 lines):
 Levels that use data an earlier level left in memory (Turrican II 3-3 drew the pattern 3-2 loaded) start from the
 world's first level and finish it at once until the chosen level is loaded - the page's "chain" event.
 
+### `arek discover` (kit 1.0.81): the run-time half of the loop, the same for every game
+
+Steps 1, 2 (the run side) and 6 above are now one command; the translation side (roots, refusals, flow arguments) stays
+the project's build, which `arek discover` runs. The project builds its host with `-DAREK_DISCOVER` (no hooks of its own):
+the first target the translation does not know ends the run with one JSON line in `$AREK_UNKNOWN` - a routine (exit 40:
+the target, and the C file, function and line of the place that met it) or an overlay module (exit 41: base, size,
+entry, key, fingerprint, its area dumped beside the record) - after writing the coverage to `$AREK_COVER`.
+`arek discover DISCOVER.json` then, scenario by scenario: a fresh folder per run, the same input until the scenario runs
+clean (exit 0 and the output matches `clean`, e.g. the frame count); a routine inside the resident ranges is appended
+to the project's roots file, one inside an overlay area to its module roots file, a module to `modules.json` with its
+dump; an odd target or one outside both is a wild jump - reported with the place, never added; the same target again
+after the build means the build did not read the file - stopped. Where every address came from is in `found.jsonl`.
+The config, the rules and the record are in `src/arek/discover.py`. SWIV, its 69 run-time roots taken away: see
+CHANGELOG 1.0.81 for what the command found again.
+
+### Changes to the game by address (kit 1.0.81), not by the generated text
+
+A rebuild that changes the game (a wider band, a widened object activation, a Debug option) used to patch the generated C
+by its exact text - Superfrog re-fitted 50 such patches at every kit upgrade (2-4.5 h each), Turrican II's shipped once
+without them when the code generator changed. Now they are flow arguments kept by the instruction's address:
+`--operand ADDR=EXPR` (the immediate or register source operand read as a C expression), `--hook ADDR=NAME[:before|after|
+instead|skip]` (`void NAME(M68 *m)` around the instruction, instead of its body - its time kept - or `int NAME` that skips
+it), `--declare TEXT` (the declarations they use). An address inside the translation that is not an instruction's start
+fails the translation; one outside it (a module's) is a note. SWIV's band (`tools/patch_band.py`, four places) as four
+`--operand`s: the same records as the text patch over 20 000 frames, the band on and off.
+
 ## The page (M7): events at exact game frames
 
 The engine in its thread is held at the frame of the next event (`engine_allow(min(n, event.f))`); the event (keys, a

@@ -3,6 +3,25 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.81 (2026-11-15)
+
+- `-DAREK_DISCOVER`: the first target a translation does not know ends the run with one JSON line in `$AREK_UNKNOWN`
+  (exit 40 a routine: the target and the C file, function, line that met it; exit 41 an overlay module: base, size,
+  entry, key, fingerprint, its area dumped beside the record) after the coverage to `$AREK_COVER`
+- `arek discover DISCOVER.json` (arek.discover): the run-time loop the five rebuilds each wrote by hand - scenario by
+  scenario, a fresh folder per run, the same input until clean (exit 0 and the output shows `clean`), a routine to the
+  project's roots file, one in an overlay area to its module roots, a module to `modules.json` with its dump; odd or
+  outside the code = a wild jump, reported and never added; the same target after the build = the build did not read
+  it, stopped; where each address came from in `found.jsonl`. SWIV with its 69 run-time roots taken away, seven
+  landscapes (L0 with the trainer, L1-L6), 30 000 frames each: clean after 72 runs in 78 minutes without a hand, 65
+  roots - 60 of SWIV's 69 (the other 9 are on paths these scenarios do not take) and 5 its list lacks ($1aaee $1acfa
+  $1ae2e $1af02 $1b028): with SWIV's own 69 the same L4 run stops at $1acfa, L5 at $1ae2e
+- Changes to the game by address, not by the generated text: `arek recomp --operand ADDR=EXPR` (the immediate or
+  register source operand read as a C expression), `--hook ADDR=NAME[:before|after|instead|skip]`, `--declare TEXT`;
+  an address in the translation that is not an instruction's start fails the translation, one outside it is a note.
+  SWIV's band (`tools/patch_band.py`, four text patches) as four `--operand`s: the same VTR over 20 000 frames, band on
+  and off (REBUILD-PLAYBOOK.md)
+
 ## 1.0.80 (2026-11-15)
 
 - wb-scene 2.17: passes that stopped - frames still coming in time and no new pass (also as `rec.next`) for longer than
