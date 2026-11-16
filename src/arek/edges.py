@@ -15,7 +15,9 @@ line); each was found after the user saw the band misbehave. This lists them all
 3. the project's scenario runs once with every knob at 0 (the baseline: the translation's own run, and which candidates
    the run executes at all), then once per executed candidate with only that knob at ``shift``;
 4. the report: per candidate the reads, the range of the register the constant meets (cmp / add / sub #n,Dn: a screen
-   coordinate runs from below 0 to past the edge, a ring index or a counter does not), whether the run's outcome changed
+   coordinate runs from below 0 to past the edge, a ring index or a counter does not) and where that range lies against
+   the constant (``place``: ``screen`` inside its scale, ``world`` wholly outside it - the constant is an offset from a
+   position far away that moves, a camera in level coordinates; ``wide`` across it), whether the run's outcome changed
    (``outcome``: a regex over the output, default its last line) and the project's metrics (``metrics``: name -> a regex
    with one number) against the baseline.
 
@@ -69,6 +71,22 @@ def runtime(n):
         'while (e && *e) { k = strtol(e, &q, 10); if (*q != \'=\') break; v = strtol(q + 1, &q, 0); '
         'if (k >= 0 && k < %d) arek_knob_v[k] = (int32_t)v; if (*q != \',\') break; e = q + 1; } atexit(arek_knob_dump); }' % (KNOBS_ENV, n),
     ]
+
+
+def place(simm, other):
+    """1.0.85: where the range the constant meets lies against the constant: 'screen' from a little below 0 to about twice
+    the constant (a screen coordinate, a ring index), 'world' wholly outside that (the constant is an offset from a moving
+    position in level coordinates: SWIV $14F1E addi.w #256,d7 meets the camera's -6614..-6048 - the bullets' deletion line
+    256 below the camera, a screen edge although no screen coordinate is in sight), 'wide' across it (a counter, a long
+    run); None when the constant meets no register."""
+    if not other:
+        return None
+    lo, hi = other
+    n = abs(simm)
+    a, b = -n, 2 * n + 64
+    if a <= lo and hi <= b:
+        return 'screen'
+    return 'world' if hi < a or lo > b else 'wide'
 
 
 def candidates(imms, lo, hi, mn=None, exclude=()):
@@ -211,7 +229,7 @@ class Project:
             for k, r in ex.map(one, live):
                 c = cands[k]
                 rows.append({'knob': k, 'addr': c['addr'], 'text': c['text'], 'imm': c['imm'], 'reads': base['reads'][k],
-                             'other': base['other'].get(k),
+                             'other': base['other'].get(k), 'place': place(c['simm'], base['other'].get(k)),
                              'rc': r['rc'], 'changed': r['outcome'] != base['outcome'] or r['rc'] != base['rc'],
                              'outcome': r['outcome'], 'metrics': r['metrics']})
                 log('edges: %s %-28s reads %-8d %s' % (c['addr'], c['text'][:28], base['reads'][k], 'CHANGED' if rows[-1]['changed'] else 'same'))
@@ -235,7 +253,7 @@ def format_report(rep):
         out.append('metrics (baseline): ' + ', '.join('%s %s' % (n, rep['base']['metrics'].get(n)) for n in names))
     for r in rep['runs']:
         m = ''.join(' %s %s' % (n, r['metrics'].get(n)) for n in names if r['metrics'].get(n) != rep['base']['metrics'].get(n))
-        o = ' meets %d..%d' % tuple(r['other']) if r.get('other') else ''
+        o = ' meets %d..%d %s' % (tuple(r['other']) + (r.get('place') or '',)) if r.get('other') else ''
         out.append('%s %-8s %-30s reads %-9d%s%s%s' % (r['addr'], 'CHANGED' if r['changed'] else 'same', r['text'][:30], r['reads'], o,
                                                          ' rc %d' % r['rc'] if r['rc'] != rep['base']['rc'] else '', m))
     ch = sum(1 for r in rep['runs'] if r['changed'])

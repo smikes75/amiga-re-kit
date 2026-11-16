@@ -97,11 +97,12 @@ def test_a_scenario_per_candidate_finds_the_constant_that_decides(tmp_path, caps
     runs = {r['addr']: r for r in rep['runs']}
     assert runs['001004']['changed'] and runs['001004']['outcome'] == 'd2 0' and runs['001004']['reads'] == 1
     assert runs['001004']['other'] == [300, 300] and runs['00100e']['other'] is None                   # cmpi #256 meets d1 = 300
+    assert runs['001004']['place'] == 'screen' and runs['00100e']['place'] is None
     assert not runs['00100e']['changed'] and runs['00100e']['metrics'] == {'d3': 264.0} and not runs['001000']['changed']
     assert rep['runs'][0]['addr'] == '001004'                                                          # the changed first
     assert json.loads((tmp_path / 'edges/runs/report.json').read_text())['executed'] == 3
     text = edges.format_report(rep)
-    assert '001004 CHANGED' in text and 'meets 300..300' in text and '00100e same' in text and 'd3 264.0' in text and '1 of 3 executed candidates change' in text
+    assert '001004 CHANGED' in text and 'meets 300..300 screen' in text and '00100e same' in text and 'd3 264.0' in text and '1 of 3 executed candidates change' in text
     assert cli.main(['edges', str(tmp_path / 'EDGES.json'), '--list']) == 0
     assert '4 candidates of 5 constants' in capsys.readouterr().out
     assert cli.main(['edges', str(tmp_path / 'EDGES.json'), '--only', '1004', '--shift', '-100', '--json']) == 0
@@ -112,3 +113,12 @@ def test_a_scenario_per_candidate_finds_the_constant_that_decides(tmp_path, caps
 def shlex_quote(s):
     import shlex
     return shlex.quote(s)
+
+
+def test_place_sorts_the_met_range():
+    """1.0.85: SWIV $14F1E addi.w #256,d7 met the camera (-6614..-6048) and was read as no screen edge; it is the bullets'
+    deletion line 256 below the camera."""
+    assert edges.place(256, [-48, 327]) == 'screen' and edges.place(288, [32, 298]) == 'screen'
+    assert edges.place(256, [-6614, -6048]) == 'world' and edges.place(256, [7000, 9000]) == 'world'
+    assert edges.place(256, [0, 2500]) == 'wide' and edges.place(-256, [-6614, 100]) == 'wide'
+    assert edges.place(256, None) is None

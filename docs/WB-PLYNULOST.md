@@ -698,6 +698,25 @@ display frame), limit 0.5 each:
 | SWIV e86d703 (kit 1.0.83) | 71 of 1232 = 57.6 per mille | 294 of 151 602 = 1.9 per mille | passes (0.03 its own run) |
 | Xenon 2 0952a2a (kit 1.0.48) | 0 of 1271 | 0 of 41 317 | 0.004 |
 
+**2.21 (kit 1.0.85, SWIV): what is fixed on the screen takes its screen row's palette (wb-scene 2.19); the page's own
+drawing in `arek web smooth` (websmooth 1.11).** SWIV's HUD colour 16 has a gradient over the screen rows 9-13 (the
+record's per-row palette: aae / ccf / ccf / ccf / aae, 88d elsewhere). The scene gave every object the palette of the
+world row under its device pixel - right for the ground and what moves with it, wrong for a thing the game draws at one
+screen position: the view's camera moves against the record's window by -2..+1 rows (camView, 2.19 above), so the
+gradient slid over the HUD and the HUD shimmered. An object or a sprite fixed on the screen (`objects[].screen`,
+`sprites[].screen`) now takes the palette row of its screen row - the band row less the window's top in the band
+(`palScreen` when given, else `extY`), clamped to the palette's rows - on the CPU reference and in the shader alike
+(the GPU equals the reference on the synthetic page with a screen object under a moving view camera and with palTop).
+Measured on SWIV's record (TOWN, fuzz_23 from frame 4100, 600 game frames, 711 display frames at S 2.5, the HUD opaque,
+its picture, place and the palette unchanged between two display frames): kit 1.0.84 changed the HUD's colours in 62 of
+them (173 688 device pixels), 1.0.85 in 0; every pixel outside the things fixed on the screen is the same on both.
+
+SWIV's JavaScript picture draws the scene's composition with a renderer of its own; `arek web smooth` reads cam() and
+objs() - the composition's positions, the same on both paths - and could not tell the two apart. The page may give
+`drawMs()`, the ms its own drawing took in this display frame: reported as the median, the 95th percentile and the
+maximum, and the frames whose drawing took over half a display interval (not judged). When the renderer places an object
+elsewhere than the composition (its own rounding), objs() should give where it drew it.
+
 An object's id must be what holds for its life: the game's node and the part, not a flag the game toggles.
 
 ## I. The scene recorder (`arek_scene.h` + `wb-scenerec.js`, kit 1.0.77) - one hint instead of a recorder per game

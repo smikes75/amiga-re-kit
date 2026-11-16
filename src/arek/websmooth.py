@@ -62,6 +62,12 @@ direction and then catches up (``holds``) - are counted and judged per mille of 
 player's (player() is sampled every display frame now, the samples' sixth element); limit 0.5 each. The jitter left them
 out (the catch-up is a step over OBJ_JUMP) and SWIV's page passed at 0.03 px while its player stood still twice every
 160 ms: 58 per mille (Xenon 2: 0).
+1.11 (kit 1.0.85, SWIV): drawMs() -> ms the page's own drawing took in this display frame (optional; sampled every display
+frame, the samples' seventh element; reported as ``draw_ms`` = [median, 95th percentile, max] and ``draw_over`` = the frames
+whose drawing took over half a display interval - not judged). A page that draws the scene's composition with a renderer of
+its own (SWIV's JavaScript picture) shows the same cam() and objs() on both paths - the composition's positions; what the
+renderer adds is its time on the main thread, and that is what drawMs() gives. When the renderer places the objects
+elsewhere than the composition (its own rounding), objs() should give where it drew them.
 """
 import json
 import statistics
@@ -79,7 +85,7 @@ HOLD_MAX = 3                       # display frames: a standstill up to this lon
 SAMPLE_START_JS = """() => { const H = globalThis.WBLONGRUN; const S = globalThis.__wbSmooth = { out: [], on: true };
     const f = (ts) => { if (!S.on) return;
         if (H.ready && !H.ready()) { if (S.out.length && S.out[S.out.length - 1] !== null) S.out.push(null); }   // 1.2: outside the game - a gap
-        else S.out.push([ts, H.cam(), H.objs ? H.objs() : null, H.missing ? H.missing() : null, H.ahead ? H.ahead() : null, H.player ? H.player() : null]);
+        else S.out.push([ts, H.cam(), H.objs ? H.objs() : null, H.missing ? H.missing() : null, H.ahead ? H.ahead() : null, H.player ? H.player() : null, H.drawMs ? H.drawMs() : null]);
         requestAnimationFrame(f); };
     requestAnimationFrame(f); return true; }"""
 SAMPLE_STOP_JS = "() => { const S = globalThis.__wbSmooth; S.on = false; return S.out; }"
@@ -217,7 +223,7 @@ def overjumps(steps, window=3, jump=OBJ_JUMP):
 
 
 def analyse(samples, scale=None, axis=0):
-    """``[[ts, cam, objs, missing, ahead(, player)], ...]`` of one run -> the metrics; ``scale``: S, device px per game px, when
+    """``[[ts, cam, objs, missing, ahead(, player(, drawMs))], ...]`` of one run -> the metrics; ``scale``: S, device px per game px, when
     the page draws its objects on whole device pixels (their steps on the screen are then judged within 1/S); ``axis``:
     0 or 1, the camera's coordinate that is judged (1.6)."""
     # 1.2: None marks a gap - the page's ready() was false (a map fly-over after a death, a menu); nothing is
@@ -300,7 +306,10 @@ def analyse(samples, scale=None, axis=0):
     miss = [s[3] for s in samples_in if s[3] is not None]
     missing_pct = 100.0 * (miss[-1] - miss[0]) / max(1, len(samples_in) - 1) if len(miss) > 1 else None
     ahead = [s[4] for s in samples_in if s[4] is not None]
-    return {'frames': len(samples_in), 'gaps': gaps, 'refresh_hz': round(1000.0 / nominal, 1) if nominal else None, 'dropped': dropped,
+    draws = sorted(float(s[6]) for s in samples_in if len(s) > 6 and isinstance(s[6], (int, float)))   # 1.11: the page's own drawing
+    draw_ms = [round(statistics.median(draws), 2), round(draws[min(len(draws) - 1, int(0.95 * len(draws)))], 2), round(draws[-1], 2)] if draws else None
+    return {'draw_ms': draw_ms, 'draw_over': sum(1 for d in draws if d > nominal / 2) if draws else None,
+            'frames': len(samples_in), 'gaps': gaps, 'refresh_hz': round(1000.0 / nominal, 1) if nominal else None, 'dropped': dropped,
             'cam_dev': round(cam_dev, 4), 'cam_jitter': round(cam_jit, 4), 'cam_jitter_max': round(cam_jit_max, 4), 'cam_moving': len(moving),
             'obj_dev': round(obj_dev, 4), 'obj_jitter': round(obj_jit, 4), 'obj_jitter_mean': round(obj_jit_mean, 4), 'obj_back': obj_back, 'obj_moving': obj_moving,
             'obj_back_pm': round(1000.0 * obj_back / obj_moving, 2) if obj_moving else 0.0, 'obj_over': obj_over, 'missing_pct': missing_pct,
@@ -547,5 +556,6 @@ def format_result(name, r):
                 + (' (the game\'s own %.0f ms)' % r['game_latency_ms'] if r.get('game_latency_ms') else ''), aud,
                 ('; '.join(r['fails']) if r['fails'] else 'every limit met') + (' · ' + r['status'] if r.get('status') else '')
                 + (' · records late %s / %s ms' % tuple(r['late']) if r.get('late') else '')
+                + (' · drawing %s / %s / %s ms (median / 95 %% / max), %d frames over half an interval' % (tuple(r['draw_ms']) + (r.get('draw_over') or 0,)) if r.get('draw_ms') else '')
                 + (' · WebGL %s' % r['renderer'] if r.get('renderer') else '') + (' · load %s -> %s' % tuple(r['load']) if r.get('load') else '')
                 + ''.join(' · ' + n for n in r.get('notes', []))))

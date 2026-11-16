@@ -24,7 +24,7 @@ def js(expr):
 
 
 def test_version_and_files():
-    assert js('S.VERSION') == '2.18' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
+    assert js('S.VERSION') == '2.19' and 'wb-scene.js' in web.FILES and (WEB / 'scene-demo.html').exists()
 
 
 def test_view_camera_inside_the_limits():
@@ -161,6 +161,25 @@ def test_palette_rows_on_the_screen():
     assert js(body % ('1', "'window'", 3, '1')) == [0, 0, 1, 2]       # frame 2 at y 12..19: band row 3 shows world 11..14 - the rows of B's picture
     assert js(body % ('1', "'screen'", 3, '1')) == [3, 3, 3, 3]       # the screen row 3 of the game's camera, all the way
     assert js(body % ('3', "'screen'", 10, '3')) == [3, 3, 3, 3]      # device row 10 at S 3 is band row 3
+
+
+def test_things_fixed_on_the_screen_take_the_screen_rows_palette():
+    """2.19 (SWIV: the HUD's colour 16 has a gradient over screen rows 9-13; with the palette of the world row under it the
+    gradient moved -2..+1 rows as the view's camera moved against the window and the HUD shimmered): an object or a sprite
+    fixed on the screen takes the palette of its screen row; the ground keeps the world row's."""
+    body = """(() => { const pal = new Uint8Array(16 * 32 * 4); for (let r = 0; r < 16; r++) for (let i = 0; i < 32; i++) { pal[(r * 32 + i) * 4] = i * 10; pal[(r * 32 + i) * 4 + 1] = r; pal[(r * 32 + i) * 4 + 3] = 255; }
+        const map = { gen: 1, atlas: new Uint8Array(256).fill(2), nslots: 1, dirty: null, cols: 8, rows: 16, cells: new Uint16Array(128).fill(0), origin: [0, 0] };
+        const rec = (n, t, y) => ({ n, t, cam: [0, y], limits: { x0: 0, x1: 0, y0: 0, y1: 100 }, window: { w: 8, h: 16, idx: new Uint8Array(128).fill(1), pal }, map,
+            objects: [{ id: 5, w: 2, h: 2, idx: new Uint8Array(4).fill(3), x: 2, y: y + 6, screen: true }], sprites: [{ k: 0, h: 2, idx: new Uint8Array(32).fill(4), x: 0, y: 10, screen: true }] });
+        const fr = [rec(1, 0, 8), rec(2, 20, 12), rec(3, 40, 16)], out = [];
+        for (const t of [20, 25, 30, 35]) { const c = S.compose(fr, t, { S: 2, extX: 0, extY: 0 }, {}, null), px = S.reference(c), at = (x, y) => (y * 2 * 2 * c.W + x * 2) * 4;
+            out.push([px[at(2, 6)], px[at(2, 6) + 1], px[at(2, 7) + 1], px[at(0, 10)], px[at(0, 10) + 1], px[at(6, 3) + 1]]); }
+        return out; })()"""
+    r = js(body)
+    assert [x[0] for x in r] == [30] * 4 and [x[3] for x in r] == [40] * 4      # the object (idx 3) and the sprite (idx 4) are there
+    assert [x[1] for x in r] == [6] * 4 and [x[2] for x in r] == [7] * 4         # the object's rows 6 and 7: screen rows 6 and 7, all the way
+    assert [x[4] for x in r] == [10] * 4                                         # the sprite at screen row 10
+    assert len(set(x[5] for x in r)) > 1                                         # the ground at band row 3 still goes with the world rows
 
 
 def test_objects_stand_on_the_ground_without_subpixel():
@@ -391,7 +410,7 @@ def _run_page(url_tail, fn, browser='chromium'):
         srv.shutdown()
 
 
-@pytest.mark.parametrize('tail', ['?s=2&scale=1&pair=2', '?s=1.9943&fine=1&scale=1&alpha=1&mean=1', '?s=2&alpha=1&pair=2', '?s=1.9943&fine=1&alpha=1&mean=1', '?s=2.5&scrobj=1&mean=1', '?s=1.9943&fine=1&scrobj=1&mean=1', '?s=2&back=1', '?s=1.9943&fine=1&back=1&mean=1', '?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1', '?s=2&paltop=1&palscreen=1', '?s=1.9943&fine=1&paltop=1&palscreen=1', '?s=2&view=1&pair=2', '?s=1.9943&fine=1&view=1&mean=1'])
+@pytest.mark.parametrize('tail', ['?s=2&scale=1&pair=2', '?s=1.9943&fine=1&scale=1&alpha=1&mean=1', '?s=2&alpha=1&pair=2', '?s=1.9943&fine=1&alpha=1&mean=1', '?s=2.5&scrobj=1&mean=1', '?s=1.9943&fine=1&scrobj=1&mean=1', '?s=2&back=1', '?s=1.9943&fine=1&back=1&mean=1', '?s=1', '?s=2&pair=2', '?s=2&pair=2&mean=1', '?s=2&pair=2&fine=1', '?s=3&mean=1&fine=1', '?s=2&paltop=1', '?s=1.9943&fine=1&paltop=1', '?s=2&paltop=1&palscreen=1', '?s=1.9943&fine=1&paltop=1&palscreen=1', '?s=2&view=1&pair=2', '?s=1.9943&fine=1&view=1&mean=1', '?s=2&view=1&scrobj=1&mean=1', '?s=2.5&paltop=1&scrobj=1&pair=2'])
 def test_gpu_equals_the_reference(tail):
     """The GPU band against the CPU reference of the same composition, pixel for pixel, while the camera moves and the
     objects interpolate (as Alien Breed II checked its WebGL path: 0 of 60 M pixels)."""

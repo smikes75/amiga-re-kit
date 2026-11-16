@@ -302,3 +302,18 @@ def test_holds_judged_for_objects_and_the_player():
     assert 'player holds 0.0 per mille' in websmooth.format_result('chromium', ok)
     r = websmooth.analyse([[i * 16.7, [0, i * 0.25], [[1, i * 2.5, 5.0]], 0, 1] for i in range(100)], axis=1)   # no sixth element
     assert r['player_moving'] == 0 and r['player_holds_pm'] == 0.0
+
+
+def test_the_pages_own_drawing_time_is_reported():
+    """1.11 (SWIV: its JavaScript picture draws the scene's composition - cam() and objs() are the same on both paths, the
+    drawing's main-thread time is what differs): drawMs() as the seventh element -> draw_ms [median, 95 %, max] and
+    draw_over (frames over half a display interval), reported, not judged."""
+    smp = _samples()
+    for i, s in enumerate(smp):
+        s.extend([None, 0.5 if i % 20 else 9.5])
+    r = websmooth.analyse(smp)
+    assert r['draw_ms'] == [0.5, 9.5, 9.5] and r['draw_over'] == 6
+    assert websmooth.verdict(r, keys=False)[0]
+    assert websmooth.analyse(_samples())['draw_ms'] is None
+    r.update({'passed': True, 'fails': [], 'latency_ms': None, 'latency_all': [], 'audio': None})
+    assert 'drawing 0.5 / 9.5 / 9.5 ms' in websmooth.format_result('chromium', r)

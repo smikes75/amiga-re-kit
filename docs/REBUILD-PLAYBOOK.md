@@ -177,6 +177,13 @@ $15460 `subi.w #256,d1` (meets -48..327: the deletion line) - and the ranges sor
 an x. A constant that changes the run is a place the game decides by that number, not yet an edge: what it decides the
 project checks with its own tools, then keeps the edges in its own flow file (`operand 1853c=(248 + band())`).
 
+Read the ranges in level coordinates too (1.0.85: `place` in the report). $14F1E `addi.w #256,d7` meets -6614..-6048 -
+no screen coordinate, so the first sorting of that list passed it over - and it is an edge: d7 is the camera's position
+in the level, the sum the line below which the player's bullets are deleted. The side shots are made at the player's
+height, so in the band they vanished the next frame (the user saw three shots become one). `screen` = the range lies on
+the constant's own scale, `world` = wholly outside it (an offset from a position that moves: a camera), `wide` = across
+it (a counter, a long run). A `world` constant that changes the run is as much a candidate as a `screen` one.
+
 ## The page (M7): events at exact game frames
 
 The engine in its thread is held at the frame of the next event (`engine_allow(min(n, event.f))`); the event (keys, a

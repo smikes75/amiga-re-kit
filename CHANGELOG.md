@@ -3,6 +3,21 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.85 (2026-11-16)
+
+- wb-scene 2.19: an object or a sprite fixed on the screen takes the palette of its screen row (the band row less the
+  window's top), not of the world row under it - on both paths. SWIV's HUD has a colour gradient over screen rows 9-13;
+  as the view's camera moved against the window by -2..+1 rows the gradient slid over the HUD. SWIV's record, 711
+  display frames: the HUD changed colour with nothing changed in 62 of them with 1.0.84, in 0 now; nothing else moved
+  (WB-PLYNULOST.md 2.21)
+- `arek web smooth` (websmooth 1.11): `drawMs()`, the page's own drawing time per display frame, reported as median /
+  95 % / max and the frames over half a display interval - a page that draws the composition with a renderer of its own
+  (SWIV's JavaScript picture) shows the same positions on both paths; its cost on the main thread is what differs
+- `arek edges`: the report says where the range a constant meets lies against the constant (`place`: `screen`, `world` -
+  wholly outside it, an offset from a moving position such as the camera in level coordinates - or `wide`). SWIV
+  $14F1E `addi.w #256,d7` (the bullets' deletion line, 256 below the camera) met -6614..-6048 and was passed over as no
+  screen edge (REBUILD-PLAYBOOK.md)
+
 ## 1.0.84 (2026-11-16)
 
 - `arek web smooth` (websmooth 1.10) judges holds: a moving object or the player that stands still for 1-3 display frames
