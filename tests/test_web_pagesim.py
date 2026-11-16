@@ -1,4 +1,4 @@
-"""wb-pagesim.js 1.0 (kit 1.0.78, SWIV): the page's loop without a browser - the clock grants, an engine model computes a frame
+"""wb-pagesim.js 1.1 (kit 1.0.78, 1.0.84; SWIV): the page's loop without a browser - the clock grants, an engine model computes a frame
 in the given ms, the page's feed makes the record when the frame is done, compose draws every display frame - and its
 samples judged by `arek web smooth --samples` with the browser's measure; wb-takt 1.7's late(); websmooth 1.8's back steps."""
 import json
@@ -42,7 +42,7 @@ def run_js(body):
 
 def test_files_and_versions():
     assert 'wb-pagesim.js' in web.FILES
-    assert run_js('[P.VERSION, T.VERSION]') == ['1.0', '1.7']
+    assert run_js('[P.VERSION, T.VERSION]') == ['1.1', '1.7']
 
 
 def test_the_clock_measures_how_late_a_frame_came():

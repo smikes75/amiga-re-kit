@@ -13,6 +13,7 @@ capture RAM + registers at the routine's call and at its return with
 state and diff registers, CCR and every written address against the second.
 """
 import re
+from pathlib import Path
 import sys
 
 from . import decoder
@@ -1982,6 +1983,50 @@ def flow_from_specs(data, base, jtab=(), indirect=(), stop=(), exitat=(), extern
                 dynamic=map(_hex, dynamic), module=mod, smc=rew, live=map(_hex, live), hooks=hk, operands=ops, declare=declare)
 
 
+def flow_file(path):
+    """1.0.84: the address-keyed changes of a project in a file - ``(hook, operand, declare)`` lists in the spellings of
+    ``--hook`` / ``--operand`` / ``--declare``. One a line: ``operand ADDR=EXPR``, ``hook ADDR=NAME[:KIND]``,
+    ``declare TEXT`` (the rest of the line as it stands); blank lines and lines starting with # are skipped. A project keeps
+    its changes to the game there instead of patching the generated text (SWIV's patch_band.py), and ``arek edges`` writes
+    its shifted operands there."""
+    hook, operand, declare = [], [], []
+    for n, line in enumerate(Path(path).read_text().splitlines(), 1):
+        t = line.strip()
+        if not t or t.startswith('#'):
+            continue
+        kind, _, rest = t.partition(' ')
+        if kind == 'operand':
+            operand.append(rest.strip())
+        elif kind == 'hook':
+            hook.append(rest.strip())
+        elif kind == 'declare':
+            declare.append(line.split('declare', 1)[1][1:] if line.lstrip().startswith('declare ') else '')
+        else:
+            raise ValueError('%s:%d: a line is operand ADDR=EXPR, hook ADDR=NAME[:KIND] or declare TEXT, not %r' % (path, n, kind))
+    return hook, operand, declare
+
+
+def immediates_of(g):
+    """1.0.84: every translated instruction whose source operand is a constant - the ones ``--operand`` can replace:
+    ``[{addr, text, mn, size, imm (unsigned in the size), simm (signed)}]`` by address."""
+    out = []
+    for pc in sorted(g.tab_insns):
+        i = g.tab_insns[pc]
+        mn = (i.text or i.kind).split()[0].split('.')[0]
+        e = getattr(i, 'src', None) or (i.ea if mn in EA_SOURCE and hasattr(i, 'ea') else None)
+        if e is not None and getattr(e, 'kind', None) == 'imm' and isinstance(e.imm, int) and not getattr(e, 'live', False):
+            v = e.imm
+        elif e is None and isinstance(getattr(i, 'imm', None), int) and not isinstance(i.imm, bool):
+            v = i.imm
+        else:
+            continue
+        sz = {SZ_B: 1, SZ_W: 2, SZ_L: 4}.get(getattr(i, 'sz', None), 4)
+        u = v & ((1 << (8 * sz)) - 1)
+        out.append({'addr': '%06x' % pc, 'text': i.text, 'mn': mn, 'size': sz, 'imm': u,
+                    'simm': u - (1 << (8 * sz)) if u >> (8 * sz - 1) else u})
+    return out
+
+
 def _ranges(pcs):
     """Sorted addresses as [[first, last], ...] of consecutive instruction words."""
     out = []
@@ -2016,7 +2061,7 @@ def unplaced(g, flow):
 
 def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow=NOFLOW,
              stub_impl=None, timing=False, memsz=None, slow=None, profile=False, cover=None, oob='stop',
-             cover_in_tick=False, bus_table=False, auto_soft=False, report=None, resume=False):
+             cover_in_tick=False, bus_table=False, auto_soft=False, report=None, resume=False, immediates=None):
     """Return (c_source, stats, entries). ``funcs`` are (start, end, entry) linear ranges,
     ``auto`` are entry addresses whose bodies are discovered by walking the
     flow graph (transitively over bsr/jsr). ``flow`` (a decoder.Flow) carries what the
@@ -2053,6 +2098,7 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
     target of call_addr, and a jump onto another stack drops the C frames and goes on at the target through TASK_RUN,
     which the host wraps around its first call (the kit's hosts and the driver do). Larger code; not with ``profile``,
     whose counters need the C frames.
+    ``immediates`` (1.0.84): a list to fill with every translated instruction whose source is a constant (immediates_of).
     Raises Unsupported / SystemExit-free."""
     hi = min(hi if hi is not None else base + len(data), base + len(data))
     lo = max(lo, base)                           # nothing outside the image can be walked
@@ -2113,6 +2159,8 @@ def generate(data, base, funcs=(), auto=(), lo=0, hi=None, with_main=False, flow
     g = Gen(data, base, list(funcs), cfg, flow, timing, profile, cover is not None, cover_in_tick, bus_table, resume)
     src = g.gen()
     unplaced(g, flow)
+    if immediates is not None:
+        immediates.extend(immediates_of(g))
     if cover is not None:
         cover['lo'] = base
         cover['routines'] = {'%x' % e: _ranges(pcs) for e, pcs in sorted(g.cov_pcs.items())}

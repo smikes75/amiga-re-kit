@@ -155,6 +155,28 @@ it), `--declare TEXT` (the declarations they use). An address inside the transla
 fails the translation; one outside it (a module's) is a note. SWIV's band (`tools/patch_band.py`, four places) as four
 `--operand`s: the same records as the text patch over 20 000 frames, the band on and off.
 
+Kit 1.0.84: the changes may stand in a file, `arek recomp --flow-file FILE` (one a line: `operand ADDR=EXPR`, `hook
+ADDR=NAME[:KIND]`, `declare TEXT`, # comments), added to the ones on the command line.
+
+### Where the screen ends: `arek edges` (kit 1.0.84)
+
+A band under the window (or a taller picture) plays like the rest of the screen only when every place that decides by the
+old edge decides by the new one - the player's limit, the deletion line, where the objects that come from below are
+made, where an enemy fires. SWIV found two such places by hand, each after the user saw the band misbehave. `arek edges
+EDGES.json` lists them at once: the translation writes every constant it translated (`--immediates FILE`), the ones in
+a range of values (the screen's height and the margins) become `constant + knob` in one build (the driver writes the
+flow file), the project's scenario runs once with every knob at 0 and once per executed candidate with its knob at the
+shift. The report per candidate: the reads, the range of the register the constant meets (a screen coordinate runs from
+below 0 to past the edge; a ring index, a counter or a width does not), whether the run changed, the project's metrics
+(regexes over its output). The config, the build's contract and the knobs' runtime are in `src/arek/edges.py`.
+
+SWIV, the in-game state of level 1, 2500 frames of random play, 200..340 shifted by +64: 3586 constants, 118 candidates,
+34 executed, 30 change the run. Both edges found by hand are among them - $1853C `addi.w #248,d1` (the player's limit) and
+$15460 `subi.w #256,d1` (meets -48..327: the deletion line) - and the ranges sort the others: $14DCC / $14DE6 `cmpi.w
+#256` meet a screen y (0..450, 44..299), the 320s of $12EC8 / $12F14 / $12F2E the ring of 320 rows, $1851C `cmpi.w #316`
+an x. A constant that changes the run is a place the game decides by that number, not yet an edge: what it decides the
+project checks with its own tools, then keeps the edges in its own flow file (`operand 1853c=(248 + band())`).
+
 ## The page (M7): events at exact game frames
 
 The engine in its thread is held at the frame of the next event (`engine_allow(min(n, event.f))`); the event (keys, a

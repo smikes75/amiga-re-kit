@@ -680,6 +680,26 @@ frames, takt ahead 4 / latC 50 / latO 76, camView = the long $25A6 read at every
 `arek web smooth --headed --channel chrome --init JS` measures in the real Chrome with a window (not throttled behind
 other windows) and runs a script before the page's own (its mode button).
 
+**2.20 (kit 1.0.84, SWIV): holds - an object that stands still and catches up (websmooth 1.10).** The user saw SWIV's player
+and enemies "not as smooth as Xenon" where the measure said 0.03 px. Sampled every display frame in the real Chrome (60 Hz,
+30 s, both pages as built), SWIV's player moved 2.5 px a frame and stood still 2 frames every ~9.5 (8 game frames), then
+jumped 6-8 px; Xenon 2's ship moved exactly 0.83 px every frame. The jitter (a step against the median of 3) left the
+catch-up out as a jump over OBJ_JUMP. The page's latency (50 / 120 ms), its extrapolation and objMean changed nothing
+(7.4-9.1 %); the game's own data were even (a pass every 2.00 frames, +-6 px); the scene lost its pair: SWIV's object id
+held a shadow flag (0x40000000) that the game toggles on the player's body every ~4 passes - the body and the rotor's
+parts all changed their ids at once, their group with them, so wb-scene had neither a pair nor a group lead and drew
+the newest pass as it was until a pair formed. 385 id-set changes on 109 of 134 objects in 30 s. A hold is now counted
+and judged: a standstill (a step under 15 % of the median of the 13 steps around) of 1-3 frames between steps of one
+direction, per mille of the moving frames (median over 0.3 px), the objects' and the player's (player() sampled at every
+display frame), limit 0.5 each:
+
+| page | player holds | objects holds | object jitter |
+|---|---|---|---|
+| SWIV e86d703 (kit 1.0.83) | 71 of 1232 = 57.6 per mille | 294 of 151 602 = 1.9 per mille | passes (0.03 its own run) |
+| Xenon 2 0952a2a (kit 1.0.48) | 0 of 1271 | 0 of 41 317 | 0.004 |
+
+An object's id must be what holds for its life: the game's node and the part, not a flag the game toggles.
+
 ## I. The scene recorder (`arek_scene.h` + `wb-scenerec.js`, kit 1.0.77) - one hint instead of a recorder per game
 
 Until 1.0.77 every game wrote its own scene record for G: SWIV's `src/swiv_scene.c` (307 lines: its buffers, its node list,

@@ -55,7 +55,7 @@ def test_filters_and_process():
 
 
 def test_menu_defaults_coerce_merge():
-    assert js('M.VERSION') == '1.3' and js('M.MODES') == ['original', 'enhanced']
+    assert js('M.VERSION') == '1.4' and js('M.MODES') == ['original', 'enhanced']
     d = js("M.defaults('display', 'enhanced')")
     assert d['par'] == 1.04 and d['smooth'] is True and d['zoom'] == 3 and d['crt-detail'] == 'fine'
     assert js("M.defaults('display', 'original').par") == 1 and js("M.defaults('display', 'original').smooth") is False
@@ -170,3 +170,88 @@ def test_the_page_test_follows_the_rows_the_menu_has(tail, rows):
     finally:
         srv.shutdown()
     assert fails == [] and n == 13 and gone == rows
+
+
+ROWS = """[{ id: 'shadows', label: 'Shadows', options: [1, 0.75, 0.5], labels: { 1: 'black, as the original' }, def: 0.5, modes: ['enhanced'] },
+           { id: 'rotor', label: 'Rotor', options: [4, 2, 0], def: { original: 0, enhanced: 4 }, modes: ['enhanced'] },
+           { id: 'fading', label: 'Blade fading', options: ['100/0', '85/30'], when: { rotor: 2 } },
+           { id: 'screen', label: 'Screen', options: [0, 32, 64, 'play64'], def: 64, modes: ['enhanced'], changesGame: ['play64'] },
+           { id: 'landscape', section: 'debug', label: 'Landscape', options: [0, 1, 2], perMode: false },
+           { id: 'lives', section: 'debug', label: 'Unlimited lives', kind: 'check', perMode: false, changesGame: true },
+           { id: 'missiles', section: 'debug', kind: 'range', min: 1, max: 6, step: 1, def: 2, perMode: false },
+           { id: 'download', section: 'debug', kind: 'button', label: 'Download the recording', run: (m) => { globalThis.ran = (globalThis.ran || 0) + 1; } }]"""
+
+
+def test_game_rows_state_modes_dependencies_and_store():
+    """wb-nastaveni 1.4 (kit 1.0.84, SWIV): spec.rows - the game's rows kept like the kit's: per mode or for both (perMode:
+    false), coerced, in get / set / reset / the store and the listeners; shown in their modes and while the row they
+    depend on (when) is shown and has the value; ids unique over the kit's items and the rows; a button keeps nothing."""
+    r = js("""(() => { const box = {}; globalThis.localStorage = { getItem: (k) => box[k] ?? null, setItem: (k, v) => { box[k] = String(v); } };
+        const spec = { store: 'g', rows: %s }, m = new M.Menu(null, spec), seen = [];
+        m.on('change', (st, what, info) => seen.push([what, info.id || info.section || info.cause]));
+        const o = [m.get('display').rotor, m.get('display').shadows, m.get('debug'), m.testHooks().shown()];
+        m.setMode('enhanced'); o.push(m.get('display').rotor, m.testHooks().shown());
+        m.set('display', 'rotor', '2'); m.set('display', 'shadows', 0.6); m.set('debug', 'lives', 1); m.set('debug', 'missiles', 9); m.set('debug', 'download', 1);
+        o.push(m.get('display').rotor, m.get('display').shadows, m.testHooks().shown(), m.get('debug'));
+        m.setMode('original'); o.push(m.get('display').rotor, m.get('debug').lives, m.testHooks().shown());
+        const again = new M.Menu(null, spec); again.setMode('enhanced');
+        o.push(again.get('display').rotor, again.get('debug'), again.get().debug.missiles);
+        again.reset('display'); o.push(again.get('display').rotor, again.get('debug').lives);
+        again.reset(); o.push(again.get('debug').lives, again.testHooks().rows().length, again.testHooks().ids().length);
+        return { o, seen: seen.slice(0, 7) }; })()""" % ROWS)
+    o = r['o']
+    assert o[0] == 0 and o[1] == 0.5 and o[2] == {'landscape': 0, 'lives': False, 'missiles': 2}
+    assert o[3] == ['wb-landscape', 'wb-lives', 'wb-missiles', 'wb-download']                          # original: no Enhanced rows
+    assert o[4] == 4 and o[5] == ['wb-shadows', 'wb-rotor', 'wb-screen', 'wb-landscape', 'wb-lives', 'wb-missiles', 'wb-download']
+    assert o[6] == 2 and o[7] == 0.5 and 'wb-fading' in o[8] and o[9] == {'landscape': 0, 'lives': True, 'missiles': 6}
+    assert o[10] == 0 and o[11] is True and 'wb-fading' not in o[12]                                    # per mode / for both modes
+    assert o[13] == 2 and o[14] == {'landscape': 0, 'lives': True, 'missiles': 6} and o[15] == 6            # kept in the store
+    assert o[16] == 4 and o[17] is True                                                                 # reset('display') leaves debug
+    assert o[18] is False and o[19] == 8 and o[20] == 19
+    assert r['seen'][0] == ['mode', 'mode'] and ['display', 'rotor'] in r['seen'] and ['debug', 'lives'] in r['seen']
+    bad = js("""[[{ id: 'zoom' }], [{ id: 'a' }, { id: 'a' }], [{ id: 'b', kind: 'select' }], [{ id: 'c', kind: 'knob' }]].map((rows) => {
+        try { new M.Menu(null, { rows }); return 'built'; } catch (e) { return e.message; } })""")
+    assert [b.split(': ')[1].split(' ')[0] for b in bad] == ['the', 'the', 'row', 'row'] and 'taken' in bad[0] and 'taken' in bad[1] and 'no options' in bad[2] and 'kind knob' in bad[3]
+
+
+def test_game_rows_in_the_browser(tmp_path):
+    """The rows render as the kit's do: a select with the option texts and the "changes the game" mark, a check, a range, a
+    button in the page's Debug host (spec.hosts.debug); hidden rows are hidden, a change of the select shows the row that
+    depends on it; Czech marks."""
+    pw = pytest.importorskip('playwright.sync_api')
+    from arek import web
+    shutil.copy(WEB / 'wb-nastaveni.js', tmp_path / 'wb-nastaveni.js')
+    (tmp_path / 'rows.html').write_text("""<!doctype html><meta charset="utf-8"><div id="menu"></div><div id="debug"></div>
+<script src="wb-nastaveni.js"></script><script>
+window.menu = WBNASTAVENI.build(document.getElementById('menu'), { lang: 'cs', mode: 'enhanced', rows: %s, hosts: { debug: document.getElementById('debug') } });
+</script>""" % ROWS)
+    import threading
+    srv = web.serve(str(tmp_path), 0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        port = srv.server_address[1]
+        with pw.sync_playwright() as p:
+            try:
+                b = p.chromium.launch()
+            except Exception as e:                                # no browser installed
+                pytest.skip(str(e))
+            pg = b.new_page()
+            pg.goto('http://127.0.0.1:%d/rows.html' % port)
+            r = pg.evaluate("""() => { const q = (s) => document.querySelector(s), o = {};
+                o.shadowOpts = [...q('#wb-shadows').options].map((x) => x.textContent);
+                o.screenOpts = [...q('#wb-screen').options].map((x) => x.textContent);
+                o.livesLabel = q('label[for=wb-lives]').textContent;
+                o.inDebug = ['wb-landscape', 'wb-lives', 'wb-missiles', 'wb-download'].every((id) => q('#debug #' + id));
+                o.inDisplay = !!q('#menu .wb-nastaveni-display #wb-rotor');
+                o.fadingHidden = q('#wb-fading').closest('.wb-nastaveni-row').hidden;
+                const sel = q('#wb-rotor'); sel.value = '2'; sel.dispatchEvent(new Event('change'));
+                o.fadingShown = !q('#wb-fading').closest('.wb-nastaveni-row').hidden;
+                q('#wb-download').click(); o.ran = globalThis.ran;
+                menu.setMode('original'); o.rotorHiddenInOriginal = q('#wb-rotor').closest('.wb-nastaveni-row').hidden;
+                return o; }""")
+            b.close()
+    finally:
+        srv.shutdown()
+    assert r['shadowOpts'] == ['black, as the original', '0,75', '0,5']                   # labels, else the number in the menu's language
+    assert r['screenOpts'][-1] == 'play64 (mění hru)' and r['livesLabel'] == 'Unlimited lives (mění hru)'
+    assert r['inDebug'] and r['inDisplay'] and r['fadingHidden'] and r['fadingShown'] and r['ran'] == 1 and r['rotorHiddenInOriginal']

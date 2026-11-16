@@ -3,6 +3,30 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.84 (2026-11-16)
+
+- `arek web smooth` (websmooth 1.10) judges holds: a moving object or the player that stands still for 1-3 display frames
+  between steps of one direction and then catches up, per mille of the moving frames (limit 0.5 each; player() is sampled
+  at every display frame, the samples' sixth element; wb-pagesim 1.1 `player(c)`). The jitter left the catch-up out as a
+  jump and SWIV passed at 0.03 px while its player stood still twice every 160 ms. Real Chrome, 60 Hz, 30 s: SWIV
+  e86d703 player 57.6 per mille, objects 1.9 (its object ids held a flag the game toggles - the scene lost the pair);
+  Xenon 2 0 and 0 (WB-PLYNULOST.md 2.20)
+- wb-nastaveni 1.4: `spec.rows`, the game's own rows built and kept like the kit's - select, check, range, button; per mode
+  or for both (`perMode: false`), only in some modes, only while another row has a value (`when`), marked "changes the
+  game" (the row or some options); `display` / `sound` rows after the kit's, any other section (Debug) into
+  `spec.hosts[section]` or a fieldset of its own
+- `arek edges CONF` (arek.edges): which constants decide where the game's screen ends - every constant of the code in a
+  range of values (`arek recomp --immediates FILE`) becomes constant + a knob in one build (`arek recomp --flow-file FILE`:
+  operand / hook / declare lines), the project's scenario runs once with the knobs at 0 and once per executed candidate
+  with its knob at the shift; the report: reads, the range of the register the constant meets, whether the outcome
+  changed, the project's metrics. SWIV (in-game state of level 1, 2500 frames of random play, 200..340, +64): 3586
+  constants, 118 candidates, 34 executed, 30 change the run - both edges SWIV found by hand among them ($1853C addi.w
+  #248 the player's limit, $15460 subi.w #256 the deletion line, meeting -48..327: a screen y); the ranges sort the rest
+  ($14DCC / $14DE6 cmpi.w #256 meet a screen y 0..450 / 44..299; the 320s of $12EC8 / $12F14 / $12F2E the ring of
+  320 rows; $1851C #316 an x)
+- wb-vtr.js 1.0: VTR2 records from JavaScript - a rewrite without the original's RAM projects its fields onto the
+  original's addresses for `arek trace compare --range` (SWIV-projekt's question)
+
 ## 1.0.83 (2026-11-15)
 
 - wb-scene 2.18, `rec.camView` (SWIV's request): the camera the view interpolates, fractions allowed; `rec.cam` stays the

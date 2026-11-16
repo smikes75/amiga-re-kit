@@ -258,3 +258,47 @@ def test_init_script_runs_before_the_page_and_headed_options_parse(tmp_path):
     a = cli.build_parser().parse_args(['web', 'smooth', 'http://x/', '--headed', '--channel', 'chrome', '--init', '@' + str(f)])
     assert a.headed and a.channel == 'chrome' and a.init == '@' + str(f)
     assert websmooth.HEADED_ARGS['chromium'][0] == '--disable-backgrounding-occluded-windows'
+
+
+def test_holds_a_standstill_inside_a_motion():
+    """websmooth 1.10 (kit 1.0.84, SWIV): a moving object that stands still for 1-3 display frames between steps of one
+    direction and then catches up is a hold; an even motion, a change of speed, a stop and a turn are not."""
+    even = [2.5] * 60
+    hitch = []
+    for k in range(6):                                             # stands 2 frames every 10, then 3 steps in one
+        hitch += [2.5] * 7 + [7.5, 0.0, 0.0]
+    stop = [2.5] * 20 + [0.0] * 20 + [2.5] * 20
+    turn = [2.5] * 20 + [0.0] + [-2.5] * 20
+    slow = [2.5] * 20 + [1.2] * 20 + [2.5] * 20
+    assert websmooth.holds(even) == (0, 48)
+    h, m = websmooth.holds(hitch)
+    assert h >= 8 and m > 40
+    assert websmooth.holds(stop)[0] == 0 and websmooth.holds(turn)[0] == 0 and websmooth.holds(slow)[0] == 0
+
+
+def test_holds_judged_for_objects_and_the_player():
+    """The samples' sixth element is the player as drawn (player() on the screen); its holds and the objects' are judged per
+    mille of their moving frames (limit 0.5); the jitter leaves the catch-up out as a jump, so it alone passes."""
+    def run(hitch):
+        out, t, ox, px = [], 0.0, 10.0, 50.0
+        for i in range(400):
+            t += 16.7
+            st = (7.5 if i % 10 == 7 else 0.0 if i % 10 in (8, 9) else 2.5) if hitch else 2.5
+            ox += st
+            px += st
+            out.append([t, [0, i * 0.25], [[1, ox, 5.0 + i * 0.25], [2, 900 - ox, 7.0 + i * 0.25]], 0, 1, [px % 300, 100.0]])
+        return websmooth.analyse(out, axis=1)
+    ok = run(False)
+    assert ok['obj_holds'] == 0 and ok['player_holds'] == 0 and ok['obj_hold_moving'] > 600 and ok['player_moving'] > 300
+    bad = run(True)
+    assert bad['obj_jitter'] < 0.05                               # the catch-up is a jump to the jitter
+    assert bad['obj_holds_pm'] > 50 and bad['player_holds_pm'] > 50
+    bad['latency_ms'], bad['audio'], bad['latency_on'] = 40, None, 'camera'
+    passed, fails = websmooth.verdict(bad)
+    assert not passed and any('objects stood still' in f for f in fails) and any('the player stood still' in f for f in fails)
+    ok['latency_ms'], ok['audio'] = 40, None
+    assert websmooth.verdict(ok)[0], websmooth.verdict(ok)
+    ok['passed'], ok['fails'], ok['latency_all'] = True, [], []
+    assert 'player holds 0.0 per mille' in websmooth.format_result('chromium', ok)
+    r = websmooth.analyse([[i * 16.7, [0, i * 0.25], [[1, i * 2.5, 5.0]], 0, 1] for i in range(100)], axis=1)   # no sixth element
+    assert r['player_moving'] == 0 and r['player_holds_pm'] == 0.0

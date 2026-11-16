@@ -17,11 +17,21 @@
 //   Values show with the item's unit in the menu's language (`20 %`, `1,04`).
 //   1.3: spec.omit = { sound: ['filter-fixed', 'filter-led'], display: [...] } leaves rows out (a machine that has no such
 //   thing): the row is not built, its value is fixed - the filters off, any other item at its default - and menu.set ignores it.
+//   1.4 (kit 1.0.84, SWIV): spec.rows - the game's own rows, described, built and kept by the menu like its own:
+//     { id, section: 'display' | 'sound' | any other name (default 'display'), kind: 'select' | 'check' | 'range' | 'button',
+//       label, options: [...], labels: { option: text }, def: value | { original, enhanced }, min / max / step / unit / digits,
+//       modes: ['enhanced'] (shown only there), when: { otherId: value | [values] } (shown only while that row of the same
+//       section has the value), perMode: false (one value for both modes: a trainer, a debug start), changesGame: true | [options]
+//       (marked "changes the game" - the row or those options), run: (menu) => {} for a button }.
+//     A row of 'display' / 'sound' goes after the kit's rows of that section; a row of another section into spec.hosts[section]
+//     (an element - the page's Debug panel) or, without one, into a fieldset of its own (legend spec.texts[section]._). Its
+//     control's id is 'wb-' + id; ids are unique across the menu. get(section) has the rows' values (a hidden row keeps its
+//     value), set / reset / the listeners / the store treat them as the kit's own; a button keeps no value.
 //
 // The file is wb-nastaveni.js (not wb-menu.js: that name is the games' own Workbench bar). Every value is kept per mode (original / enhanced). Test hooks (arek web test §6): window.wbMenuTest = menu.testHooks().
 'use strict';
 const WBNASTAVENI = (() => {
-    const VERSION = '1.3';
+    const VERSION = '1.4';
     const MODES = ['original', 'enhanced'];
     const ITEMS = {
         display: [
@@ -54,14 +64,35 @@ const WBNASTAVENI = (() => {
                          fit: 'fit', fine: 'fine', standard: 'standard', strong: 'strong', lines: 'lines', grid: 'grid' },
               sound: { _: 'Sound', sound: 'Sound', volume: 'Volume', 'filter-fixed': 'Amiga 500 filter', 'filter-led': 'LED filter', 'filter-hp': 'High-pass',
                        stereo: 'Stereo width', defaults: 'Default sound for this mode', auto: 'as the game', on: 'on', off: 'off' },
-              modes: { original: 'Original', enhanced: 'Enhanced' } },
+              modes: { original: 'Original', enhanced: 'Enhanced' }, game: { changes: 'changes the game' } },
         cs: { display: { _: 'Obraz', zoom: 'Zvětšení', crt: 'CRT', 'crt-detail': 'Stupeň CRT', 'crt-shape': 'Tvar CRT', blur: 'Rozmazání', brightness: 'Jas',
                          contrast: 'Kontrast', saturation: 'Sytost', red: 'Červená', green: 'Zelená', blue: 'Modrá', par: 'Šířka bodu', smooth: 'Plynulé zobrazení', defaults: 'Výchozí obraz tohoto režimu',
                          fit: 'do okna', fine: 'jemný', standard: 'střední', strong: 'silný', lines: 'řádky', grid: 'mřížka' },
               sound: { _: 'Zvuk', sound: 'Zvuk', volume: 'Hlasitost', 'filter-fixed': 'Filtr Amigy 500', 'filter-led': 'Filtr LED', 'filter-hp': 'Horní propust',
                        stereo: 'Šířka sterea', defaults: 'Výchozí zvuk tohoto režimu', auto: 'podle hry', on: 'zapnuto', off: 'vypnuto' },
-              modes: { original: 'Originál', enhanced: 'Vylepšeno' } },
+              modes: { original: 'Originál', enhanced: 'Vylepšeno' }, game: { changes: 'mění hru' } },
     };
+    const KIT_SECTIONS = ['display', 'sound'];
+
+    /** 1.4: a game row with its kind, section and modes filled in; ids must be unique over the kit's items and the rows. */
+    function rowsOf(list) {
+        const seen = new Set(KIT_SECTIONS.flatMap((s) => ITEMS[s].map((it) => it.id)));
+        return (list || []).map((r) => {
+            if (!r || !r.id) throw new Error('wb-nastaveni: a row without an id');
+            if (seen.has(r.id)) throw new Error('wb-nastaveni: the row id ' + r.id + ' is taken');
+            seen.add(r.id);
+            const kind = r.kind || (Array.isArray(r.options) ? 'select' : 'check');
+            if (!['select', 'check', 'range', 'button'].includes(kind)) throw new Error('wb-nastaveni: row ' + r.id + ' kind ' + kind);
+            if (kind === 'select' && !(Array.isArray(r.options) && r.options.length)) throw new Error('wb-nastaveni: row ' + r.id + ' has no options');
+            return Object.assign({ section: 'display', perMode: true }, r, { kind, game: true });
+        });
+    }
+    /** 1.4: a row's default for a mode (an object per mode or one value; none given: the first option, off, the minimum). */
+    function rowDefault(r, mode) {
+        const d = r.def !== null && typeof r.def === 'object' && !Array.isArray(r.def) ? r.def[mode] : r.def;
+        if (d !== undefined) return coerce(r, d);
+        return r.kind === 'select' ? r.options[0] : r.kind === 'range' ? r.min : false;
+    }
 
     /** The default of an item for a mode: the game's override (spec.defaults[section][mode][id]) wins. */
     function defaults(section, mode, over, snap, omit) {
@@ -114,19 +145,50 @@ const WBNASTAVENI = (() => {
                            modes: Object.assign({}, (TEXTS[this.lang] || TEXTS.en).modes, (this.spec.texts && this.spec.texts.modes) || {}) };
             this.listeners = [];
             this.mode = MODES.includes(this.spec.mode) ? this.spec.mode : 'original';
+            this.texts.game = Object.assign({}, (TEXTS[this.lang] || TEXTS.en).game, (this.spec.texts && this.spec.texts.game) || {});
+            this.rows = rowsOf(this.spec.rows);                                       // 1.4: the game's rows
+            this.sections = KIT_SECTIONS.concat([...new Set(this.rows.map((r) => r.section))].filter((s) => !KIT_SECTIONS.includes(s)));
             const stored = this.load();
             this.state = {};
             const snap = this.spec.zoom === 'snap';     // a stored exact zoom (e.g. 2 * 448 / 293) survives a reload; refreshZoom snaps it
-            for (const m of MODES) this.state[m] = { display: merge('display', m, stored, this.spec.defaults, snap, this.spec.omit), sound: merge('sound', m, stored, this.spec.defaults, false, this.spec.omit) };
+            for (const m of MODES) {
+                this.state[m] = { display: merge('display', m, stored, this.spec.defaults, snap, this.spec.omit), sound: merge('sound', m, stored, this.spec.defaults, false, this.spec.omit) };
+                for (const sec of this.sections) this.state[m][sec] = Object.assign(this.state[m][sec] || {}, this.rowValues(sec, m, stored && stored[m] && stored[m][sec]));
+            }
+            this.shared = {};
+            for (const sec of this.sections) this.shared[sec] = this.rowValues(sec, null, stored && stored.shared && stored.shared[sec]);
             if (stored && MODES.includes(stored.mode) && !this.spec.mode) this.mode = stored.mode;
-            this.controls = { display: {}, sound: {} }; this.extras = {};
+            this.controls = {}; for (const sec of this.sections) this.controls[sec] = {};
+            this.extras = {};
             if (host) this.render();
         }
         load() {
             try { const raw = this.spec.store && localStorage.getItem(this.spec.store); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
         }
         save() {
-            try { if (this.spec.store) localStorage.setItem(this.spec.store, JSON.stringify(Object.assign({ mode: this.mode, version: VERSION }, this.state))); } catch (e) { /* private window, blocked storage */ }
+            try { if (this.spec.store) localStorage.setItem(this.spec.store, JSON.stringify(Object.assign({ mode: this.mode, version: VERSION, shared: this.shared }, this.state))); } catch (e) { /* private window, blocked storage */ }
+        }
+        /** 1.4: the values of a section's rows for a mode (mode null: the rows kept for both modes), stored values coerced
+         *  over the defaults. */
+        rowValues(section, mode, stored) {
+            const out = {};
+            for (const r of this.rows) {
+                if (r.section !== section || r.kind === 'button' || (mode === null) !== (r.perMode === false)) continue;
+                out[r.id] = stored && r.id in stored ? coerce(r, stored[r.id]) : rowDefault(r, mode || MODES[0]);
+            }
+            return out;
+        }
+        rowOf(section, id) { return this.rows.find((r) => r.section === section && r.id === id); }
+        /** 1.4: a row is shown in its modes and while the rows it depends on (when) have the values it names. */
+        visible(r) {
+            if (r.modes && !r.modes.includes(this.mode)) return false;
+            for (const [k, want] of Object.entries(r.when || {})) {
+                const dep = this.rowOf(r.section, k);
+                if (dep && dep !== r && !this.visible(dep)) return false;              // the row it depends on is hidden: so is it
+                const v = this.get(r.section)[k], ok = Array.isArray(want) ? want.map(String).includes(String(v)) : String(want) === String(v);
+                if (!ok) return false;
+            }
+            return true;
         }
         render() {
             const d = this.host.ownerDocument || document, root = d.createElement('div'); root.className = 'wb-nastaveni';
@@ -134,23 +196,45 @@ const WBNASTAVENI = (() => {
                 const fs = d.createElement('fieldset'); fs.className = 'wb-nastaveni-' + section;
                 const lg = d.createElement('legend'); lg.textContent = this.texts[section]._; fs.appendChild(lg);
                 for (const it of ITEMS[section]) if (!omitted(this.spec.omit, section).has(it.id)) fs.appendChild(this.row(d, section, it));
+                for (const r of this.rows) if (r.section === section) fs.appendChild(this.row(d, section, r));   // 1.4
                 const ex = d.createElement('div'); ex.className = 'wb-nastaveni-extras'; fs.appendChild(ex); this.extras[section] = ex;
                 const btn = d.createElement('button'); btn.type = 'button'; btn.id = 'wb-defaults-' + section; btn.className = 'wb-nastaveni-defaults';
                 btn.textContent = this.texts[section].defaults; btn.addEventListener('click', () => this.reset(section)); fs.appendChild(btn);
                 root.appendChild(fs);
             }
+            for (const section of this.sections.filter((s) => !KIT_SECTIONS.includes(s))) {   // 1.4: the game's own sections
+                const host = this.spec.hosts && this.spec.hosts[section];
+                const box = d.createElement(host ? 'div' : 'fieldset'); box.className = 'wb-nastaveni-' + section + ' wb-nastaveni-rows';
+                if (!host) { const lg = d.createElement('legend'); lg.textContent = (this.spec.texts && this.spec.texts[section] && this.spec.texts[section]._) || section; box.appendChild(lg); }
+                for (const r of this.rows) if (r.section === section) box.appendChild(this.row(d, section, r));
+                (host || root).appendChild(box);
+            }
             this.host.appendChild(root); this.root = root;
             this.refresh();
         }
         row(d, section, it) {
-            const row = d.createElement('div'); row.className = 'wb-nastaveni-row wb-menu-' + it.kind;
-            const label = d.createElement('label'); label.htmlFor = 'wb-' + it.id; label.textContent = this.texts[section][it.id] || it.id;
+            const row = d.createElement('div'); row.className = 'wb-nastaveni-row wb-menu-' + it.kind + (it.game ? ' wb-nastaveni-game' : '') + (it.changesGame === true ? ' wb-nastaveni-changes' : '');
+            const mark = (t, on) => (on ? t + ' (' + this.texts.game.changes + ')' : t);
+            if (it.kind === 'button') {                                                // 1.4: a row that does something, keeps nothing
+                const b = d.createElement('button'); b.type = 'button'; b.id = 'wb-' + it.id; b.className = 'wbitem wb-nastaveni-action';
+                b.textContent = mark(it.label || it.id, it.changesGame === true); b.addEventListener('click', () => { if (it.run) it.run(this); });
+                row.appendChild(b); this.controls[section][it.id] = { ctl: b, it, row };
+                return row;
+            }
+            const label = d.createElement('label'); label.htmlFor = 'wb-' + it.id;
+            label.textContent = it.game ? mark(it.label || it.id, it.changesGame === true) : (this.texts[section][it.id] || it.id);
             let ctl;
-            if (it.id === 'zoom' && this.spec.zoom === 'snap') {
+            if (it.id === 'zoom' && this.spec.zoom === 'snap' && !it.game) {
                 ctl = d.createElement('input'); ctl.type = 'range'; ctl.min = 0; ctl.step = 1; ctl.max = 0; ctl.dataset.snap = '1';
             } else if (it.kind === 'select') {
                 ctl = d.createElement('select');
-                for (const o of it.options) { const op = d.createElement('option'); op.value = String(o); op.textContent = this.optionText(section, o); ctl.appendChild(op); }
+                for (const o of it.options) {
+                    const op = d.createElement('option'); op.value = String(o);
+                    op.textContent = it.game ? mark(it.labels && String(o) in it.labels ? it.labels[String(o)] : typeof o === 'number' ? this.num(o) : String(o),
+                                                    Array.isArray(it.changesGame) && it.changesGame.map(String).includes(String(o)))
+                        : this.optionText(section, o);
+                    ctl.appendChild(op);
+                }
             } else {
                 ctl = d.createElement('input'); ctl.type = it.kind === 'check' ? 'checkbox' : 'range';
                 if (it.kind === 'range') { ctl.min = it.min; ctl.max = it.max; ctl.step = it.step; }
@@ -160,7 +244,7 @@ const WBNASTAVENI = (() => {
             if (ctl.dataset.snap) ctl.addEventListener('input', () => { const st = this.zoomSteps(); const k = Math.min(st.length - 1, Math.max(0, +ctl.value)); if (st[k]) this.set(section, it.id, st[k].value); });
             else ctl.addEventListener(it.kind === 'range' ? 'input' : 'change', () => this.set(section, it.id, it.kind === 'check' ? ctl.checked : ctl.value));
             row.appendChild(label); row.appendChild(ctl); if (it.kind === 'range' || ctl.dataset.snap) row.appendChild(out);
-            this.controls[section][it.id] = { ctl, out, it };
+            this.controls[section][it.id] = { ctl, out, it, row };
             return row;
         }
         /** A number as the menu's language writes it (1,04 in Czech), with the item's unit (20 %). */
@@ -196,6 +280,14 @@ const WBNASTAVENI = (() => {
         refresh() {
             if (!this.root) return;
             this.root.dataset.mode = this.mode;
+            for (const r of this.rows) {                                               // 1.4: the game's rows - shown or hidden, values
+                const c = this.controls[r.section][r.id]; if (!c) continue;
+                c.row.hidden = !this.visible(r);
+                if (r.kind === 'button') continue;
+                const v = this.get(r.section)[r.id];
+                if (r.kind === 'check') c.ctl.checked = !!v; else c.ctl.value = String(v);
+                if (c.out) c.out.value = this.valueText(r, v);
+            }
             for (const section of ['display', 'sound']) for (const it of ITEMS[section]) {
                 const c = this.controls[section][it.id], v = this.state[this.mode][section][it.id];
                 if (!c) continue;                                                       // 1.3: a row left out
@@ -212,17 +304,31 @@ const WBNASTAVENI = (() => {
         }
         get(section) {
             const s = this.state[this.mode];
-            return section ? Object.assign({}, s[section]) : { mode: this.mode, display: Object.assign({}, s.display), sound: Object.assign({}, s.sound) };
+            if (section) return Object.assign({}, s[section], this.shared[section]);
+            const out = { mode: this.mode };
+            for (const sec of this.sections) out[sec] = Object.assign({}, s[sec], this.shared[sec]);
+            return out;
         }
-        getMode(mode, section) { return Object.assign({}, this.state[mode][section]); }
+        getMode(mode, section) { return Object.assign({}, this.state[mode][section], this.shared[section]); }
         setMode(mode) { if (!MODES.includes(mode)) return; this.mode = mode; this.refresh(); this.save(); this.emit('mode', { cause: 'mode' }); }
         set(section, id, value) {
-            const it = ITEMS[section].find((x) => x.id === id); if (!it || omitted(this.spec.omit, section).has(id)) return;
+            const r = this.rowOf(section, id);
+            if (r) {                                                                   // 1.4: a game row
+                if (r.kind === 'button') return;
+                (r.perMode === false ? this.shared[section] : this.state[this.mode][section])[id] = coerce(r, value);
+                this.refresh(); this.save(); this.emit(section, { cause: 'set', id });
+                return;
+            }
+            const it = (ITEMS[section] || []).find((x) => x.id === id); if (!it || omitted(this.spec.omit, section).has(id)) return;
             this.state[this.mode][section][id] = (id === 'zoom' && this.spec.zoom === 'snap') ? this.snapZoom(Number(value) || 0) : coerce(it, value);
             this.refresh(); this.save(); this.emit(section, { cause: 'set', id });
         }
         reset(section) {
-            for (const sec of section ? [section] : ['display', 'sound']) this.state[this.mode][sec] = defaults(sec, this.mode, this.spec.defaults, sec === 'display' && this.spec.zoom === 'snap', this.spec.omit);
+            for (const sec of section ? [section] : this.sections) {
+                this.state[this.mode][sec] = Object.assign(KIT_SECTIONS.includes(sec) ? defaults(sec, this.mode, this.spec.defaults, sec === 'display' && this.spec.zoom === 'snap', this.spec.omit) : {},
+                                                           this.rowValues(sec, this.mode, null));
+                this.shared[sec] = this.rowValues(sec, null, null);                    // 1.4: the rows kept for both modes too
+            }
             this.refresh(); this.save(); this.emit(section || 'all', { cause: 'reset', section: section || 'all' });
         }
         on(ev, fn) { this.listeners.push([ev, fn]); return this; }
@@ -232,10 +338,11 @@ const WBNASTAVENI = (() => {
         testHooks() {
             return { version: VERSION, ids: () => ['display', 'sound'].map((s) => ITEMS[s].filter((it) => !omitted(this.spec.omit, s).has(it.id)).map((it) => 'wb-' + it.id)).flat(),
                      get: (section) => this.get(section), getMode: (m, s) => this.getMode(m, s), setMode: (m) => this.setMode(m),
-                     set: (s, id, v) => { this.set(s, id, v); return this.get(s); }, reset: (s) => { this.reset(s); return this.get(s); } };
+                     set: (s, id, v) => { this.set(s, id, v); return this.get(s); }, reset: (s) => { this.reset(s); return this.get(s); },
+                     rows: () => this.rows.map((r) => 'wb-' + r.id), shown: () => this.rows.filter((r) => this.visible(r)).map((r) => 'wb-' + r.id) };
         }
     }
-    return { VERSION, MODES, ITEMS, TEXTS, defaults, coerce, merge, omitted, Menu, build: (host, spec) => new Menu(host, spec) };
+    return { VERSION, MODES, ITEMS, TEXTS, defaults, coerce, merge, omitted, rowsOf, rowDefault, Menu, build: (host, spec) => new Menu(host, spec) };
 })();
 if (typeof globalThis !== 'undefined') { globalThis.WBNASTAVENI = WBNASTAVENI; if (!globalThis.WBMENU) globalThis.WBMENU = WBNASTAVENI; }   // WBMENU: the 0.6.0 name
 if (typeof module !== 'undefined') module.exports = WBNASTAVENI;

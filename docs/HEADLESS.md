@@ -283,7 +283,9 @@ uint32_t r[2] = { start, length };
 fwrite(h, 4, 24, f); fwrite(r, 4, 2, f); fwrite(ram + start, 1, length, f);  /* bytes as in RAM */
 ```
 
-(`trace.encode` writes the same from Python.) Registers the engine does not keep can be 0;
+(`trace.encode` writes the same from Python; `wb-vtr.js`, kit 1.0.84, from JavaScript - a rewrite that keeps its state in
+its own objects writes its fields at the original's addresses, `w.add({ pc, frame, fields: [[addr, 'w', value], ...] })`, and
+`arek trace compare --range` compares only those.) Registers the engine does not keep can be 0;
 compare without `--regs` then.
 
 ## The chip bus: `--buslog`, `arek trace bus`

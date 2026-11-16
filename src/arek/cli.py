@@ -329,10 +329,14 @@ def cmd_recomp(a):
     for s in a.stub or []:
         recomp.add_stub(s)
     funcs = [recomp.parse_func_spec(s) for s in a.func or []]
+    hook, operand, declare = list(a.hook or []), list(a.operand or []), list(a.declare or [])
+    for f in a.flow_file or []:                                  # 1.0.84: the changes by address from a file
+        h, o, d = recomp.flow_file(f)
+        hook, operand, declare = hook + h, operand + o, declare + d
     flow = recomp.flow_from_specs(data, a.base, a.jtab or [], a.indirect or [], a.stop or [],
                                   a.exitat or [], a.extern or [], a.ret or [], a.prefix, a.lib,
                                   a.inline or [], a.overlay or [], a.dynamic or [], a.overlay_module, a.smc or [], a.live or [],
-                                  a.hook or [], a.operand or [], a.declare or [])
+                                  hook, operand, declare)
     impl = None
     if a.stub_impl:
         impl = 'notes' if a.stub_impl == 'notes' else Path(a.stub_impl).read_text()
@@ -345,14 +349,14 @@ def cmd_recomp(a):
             tok = line.split('#')[0].split()
             if tok:
                 auto.append(int(tok[0], 16))
-    report = {}
+    report, imms = {}, ([] if a.immediates else None)
     try:
         src, stats, entries = recomp.generate(
             data, a.base, funcs, auto, a.lo or a.base, a.hi, with_main=a.main, flow=flow,
             stub_impl=impl, timing=a.timing, memsz=a.memsz,
             slow=tuple(_hex(x) for x in a.slow.split(':')) if a.slow else None, profile=a.profile,
             cover=cover, oob=a.oob, cover_in_tick=a.cover_in_tick, bus_table=a.bus_table,
-            auto_soft=a.auto_soft, report=report, resume=a.resume)
+            auto_soft=a.auto_soft, report=report, resume=a.resume, immediates=imms)
     except recomp.Unsupported as e:
         if a.refusals:
             Path(a.refusals).write_text(json.dumps(recomp.refusal_json(e), indent=1) + '\n')
@@ -361,6 +365,8 @@ def cmd_recomp(a):
                                                    else '; --refusals FILE lists them as JSON'), file=sys.stderr)
         raise
     Path(a.out).write_text(src)
+    if imms is not None:                                         # 1.0.84: the constants arek edges shifts
+        Path(a.immediates).write_text(json.dumps(imms, indent=0) + '\n')
     for root, why in report.get('dropped', []):
         print('arek recomp: root %06x dropped (leads into data: %s)' % (root, why), file=sys.stderr)
     if cover is not None:
@@ -611,6 +617,14 @@ def cmd_discover(a):
                 r['name'], r['status'], r.get('rounds', 0), ' '.join(r.get('roots', [])) or '-',
                 ' '.join(r.get('module_roots', [])) or '-', ' '.join(r.get('modules', [])) or '-'))
     return 0 if res and all(r['status'] == 'clean' for r in res) else 1
+
+
+def cmd_edges(a):
+    from . import edges
+    pr = edges.Project(a.config)
+    rep = pr.scan(log=(lambda *x: None) if a.json else print, only=a.only, shift=a.shift, list_only=a.list)
+    print(json.dumps(rep, indent=1) if a.json else edges.format_report(rep))
+    return 0
 
 
 def cmd_fuzz(a):
@@ -1163,6 +1177,12 @@ def build_parser():
     s.add_argument('--operand', nargs='*', action='extend', metavar='ADDR=EXPR',
                    help='1.0.81: the immediate or register source operand of the instruction at ADDR read as the C '
                         'expression EXPR (the project\'s variable or function), masked to the size; repeatable')
+    s.add_argument('--flow-file', nargs='*', action='extend', metavar='FILE',
+                   help='1.0.84: changes by address from a file, one a line: operand ADDR=EXPR, hook ADDR=NAME[:KIND], '
+                        'declare TEXT (# comments); added to --operand / --hook / --declare')
+    s.add_argument('--immediates', metavar='FILE',
+                   help='1.0.84: write every translated instruction whose source operand is a constant as JSON '
+                        '(addr, text, mn, size, imm, simm) - what arek edges shifts')
     s.add_argument('--declare', nargs='*', action='extend', metavar='TEXT',
                    help='1.0.81: C declarations put before the functions (what --operand EXPR uses); repeatable')
     s.add_argument('--live', nargs='*', action='extend', metavar='ADDR',
@@ -1379,6 +1399,15 @@ def build_parser():
     s.add_argument('--no-build', action='store_true', help='do not build before the first run')
     s.add_argument('--json', action='store_true')
     s.set_defaults(fn=cmd_discover)
+    s = sp.add_parser('edges', help='1.0.84: which constants decide where the game\'s screen ends - every constant of the code in a '
+                      'range shifted in turn in one build (knobs), the scenario run per candidate, the outcome and metrics against '
+                      'the baseline (arek.edges)')
+    s.add_argument('config', help='EDGES.json (build, run, flow, immediates, values, mn, exclude, shift, outcome, metrics, scenario)')
+    s.add_argument('--shift', type=int, help='added to every candidate in its run (default the config\'s, 64)')
+    s.add_argument('--only', nargs='*', metavar='ADDR', help='only these candidates (hex)')
+    s.add_argument('--list', action='store_true', help='only build once and list the candidates')
+    s.add_argument('--json', action='store_true')
+    s.set_defaults(fn=cmd_edges)
     s = sp.add_parser('fuzz', help='random joystick input (R L U D F S per frame) for the emulator and a rebuild alike')
     s.add_argument('--seed', type=int, required=True)
     s.add_argument('--frames', type=int, required=True)

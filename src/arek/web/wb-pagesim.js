@@ -1,4 +1,4 @@
-// wb-pagesim.js 1.0 (kit 1.0.78) - the page's loop without a browser (amiga-re-kit, docs/WB-PLYNULOST.md 2.16). Node and the page alike.
+// wb-pagesim.js 1.1 (kit 1.0.84) - the page's loop without a browser (amiga-re-kit, docs/WB-PLYNULOST.md 2.16). Node and the page alike.
 // The clock (wb-takt) grants frames as it does in the page, an engine model computes them in turn (ms a frame as a parameter:
 // an engine thread in a browser is slower than in Node - SWIV measured 14-16 ms a game frame in Chromium, 4-6 ms in Node), the
 // page's own feed() turns every finished frame into wb-scene's record at the display frame it would reach the page, and
@@ -16,11 +16,12 @@
 //       than 1.5 frames apart), late: [median, max] ms (a record's arrival after its time, wb-takt 1.7), version }
 // Options: msgMs (2: allow -> the engine starts), warm (240 display frames before the first sample: the clock measures the
 // display), minRun (4 records before composing), keep (32 records in the list), seed, t0 (1000 ms), objs(c) -> the samples'
-// objects (default every composed object [id, x, y], as a page's WBLONGRUN.objs() over scene.last). The order within a display
+// objects (default every composed object [id, x, y], as a page's WBLONGRUN.objs() over scene.last), player(c) -> [x, y] on the screen
+// or null (1.1: the samples' sixth element, as WBLONGRUN.player(); websmooth 1.10 judges its holds). The order within a display
 // frame is the page's: the engine's progress, feed, compose, takt.tick(ts, done). No game data.
 'use strict';
 (function (root) {
-    const VERSION = '1.0';
+    const VERSION = '1.1';
     function run(o) {
         const T = o.WBTAKT, S = o.WBSCENE, F = o.from | 0, N = o.count | 0, HZ = o.hz || 60, msg = o.msgMs != null ? o.msgMs : 2;
         const keep = o.keep || 32, minRun = o.minRun || 4, warm = o.warm != null ? o.warm : 240, skip = o.skip || 24;
@@ -54,7 +55,7 @@
             }
             if (i > warm && valid >= minRun && frames.length > 1) {
                 const c = S.compose(frames, ts, view, opts, takt);
-                if (c) { shown++; if (c.of > 1 + 1e-4) ext++; samples.push([ts, c.cam.slice(), objsOf(c), takt.missing, takt.stats().ahead]); }
+                if (c) { shown++; if (c.of > 1 + 1e-4) ext++; samples.push(o.player ? [ts, c.cam.slice(), objsOf(c), takt.missing, takt.stats().ahead, o.player(c)] : [ts, c.cam.slice(), objsOf(c), takt.missing, takt.stats().ahead]); }
             }
             takt.tick(ts, done, false);
         }

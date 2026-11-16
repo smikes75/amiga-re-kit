@@ -57,20 +57,29 @@ short track can decide it, SWIV). late() -> [median,
 max] ms, how long after its time a frame's record reached the page (wb-takt 1.7 takt.late(); optional, reported).
 ``--samples FILE`` judges samples made without a browser (wb-pagesim.js: the page's loop with the engine's time a frame
 as a parameter) with the same measure: dropped frames, jitter, back steps, missing passes - no keys, no sound.
+1.10 (kit 1.0.84, SWIV): holds - a moving object or player that stands still for 1-3 display frames between steps of one
+direction and then catches up (``holds``) - are counted and judged per mille of the moving frames, the objects' and the
+player's (player() is sampled every display frame now, the samples' sixth element); limit 0.5 each. The jitter left them
+out (the catch-up is a step over OBJ_JUMP) and SWIV's page passed at 0.03 px while its player stood still twice every
+160 ms: 58 per mille (Xenon 2: 0).
 """
 import json
 import statistics
 
-LIMITS = {'dropped': 0, 'cam_jitter': 0.05, 'obj_jitter': 0.05, 'missing_pct': 0.0, 'latency_ms': 70, 'dropouts': 0, 'obj_back_pm': 4.0}
+LIMITS = {'dropped': 0, 'cam_jitter': 0.05, 'obj_jitter': 0.05, 'missing_pct': 0.0, 'latency_ms': 70, 'dropouts': 0, 'obj_back_pm': 4.0,
+          'obj_holds_pm': 0.5, 'player_holds_pm': 0.5}
 BROWSERS = ('chromium', 'webkit')
 OBJ_JUMP = 1.0                     # game px: a larger step of an object against the screen is a jump (animation, a new place), not jitter
 CAM_JUMP = 40.0                    # game px: a larger camera step is a jump (wb-scene's jumpMax), it ends a moving stretch
 BACK_MEAN = 0.3                    # game px a display frame: an object whose 9 steps around a step average more has a direction (1.8)
+HOLD_MOVE = 0.3                    # game px a display frame: the median step of the 13 around a frame that makes it a moving one (1.10)
+HOLD_FRAC = 0.15                   # a step under this share of that median is a standstill (1.10)
+HOLD_MAX = 3                       # display frames: a standstill up to this long between steps of one direction is a hold (1.10)
 
 SAMPLE_START_JS = """() => { const H = globalThis.WBLONGRUN; const S = globalThis.__wbSmooth = { out: [], on: true };
     const f = (ts) => { if (!S.on) return;
         if (H.ready && !H.ready()) { if (S.out.length && S.out[S.out.length - 1] !== null) S.out.push(null); }   // 1.2: outside the game - a gap
-        else S.out.push([ts, H.cam(), H.objs ? H.objs() : null, H.missing ? H.missing() : null, H.ahead ? H.ahead() : null]);
+        else S.out.push([ts, H.cam(), H.objs ? H.objs() : null, H.missing ? H.missing() : null, H.ahead ? H.ahead() : null, H.player ? H.player() : null]);
         requestAnimationFrame(f); };
     requestAnimationFrame(f); return true; }"""
 SAMPLE_STOP_JS = "() => { const S = globalThis.__wbSmooth; S.on = false; return S.out; }"
@@ -157,6 +166,50 @@ def backsteps(steps):
     return back, moving
 
 
+def holds(steps):
+    """1.10 (kit 1.0.84, SWIV): ``(held, moving)`` - the moving display frames (the median of the 13 steps around one is at
+    least HOLD_MOVE) and of them the holds: a standstill (a step under HOLD_FRAC of that median) of 1..HOLD_MAX frames between
+    steps of the same direction. It is what a page draws when its scene has no pair for an object's newest pass - the
+    object stands, then catches up with a step the jitter leaves out as a jump (over OBJ_JUMP). A stop, a turn and a slow
+    drift are no holds. SWIV's player in Chrome: 58 per mille of 1233 moving frames (the scene lost its pair every 4 passes
+    when the game set a flag that was a part of the object's id), its objects 1-2 per mille; Xenon 2: 0 of 1271 and 0 of 41317."""
+    held = moving = 0
+    n = len(steps)
+    for i in range(6, n - 6):
+        m = sorted(abs(v) for v in steps[i - 6:i + 7])[6]
+        if m < HOLD_MOVE:
+            continue
+        moving += 1
+        lim = HOLD_FRAC * m
+        if abs(steps[i]) >= lim:
+            continue
+        a = i
+        while a > 0 and abs(steps[a - 1]) < lim and i - a <= HOLD_MAX:
+            a -= 1
+        b = i + 1
+        while b < n and abs(steps[b]) < lim and b - i <= HOLD_MAX:
+            b += 1
+        if b - a <= HOLD_MAX and a > 0 and b < n and steps[a - 1] * steps[b] > 0:
+            held += 1
+    return held, moving
+
+
+def _stretches(pts, norm, k):
+    """The steps of a track ``[(sample index, x, y), ...]`` on axis ``k`` (1 / 2) per nominal display interval, split
+    where the track misses a sample."""
+    out, cur = [], []
+    for a, b in zip(pts, pts[1:]):
+        if b[0] != a[0] + 1:
+            if cur:
+                out.append(cur)
+            cur = []
+            continue
+        cur.append((b[k] - a[k]) * norm[a[0]])
+    if cur:
+        out.append(cur)
+    return out
+
+
 def overjumps(steps, window=3, jump=OBJ_JUMP):
     """1.8: the steps further than ``jump`` from the median of the ``window`` steps around them (left out of the jitter)."""
     h = window // 2
@@ -164,7 +217,7 @@ def overjumps(steps, window=3, jump=OBJ_JUMP):
 
 
 def analyse(samples, scale=None, axis=0):
-    """``[[ts, cam, objs, missing, ahead], ...]`` of one run -> the metrics; ``scale``: S, device px per game px, when
+    """``[[ts, cam, objs, missing, ahead(, player)], ...]`` of one run -> the metrics; ``scale``: S, device px per game px, when
     the page draws its objects on whole device pixels (their steps on the screen are then judged within 1/S); ``axis``:
     0 or 1, the camera's coordinate that is judged (1.6)."""
     # 1.2: None marks a gap - the page's ready() was false (a map fly-over after a death, a menu); nothing is
@@ -204,6 +257,7 @@ def analyse(samples, scale=None, axis=0):
     cam_jit_max = max((x for _, x in jm), default=0.0)
     obj_dev = obj_jit = obj_jit_mean = 0.0
     obj_back = obj_moving = obj_over = 0
+    obj_held = obj_hmov = 0
     if samples_in and samples_in[0][2] is not None:
         # 1.2 (G44): an object is judged on the screen (its world position less the camera): its steps there are within
         # 1/S of each other when the page draws on whole device pixels (scale), a step over OBJ_JUMP game px (an
@@ -228,9 +282,21 @@ def analyse(samples, scale=None, axis=0):
                     obj_back += b
                     obj_moving += m
                     obj_over += overjumps(st)
+            for k in (1, 2):                              # 1.10: holds, within the stretches the track has every sample of
+                for st in _stretches(pts, norm, k):
+                    h, m = holds(st)
+                    obj_held += h
+                    obj_hmov += m
         obj_dev = max(devs) if devs else 0.0
         obj_jit = max(jits) if jits else 0.0
         obj_jit_mean = statistics.fmean(jits) if jits else 0.0
+    pl_held = pl_mov = 0                                  # 1.10: the player as drawn (player() on the screen), when sampled
+    ppts = [(i, s[5][0], s[5][1]) for i, s in enumerate(samples) if s is not None and len(s) > 5 and s[5]]
+    for k in (1, 2):
+        for st in _stretches(ppts, norm, k):
+            h, m = holds(st)
+            pl_held += h
+            pl_mov += m
     miss = [s[3] for s in samples_in if s[3] is not None]
     missing_pct = 100.0 * (miss[-1] - miss[0]) / max(1, len(samples_in) - 1) if len(miss) > 1 else None
     ahead = [s[4] for s in samples_in if s[4] is not None]
@@ -238,6 +304,8 @@ def analyse(samples, scale=None, axis=0):
             'cam_dev': round(cam_dev, 4), 'cam_jitter': round(cam_jit, 4), 'cam_jitter_max': round(cam_jit_max, 4), 'cam_moving': len(moving),
             'obj_dev': round(obj_dev, 4), 'obj_jitter': round(obj_jit, 4), 'obj_jitter_mean': round(obj_jit_mean, 4), 'obj_back': obj_back, 'obj_moving': obj_moving,
             'obj_back_pm': round(1000.0 * obj_back / obj_moving, 2) if obj_moving else 0.0, 'obj_over': obj_over, 'missing_pct': missing_pct,
+            'obj_holds': obj_held, 'obj_hold_moving': obj_hmov, 'obj_holds_pm': round(1000.0 * obj_held / obj_hmov, 2) if obj_hmov else 0.0,
+            'player_holds': pl_held, 'player_moving': pl_mov, 'player_holds_pm': round(1000.0 * pl_held / pl_mov, 2) if pl_mov else 0.0,
             'ahead': statistics.median(ahead) if ahead else None, 'axis': 'xy'[axis]}
 
 
@@ -258,6 +326,10 @@ def verdict(r, keys=True):
         fails.append('object jitter %.3f px' % r['obj_jitter'])
     if interp and r.get('obj_moving', 0) >= 100 and r.get('obj_back_pm', 0) > LIMITS['obj_back_pm']:   # 1.8
         fails.append('objects stepped back %d times against their motion (%.1f per mille of %d moving steps)' % (r['obj_back'], r['obj_back_pm'], r['obj_moving']))
+    if interp and r.get('obj_hold_moving', 0) >= 200 and r.get('obj_holds_pm', 0) > LIMITS['obj_holds_pm']:   # 1.10
+        fails.append('objects stood still and caught up %d times (%.1f per mille of %d moving frames)' % (r['obj_holds'], r['obj_holds_pm'], r['obj_hold_moving']))
+    if interp and r.get('player_moving', 0) >= 100 and r.get('player_holds_pm', 0) > LIMITS['player_holds_pm']:
+        fails.append('the player stood still and caught up %d times (%.1f per mille of %d moving frames)' % (r['player_holds'], r['player_holds_pm'], r['player_moving']))
     if interp and r.get('missing_pct') is not None and r['missing_pct'] > LIMITS['missing_pct']:
         fails.append('missing passes %.1f %%' % r['missing_pct'])
     if not keys:
@@ -426,8 +498,10 @@ def run(url, seconds=30.0, browsers=BROWSERS, stalls=10, stall_ms=150, log=print
 
 
 def _back(r):
-    return (' (mean over objects %.3f; back %d of %d moving steps = %.1f per mille, over %g px %d)' % (
+    return ((' (mean over objects %.3f; back %d of %d moving steps = %.1f per mille, over %g px %d)' % (
         r.get('obj_jitter_mean', 0.0), r['obj_back'], r['obj_moving'], r['obj_back_pm'], OBJ_JUMP, r['obj_over']) if r.get('obj_moving') else '')
+        + (', holds %.1f per mille' % r['obj_holds_pm'] if r.get('obj_hold_moving') else '')            # 1.10
+        + (', player holds %.1f per mille' % r['player_holds_pm'] if r.get('player_moving') else ''))
 
 
 def judge_samples(data, scale=None, axis=None, interp=None):
