@@ -58,6 +58,8 @@ static struct { uint32_t pc; int st, skip, skipcmd, jmp; long next; uint16_t w1;
 static uint16_t ARD_PIX[ARD_LINES][ARD_WIDTH];
 static uint16_t ARD_PIXH[ARD_LINES][2 * ARD_WIDTH];    /* hires lines: both pixels of every lowres pixel */
 static uint8_t ARD_HR[ARD_LINES];                      /* 1 = the line was drawn in hires (ARD_PIX holds the pair averages) */
+static int ARD_PICTURE = 1;                            /* 1.0.86 (SWIV KIT-GAPS 19): 0 = no pixels - the Copper, the DMA slots, the sprite lines and the
+                                                          hooks (ard_line_cb, ard_spr_cb, ard_fetch_cb) run on, ARD_PIX / ARD_PIXH keep the last picture */
 static int ARD_NEXT = 0;                               /* the next line to draw */
 static uint8_t ARD_RGB[ARD_SHOT_W * ARD_SHOT_H * 3];
 static uint8_t ARD_PAL[0x2000][3];
@@ -348,7 +350,7 @@ static void ard_line(int v) {
                 base[0] = start + (((con1 & 15) + ofs) & 15); base[1] = start + ((((con1 >> 4) & 15) + ofs) & 15);
                 if (ard_fetch_cb) ard_fetch_cb(v, n, pt, nw, base, hr, words);   /* 1.0.77: the scene recorder (arek_scene.h) */
                 fetch_end = ddfstrt + (hr ? 4 : 8) * nw; nplanes = n; fetch = 1;
-                if (hr) { ARD_HR[v] = 1; for (int x = 0; x < 4 * c; x++) ARD_PIXH[v][x] = ARD_PIX[v][x >> 1]; }
+                if (hr && ARD_PICTURE) { ARD_HR[v] = 1; for (int x = 0; x < 4 * c; x++) ARD_PIXH[v][x] = ARD_PIX[v][x >> 1]; }
             } else fetch = -1;
         }
         {                                              /* the Copper: free even cycles not taken by bitplane DMA */
@@ -360,7 +362,7 @@ static void ard_line(int v) {
             ARD_SPRW = -1; ard_copper(v, c, busy);
             if (ARD_SPRW >= 0 && c >= 0x34) ns = ard_sprite_change(sl, ns, ARD_SPRW >> 3, 2 * c + ((ARD_SPRW & 4) ? 2 : 3));
         }
-        for (int h = 2 * c; h <= 2 * c + 1; h++) {
+        if (ARD_PICTURE) for (int h = 2 * c; h <= 2 * c + 1; h++) {
             if (hr && fetch == 1) {
                 uint16_t a = ard_pixel(h, words, nw, base, nplanes, sl, ns, 0, &ham, vwin), b = ard_pixel(h, words, nw, base, nplanes, sl, ns, 1, &ham, vwin);
                 ARD_PIXH[v][2 * h] = a; ARD_PIXH[v][2 * h + 1] = b; ARD_PIX[v][h] = ard_avg12(a, b);

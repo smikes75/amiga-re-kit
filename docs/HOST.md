@@ -226,7 +226,12 @@ The translated game on the host, driven frame by frame by the page, which reads 
 picture (`engine_rgb`, vAmiga's 716 x 285 screenshot layout; `engine_pix` the 12-bit colours;
 `engine_dac(1)` (1.0.66) gives `engine_rgb` the colours of the Amiga's converter - a component
 times 17, as wb-scene's `x17` - from the next frame on; the default is vAmiga's monitor, which a
-screenshot of the emulator holds and which is darker by 25 of 255 on average)
+screenshot of the emulator holds and which is darker by 25 of 255 on average;
+`engine_picture(0)` (1.0.86) leaves the picture out from the next frame the engine starts on - no
+pixels, no RGB - while the Copper, the DMA slots, the sprite lines and the scene hooks run on, for a
+page that draws from the game's state: SWIV natively 3.3 -> 2.3 ms a frame, the chip RAM of 6 000
+frames byte-equal; `engine_picture(1)` brings it back from the next whole frame, the hash then
+covers the chip RAM only, natively `--no-picture`)
 and sound (`engine_aud_ring`, 48 kHz stereo, `engine_fr_aud0` / `engine_fr_naud` per frame)
 and gives the inputs (`engine_keys` bits R L U D F on port 1, `engine_keys2` port 0,
 `engine_key` a raw key code) and the disk images (`engine_set_disk`). Built with Emscripten

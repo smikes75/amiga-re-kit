@@ -322,6 +322,59 @@ const H = require(%s);
     assert mon != dac and mon[1] == 236 and back == mon and h0 != h1, (mon, back)   # the monitor's $F is 236
 
 
+def test_engine_picture_off_keeps_the_game(tmp_path):
+    """1.0.86 (SWIV KIT-GAPS 19): a page that draws from the game's state does not need the chips' picture, which is
+    ~70 % of SWIV's engine. engine_picture(0) skips the pixels and the RGB from the next whole frame on while the
+    Copper, the DMA slots and the hooks run on: the chip RAM of every frame is the run's with the picture, the last
+    picture stays, the hash covers the chip RAM only; engine_picture(1) gives the run's picture again from the next frame."""
+    if not (shutil.which('emcc') and shutil.which('node') and bus.compiler()):
+        pytest.skip('no emcc + node')
+    build_state(tmp_path)
+    st = tmp_path / 'state'
+    chip = bytearray((st / 'chip.bin').read_bytes())
+    chip[0x8000:0x30000] = bytes(((i * 13) ^ (i >> 7)) & 0xff for i in range(0x28000))   # a picture that changes every frame
+    (st / 'chip.bin').write_bytes(chip)
+    creg = bytearray((st / 'creg.bin').read_bytes())
+    creg[0x96:0x98] = struct.pack('>H', 0x0300)                         # DMAEN + BPLEN: the planes take their slots
+    creg[0x100:0x102] = struct.pack('>H', 0x2200)                       # two planes
+    creg[0xe0:0xe8] = struct.pack('>HHHH', 0, 0x8000, 0, 0xa000)
+    creg[0x180:0x188] = struct.pack('>HHHH', 0x000, 0xf00, 0x0f0, 0x00f)
+    (st / 'creg.bin').write_bytes(creg)
+    host.pack(str(st), str(tmp_path / 'state.bin'))
+    host.engine_build(str(tmp_path / 'wa'), str(tmp_path / 'game.c'), 'f_001100', 'f_001000', src=str(tmp_path / 'externs.c'),
+                      defines=['HOST_L4=f_001180'])
+    script = tmp_path / 'pic.js'
+    script.write_text("""
+const H = require(%s), crypto = require('crypto');
+const sum = (b) => crypto.createHash('sha1').update(Buffer.from(b)).digest('hex').slice(0, 12);
+(async () => {
+  const open = () => H.open(%s, { state: %s, disks: [%s], hash: true });
+  const ref = await open(), r = {};
+  for (const n of [3, 4, 6, 8]) { await ref.run(n); r[n] = { rgb: sum(ref.rgb().data), ram: sum(ref.dump(0, 0x80000)), hash: ref.hash() }; }
+  const off = await open(), o = {};
+  await off.run(3); o[3] = sum(off.rgb().data); const was = off.M._engine_picture(-1); off.picture(false);
+  await off.run(6); o[6] = { rgb: sum(off.rgb().data), ram: sum(off.dump(0, 0x80000)), now: off.M._engine_picture(-1), hash: off.hash() };
+  off.picture(true); await off.run(8); o[8] = { rgb: sum(off.rgb().data), ram: sum(off.dump(0, 0x80000)), hash: off.hash() };
+  const late = await H.open(%s, { state: %s, disks: [%s], picture: false }); await late.run(4);
+  console.log(JSON.stringify({ r, o, was, lateRgb: sum(late.rgb().data) }));
+})();
+""" % tuple(repr(str(x)) for x in (os.path.join(HOST, 'arek_host_engine_node.js'), tmp_path / 'wa', tmp_path / 'state.bin', tmp_path / 'disk.adf',
+                                   tmp_path / 'wa', tmp_path / 'state.bin', tmp_path / 'disk.adf')))
+    r = subprocess.run(['node', str(script)], capture_output=True, text=True, timeout=240)
+    assert r.returncode == 0, r.stderr
+    import json
+    d = json.loads(r.stdout)
+    ref, off = d['r'], d['o']
+    assert len({ref['3']['rgb'], ref['6']['rgb'], ref['8']['rgb']}) == 3, ref          # the picture changes: the test sees the pixels
+    assert d['was'] == 1 and off['6']['now'] == 0
+    assert off['3'] == ref['3']['rgb'] and off['6']['rgb'] == ref['4']['rgb'], (off, ref)   # the coroutine was in frame 4 already: its picture stays
+    assert off['6']['ram'] == ref['6']['ram'] and off['8']['ram'] == ref['8']['ram']      # the game is the same
+    assert off['6']['hash'] != ref['6']['hash']                                         # the hash without the picture
+    assert off['8']['rgb'] == ref['8']['rgb'] and off['8']['hash'] == ref['8']['hash']   # the picture again, whole
+    import hashlib
+    assert d['lateRgb'] == hashlib.sha1(bytes(716 * 285 * 3)).hexdigest()[:12]              # off before the first frame: never a picture
+
+
 def test_engine_keys_through_the_hosts_keyboard(tmp_path):
     """1.0.66 (SWIV, the second player on the keyboard): with engine_keyboard(1) (natively --keyboard) engine_key's
     events go through the host's keyboard, as host_trace's K / k tokens do since 1.0.65 - every waiting event at the

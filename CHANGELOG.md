@@ -3,6 +3,19 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.86 (2026-11-17)
+
+- `engine_picture(0)` (natively `--no-picture`, Node `picture(false)` / `open({ picture: false })`): the engine leaves the
+  chips' picture out from the next frame it starts on - no pixels, no RGB - while the Copper, the DMA slots, the sprite
+  lines and the scene hooks run on; for a page that draws from the game's state (SWIV's Enhanced picture since
+  2026-11-17). SWIV natively, 6 000 frames: 3.3 -> 2.3 ms a frame, the chip RAM byte-equal; `engine_picture(1)` gives the
+  picture again from the next whole frame; the hash then covers the chip RAM only (SWIV KIT-GAPS 19, HOST.md)
+- `arek roots`: kind `ofs`, offset tables found from the code that reads them - `lea BASE,An` + `adda.w Dx,An` (x1 / x2,
+  an `add.w Dx,Dx` / `lsl.w` before doubles it) with a `lea TABLE` up to 64 bytes before, or a relative jump table
+  `move.w (T,pc,Dx),Dx` + `jmp` / `jsr (T,pc,Dx)`; the table and its base are reported on stderr. SWIV's image: one
+  table, $16422 base $16564, 73 coroutines and nothing else - 12 of them were missing until the end of the game and 60
+  of the 74 its bot found by playing are static now (METHOD.md)
+
 ## 1.0.85 (2026-11-16)
 
 - wb-scene 2.19: an object or a sprite fixed on the screen takes the palette of its screen row (the band row less the

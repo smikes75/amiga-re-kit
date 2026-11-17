@@ -177,7 +177,11 @@ of the level then matches; check it before blaming the level code.
 **A whole game, not one level.** The walker sees calls and branches; a game reaches the rest
 through tables and stored addresses. `arek roots image.bin --base B --lo CODE --hi END` lists the
 static roots: tables of `bra.w` slots, pointer tables into code, the bases `lea`/`pea` point at,
-and `move.l #code,...` (a handler stored into a structure at run time). Give them to
+`move.l #code,...` (a handler stored into a structure at run time) and (1.0.86) offset tables the
+code adds to a base - `lea BASE,An` + `adda.w Dx,An` with a `lea TABLE` just before, or a relative
+jump table `move.w (T,pc,Dx),Dx` + `jmp (T,pc,Dx)`; found from the code that reads them, so a
+table of 16-bit offsets is no guess (SWIV's behaviour table: 73 coroutines, 12 of them met only at
+the end of the game, which the coverage loop had to reach by playing). Give them to
 `arek recomp --auto-file roots.txt --auto-soft`: a root that leads into data is dropped with a
 note instead of refusing the translation. Then the coverage loop (Alien Breed II, 17 levels):
 run the host with random play and level skips; every `unknown routine X` becomes a root and the

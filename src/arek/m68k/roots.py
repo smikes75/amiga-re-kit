@@ -8,7 +8,14 @@ which needed 1 929 of them for 17 levels):
 - ``lea``: the target of ``lea``/``pea`` when a slot table starts there (the table's base), or any decodable
   target (1.0.12: a routine whose address is passed in a register);
 - ``imm``: ``move.l #addr,...`` with a code address (a handler stored into a structure at run time,
-  which the walker never sees - KIT-GAPS G30 of Alien Breed II).
+  which the walker never sees - KIT-GAPS G30 of Alien Breed II);
+- ``ofs`` (1.0.86, SWIV): tables of 16-bit offsets that the code adds to a base, found from the code that reads
+  them - ``lea BASE,An`` followed by ``adda.w Dx,An`` (once: offset * 1, twice: * 2; an ``add.w Dx,Dx`` / ``lsl.w #n,Dx``
+  just before the ``lea`` doubles it) with a ``lea TABLE`` / ``pea TABLE`` up to 64 bytes before (entries of 2 or 4 bytes,
+  the offset in either word: the longest run wins), or ``move.w (TABLE,pc,Dx),Dx`` + ``jmp`` / ``jsr (TABLE,pc,Dx)`` (a
+  relative jump table: offsets from the table). A run ends at an offset 0 or at a target that is no instruction start
+  of the linear decode; it counts from ``min_ofs`` (4) entries. SWIV's behaviour table ($16422, base $16564: 73
+  coroutines, 12 of them reached only at the end of the game) is one.
 
 A root that leads into data is harmless with ``arek recomp --auto-soft`` (it is dropped with a
 warning), so the scan can be generous.
@@ -49,7 +56,10 @@ def _slot_run(data, base, a, hi):
     return n
 
 
-def scan(data, base, lo=None, hi=None, min_slots=4, min_run=1, kinds=('slots', 'ptr', 'lea', 'imm')):
+KINDS = ('slots', 'ptr', 'lea', 'imm', 'ofs')
+
+
+def scan(data, base, lo=None, hi=None, min_slots=4, min_run=1, kinds=KINDS, min_ofs=4):
     """``{address: set(kinds)}`` of the static roots in [lo, hi) (default: the whole image)."""
     lo = base if lo is None else lo
     hi = base + len(data) if hi is None else min(hi, base + len(data))
@@ -122,7 +132,93 @@ def scan(data, base, lo=None, hi=None, min_slots=4, min_run=1, kinds=('slots', '
                 v = src.imm & 0xffffff
                 if lo <= v < hi and v != i.addr and code_at(v):
                     add(v, 'imm')
+    if 'ofs' in kinds:
+        for t in offset_tables(data, base, lo, hi, ins, min_ofs):
+            for v in t['targets']:
+                add(v, 'ofs')
     return roots
+
+
+def _sword(data, base, a):
+    w = _word(data, base, a)
+    return None if w is None else w - 0x10000 if w & 0x8000 else w
+
+
+def _run(data, base, lo, hi, starts, table, at, stride, scale, field):
+    """The targets of the offset table's entries in a row: base ``at`` + offset * scale, until an offset 0 or a target
+    that is no instruction start."""
+    out, p = [], table + field
+    while p + 2 <= hi:
+        o = _sword(data, base, p)
+        if not o:
+            break
+        t = at + o * scale
+        if t & 1 or not lo <= t < hi or t not in starts:
+            break
+        out.append(t)
+        p += stride
+    return out
+
+
+def offset_tables(data, base, lo, hi, ins=None, min_ofs=4):
+    """The offset tables the code reads (kind ``ofs`` of :func:`scan`): a list of ``{table, base, stride, field, scale,
+    site, targets}``, ``site`` the instruction that adds the offset (the ``adda`` or the ``jmp`` / ``jsr``)."""
+    ins = instructions(data, base, lo, hi) if ins is None else ins
+    starts, order = set(ins), sorted(ins)
+    pos = {a: k for k, a in enumerate(order)}
+    out, seen = [], set()
+
+    def target(i):
+        return getattr(getattr(i, 'ea', None), 'absval', None)
+
+    def best(table, at, scales, site, strides=(2, 4)):
+        top = None
+        for stride in strides:
+            for field in range(0, stride, 2):
+                for scale in scales:
+                    r = _run(data, base, lo, hi, starts, table, at, stride, scale, field)
+                    if len(r) >= min_ofs and (top is None or len(r) > len(top['targets'])):
+                        top = {'table': table, 'base': at, 'stride': stride, 'field': field, 'scale': scale, 'site': site, 'targets': r}
+        if top and (top['table'], top['base'], top['field']) not in seen:
+            seen.add((top['table'], top['base'], top['field']))
+            out.append(top)
+
+    for k, a in enumerate(order):
+        i = ins[a]
+        if i.kind == 'lea' and target(i) is not None:            # lea BASE,An ; adda.w Dx,An [; adda.w Dx,An]
+            at, an, n, dx, site = target(i), getattr(i, 'an', None), 0, None, None
+            for b in order[k + 1:k + 4]:
+                j = ins[b]
+                if j.kind == 'adda' and getattr(j, 'sz', None) == decoder.SZ_W and getattr(j, 'an', None) == an and j.ea.kind == 'd' and dx in (None, j.ea.reg):
+                    dx, n, site = j.ea.reg, n + 1, site or b
+                elif n:
+                    break
+            if not n or not lo <= at < hi:
+                continue
+            mul = 1
+            for b in order[max(0, k - 2):k]:                     # add.w Dx,Dx / lsl.w #s,Dx just before the lea
+                j = ins[b]
+                if j.kind == 'alu' and getattr(j, 'name', None) == 'add' and j.sz == decoder.SZ_W and j.reg == dx and j.ea.kind == 'd' and j.ea.reg == dx:
+                    mul *= 2
+                elif j.kind == 'shift' and getattr(j, 'name', None) in ('lsl', 'asl') and j.sz == decoder.SZ_W and j.reg == dx and str(j.cnt).isdigit():
+                    mul <<= int(j.cnt)
+            scales = sorted({n * mul, n})
+            tables = []
+            for b in order[max(0, k - 24):k]:                    # lea / pea TABLE up to 64 bytes before
+                j = ins[b]
+                if j.kind in ('lea', 'pea') and a - b <= 64 and target(j) is not None and target(j) != at and lo <= target(j) < hi:
+                    tables.append(target(j))
+            for table in tables:
+                best(table, at, scales, site)
+        elif i.kind in ('jmp', 'jsr') and getattr(i.ea, 'mode', None) == 73 and getattr(i.ea, 'pcbase', None) is not None:
+            tb = i.ea.pcbase                                     # move.w (T,pc,Dx),Dx ; jmp (T,pc,Dx)
+            for b in order[max(0, k - 3):k]:
+                j = ins[b]
+                src = getattr(j, 'src', None)
+                if j.kind == 'move' and getattr(j, 'sz', None) == decoder.SZ_W and getattr(src, 'mode', None) == 73 and getattr(src, 'pcbase', None) == tb:
+                    best(tb, tb, (1,), a, strides=(2,))
+                    break
+    return out
 
 
 def format_roots(roots):

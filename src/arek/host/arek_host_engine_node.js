@@ -118,6 +118,9 @@ class Engine {
     /** 1.0.66: rgb()'s colours from the next finished frame on - true = the Amiga's converter (component * 17, as the page shows
      *  them after engine_dac(1)), false = vAmiga's monitor (the default); open(dir, { dac: true }) sets it before the first frame */
     dac(on) { this.M._engine_dac(on === false ? 0 : 1); return this; }
+    /** 1.0.86: false = no picture from the next frame on (the Copper, DMA and the scene hooks run on; rgb() / pix() keep the last
+     *  picture, hash() covers the chip RAM only), true = the picture again; open(dir, { picture: false }) before the first frame */
+    picture(on) { this.M._engine_picture(on === false ? 0 : 1); return this; }
 }
 
 async function open(dir, opts) {
@@ -128,6 +131,7 @@ async function open(dir, opts) {
     const eng = new Engine(M, opts);
     if (opts.hash) M._engine_hash_on(1);
     if (opts.dac) M._engine_dac(1);
+    if (opts.picture === false) M._engine_picture(0);
     if (opts.keyboard) M._engine_keyboard(1);   // 1.0.66: key() through the host's keyboard (the serial port, the handshake)
     if (opts.state) eng.init(opts.state);
     if (opts.disks) opts.disks.forEach((f, i) => eng.disk(i, f));

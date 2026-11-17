@@ -163,13 +163,14 @@ static void e_apply_keys(void) {
         int v = E_KQ[kr % E_KEYQ], c = v & 0x7f; __atomic_store_n(&E_KQ_R, kr + 1, __ATOMIC_SEQ_CST);
         H_CIAA_SDR = (uint8_t)~((c << 1) | ((v & 0x100) ? 0 : 1)); H_CIAA_ICR |= 0x08; h_cia_raise(0); }   /* 1.0.12: SP in ICR raises PORTS when the game enabled it (Turrican II KIT-GAPS 19) */
 }
-static volatile int E_CPU_PEND = 0, E_DAC_PEND = 0;        /* E_DAC_PEND: 1 = the Amiga's converter, 2 = the monitor */
-static void e_frame_start(void) { e_apply_keys(); if (E_CPU_PEND) { H_CPU_NUM = E_CPU_PEND; E_CPU_PEND = 0; } }
+static volatile int E_CPU_PEND = 0, E_DAC_PEND = 0, E_PIC_PEND = 0;   /* E_DAC_PEND: 1 = the Amiga's converter, 2 = the monitor; E_PIC_PEND: 1 = picture on, 2 = off */
+static void e_frame_start(void) { e_apply_keys(); if (E_CPU_PEND) { H_CPU_NUM = E_CPU_PEND; E_CPU_PEND = 0; }
+    if (E_PIC_PEND) { ARD_PICTURE = E_PIC_PEND == 1; E_PIC_PEND = 0; } }   /* 1.0.86: a whole frame with or without its picture */
 /* the frame is drawn (ARD_PIX): its screenshot, its samples into the ring, its record; the page may now read them */
 static void e_frame_done(void) {
     int n = G_DONE; GFr *f = &G_FR[n % G_NFR];
     if (E_DAC_PEND) { if (E_DAC_PEND == 1) ard_pal_dac(); else ard_pal_init(); E_DAC_PEND = 0; }   /* in the engine's thread, between two pictures */
-    ard_to_rgb();
+    if (ARD_PICTURE) ard_to_rgb();                        /* 1.0.86: engine_picture(0) - the page draws from the game's state */
     ara_until(H_PAULA.frame_base + (double)H_LINES * HOST_HPOS);
     f->frame = H_FRAME0 + H_FRAME; f->led = H_LED_OFF < 0 ? -1 : !H_LED_OFF; f->aud0 = G_AW; f->naud = ARA_N;
     for (int i = 0; i < ARA_N; i++) { int w = (G_AW + i) % G_AUDN; G_AUD[2 * w] = ARA_BUF[2 * i]; G_AUD[2 * w + 1] = ARA_BUF[2 * i + 1]; }
@@ -223,6 +224,7 @@ API int engine_init(const uint8_t *p, int n) {
     h_frame_cb = e_frame_start; h_frame_done_cb = e_frame_done;
     G_DONE = 0; G_END = 0; G_WAIT = 0; G_ERR = 0; G_AW = 0;
     E_KQ_R = 0; E_KQ_W = 0;
+    if (E_PIC_PEND) { ARD_PICTURE = E_PIC_PEND == 1; E_PIC_PEND = 0; }   /* 1.0.86: engine_picture before the state - the first (partial) frame too */
     __atomic_store_n(&G_AWT, 0, __ATOMIC_SEQ_CST); __atomic_store_n(&G_ARD, -1, __ATOMIC_SEQ_CST);   /* with G_AW: the worklet's place is count % n */
     return 0;
 }
@@ -310,6 +312,11 @@ API uint8_t *engine_rgb(void) { return ARD_RGB; }           /* the last frame: 7
  * of the emulator holds, darker by 25 of 255 on average). The picture is in the engine's hash: a tool that compares
  * with the page sets the same. It stays over engine_init. */
 API void engine_dac(int on) { E_DAC_PEND = on ? 1 : 2; }
+/* 1.0.86 (SWIV KIT-GAPS 19): 0 = from the next frame the engine starts on (after engine_run(n) the coroutine may be in frame n + 1
+ * already: then from n + 2; before engine_init: from the first, partial frame) no picture (no pixels, no RGB: ~70 % of the engine's work in SWIV) while the
+ * Copper, the DMA slots, the sprite lines and the scene hooks run on - for a page that draws from the game's state; 1 = the picture
+ * again from the next whole frame; -1 = ask. Returns the picture's state now (a pending change counts from the next frame). */
+API int engine_picture(int on) { if (on >= 0) E_PIC_PEND = on ? 1 : 2; return ARD_PICTURE; }
 API int engine_rgb_w(void) { return ARD_SHOT_W; }
 API int engine_rgb_h(void) { return ARD_SHOT_H; }
 API uint16_t *engine_pix(void) { return &ARD_PIX[0][0]; }   /* 12-bit colours, ARD_LINES x ARD_WIDTH */
@@ -338,7 +345,7 @@ API double engine_disk_fails(void) { return (double)AHD_FAIL; }
 static char G_HASH[17] = "0000000000000000";
 static void g_hash_now(void) {
     uint64_t h = 0xcbf29ce484222325ull;
-    for (size_t i = 0; i < sizeof ARD_RGB; i++) { h ^= ARD_RGB[i]; h *= 0x100000001b3ull; }
+    if (ARD_PICTURE) for (size_t i = 0; i < sizeof ARD_RGB; i++) { h ^= ARD_RGB[i]; h *= 0x100000001b3ull; }   /* 1.0.86: without a picture the chip RAM only */
     for (size_t i = 0; i < MEMSZ; i++) { h ^= MEM[i]; h *= 0x100000001b3ull; }
     snprintf(G_HASH, sizeof G_HASH, "%016llx", (unsigned long long)h);
 }
@@ -354,7 +361,7 @@ static uint8_t *rdall(const char *path, long *len) {
     fclose(f); return b;
 }
 int main(int argc, char **argv) {
-    if (argc < 3) { fprintf(stderr, "arek_host_engine STATE.bin FRAMES [--disk N FILE]... [--keys alt|none] [--shot OUT.raw] [--dump CHIP.bin]\n"); return 2; }
+    if (argc < 3) { fprintf(stderr, "arek_host_engine STATE.bin FRAMES [--disk N FILE]... [--keys alt|none] [--shot OUT.raw] [--dump CHIP.bin] [--no-picture]\n"); return 2; }
     long len; uint8_t *st = rdall(argv[1], &len);
     int r = engine_init(st, (int)len);
     if (r) { fprintf(stderr, "engine_init %d\n", r); return 2; }
@@ -370,6 +377,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--twice")) twice = 1;       /* 1.0.43: the run, then a restart from the same state and the run again: two lines, the same hash */
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--dump") && i + 1 < argc) dump = argv[++i];
+        else if (!strcmp(argv[i], "--no-picture")) ARD_PICTURE = 0;   /* 1.0.86: engine_picture(0) from the first frame (the hash: chip RAM only) */
     }
 #ifdef ENGINE_THREAD
     if (engine_run()) { fprintf(stderr, "engine_run failed\n"); return 2; }

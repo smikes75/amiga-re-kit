@@ -310,12 +310,19 @@ def cmd_xref(a):
 def cmd_roots(a):
     from .m68k import roots
     data = rd(a.file)
-    r = roots.scan(data, a.base, a.lo, a.hi, min_slots=a.min_slots, min_run=a.min_run, kinds=tuple(a.kinds or ('slots', 'ptr', 'lea', 'imm')))
+    kinds = tuple(a.kinds or roots.KINDS)
+    r = roots.scan(data, a.base, a.lo, a.hi, min_slots=a.min_slots, min_run=a.min_run, kinds=kinds, min_ofs=a.min_ofs)
     print(roots.format_roots(r))
     if a.json:
         with open(a.json, 'w') as f:
             json.dump({'%x' % k: sorted(v) for k, v in sorted(r.items())}, f, indent=1)
-    print('%d roots (%s)' % (len(r), ', '.join('%s %d' % (k, sum(1 for v in r.values() if k in v)) for k in ('slots', 'ptr', 'lea', 'imm'))), file=sys.stderr)
+    if 'ofs' in kinds:                                   # 1.0.86: which offset tables, so a project can check them
+        lo = a.base if a.lo is None else a.lo
+        hi = a.base + len(data) if a.hi is None else a.hi
+        for t in roots.offset_tables(data, a.base, lo, hi, min_ofs=a.min_ofs):
+            print('offset table %06x: base %06x, %d-byte entries, offset at +%d, x%d, added at %06x: %d targets'
+                  % (t['table'], t['base'], t['stride'], t['field'], t['scale'], t['site'], len(t['targets'])), file=sys.stderr)
+    print('%d roots (%s)' % (len(r), ', '.join('%s %d' % (k, sum(1 for v in r.values() if k in v)) for k in roots.KINDS)), file=sys.stderr)
 
 
 def cmd_difftest(a):
@@ -1348,14 +1355,15 @@ def build_parser():
     s.add_argument('--max', type=int, default=3, help='calls per routine (3)')
     s.add_argument('--json', help='write the results here')
     s.set_defaults(fn=cmd_verify)
-    s = sp.add_parser('roots', help='static roots for a whole-game translation: bra.w slot tables, pointer tables, lea/pea table bases, move.l #code (docs/METHOD.md)')
+    s = sp.add_parser('roots', help='static roots for a whole-game translation: bra.w slot tables, pointer tables, lea/pea table bases, move.l #code, offset tables the code adds to a base (docs/METHOD.md)')
     s.add_argument('file')
     s.add_argument('--base', type=AH, required=True)
     s.add_argument('--lo', type=AH, help='code range start (default: the image)')
     s.add_argument('--hi', type=AH, help='code range end')
     s.add_argument('--min-slots', type=int, default=4, help='bra.w slots in a row that make a table (4)')
     s.add_argument('--min-run', type=int, default=1, help='code pointers in a row that count (1: single pointers too)')
-    s.add_argument('--kinds', nargs='*', choices=['slots', 'ptr', 'lea', 'imm'], help='which kinds (default all)')
+    s.add_argument('--min-ofs', type=int, default=4, help='offsets in a row that make an offset table (4)')
+    s.add_argument('--kinds', nargs='*', choices=['slots', 'ptr', 'lea', 'imm', 'ofs'], help='which kinds (default all)')
     s.add_argument('--json', help='write {address: [kinds]} here')
     s.set_defaults(fn=cmd_roots)
     s = sp.add_parser('host', help='the host of a translation (C sources: time, interrupts, CIAs, Paula, picture) and its state')

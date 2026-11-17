@@ -126,3 +126,46 @@ def test_scan_finds_a_pointer_inside_word_long_pairs():
     img[0x106:0x10a] = struct.pack('>I', 0x1180)                  # L2
     r = roots.scan(bytes(img), 0)
     assert 0x1180 in r and 'ptr' in r[0x1180], sorted(hex(a) for a in r)
+
+
+def offset_image():
+    """1.0.86 (SWIV): offset tables the code adds to a base. $2000 a behaviour table of (word, offset) pairs read with
+    movem and added twice to a base (SWIV's $16422 / $16564); $2200 a relative jump table (move.w + jmp (T,pc,d0))."""
+    img = bytearray(bytes.fromhex('4e71') * 0x180)                # nops: the linear decode stays in step
+    put = lambda a, hx: img.__setitem__(slice(a - 0x2000, a - 0x2000 + len(hx) // 2), bytes.fromhex(hx))
+    put(0x2000, '41fa003e')                    # lea $2040(pc),a0          the table
+    put(0x2004, '4c980006')                    # movem.w (a0)+,d1/d2
+    put(0x2008, '4a416704b24066f4')            # tst.w d1 ; beq ; cmp.w d0,d1 ; bne $2004
+    put(0x2010, '41fa006e')                    # lea $2080(pc),a0          the base
+    put(0x2014, 'd0c2d0c24e75')                # adda.w d2,a0 (twice: offset * 2) ; rts
+    for k, rel in enumerate((0x40, 0x48, 0x50, 0x58)):
+        img[0x40 + 4 * k:0x44 + 4 * k] = struct.pack('>Hh', 0x0404 + k, rel)
+    put(0x2080, '4e75')                        # the base itself: code (SWIV: a bra)
+    for k in range(4):
+        put(0x2100 + 0x10 * k, '70%02x4e75' % k)                  # four handlers
+    put(0x2200, '303b00084efb0004')            # move.w $220a(pc,d0.w),d0 ; jmp $220a(pc,d0.w)
+    put(0x2208, '4e71')
+    for k, o in enumerate((0x16, 0x26, 0x36, 0x46)):
+        img[0x20a + 2 * k:0x20c + 2 * k] = struct.pack('>h', o)
+    put(0x2212, '0000')                        # an offset 0 ends the table
+    for k in range(4):
+        put(0x2220 + 0x10 * k, '72%02x4e75' % k)
+    put(0x2290, '41fa0000d0c34e75')            # lea + adda without a table before it: nothing
+    return bytes(img)
+
+
+def test_offset_tables_from_the_code_that_reads_them(tmp_path, capsys):
+    data = offset_image()
+    tabs = roots.offset_tables(data, 0x2000, 0x2000, 0x2300)
+    got = {(t['table'], t['base'], t['stride'], t['field'], t['scale'], t['site']): t['targets'] for t in tabs}
+    assert got == {(0x2040, 0x2080, 4, 2, 2, 0x2014): [0x2100, 0x2110, 0x2120, 0x2130],
+                   (0x220a, 0x220a, 2, 0, 1, 0x2204): [0x2220, 0x2230, 0x2240, 0x2250]}, got
+    r = roots.scan(data, 0x2000, kinds=('ofs',))
+    assert set(r) == {0x2100, 0x2110, 0x2120, 0x2130, 0x2220, 0x2230, 0x2240, 0x2250}
+    assert roots.offset_tables(data, 0x2000, 0x2000, 0x2300, min_ofs=5) == []   # four entries, five asked
+    assert 'ofs' in roots.scan(data, 0x2000)[0x2100]                            # the default kinds include it
+    f = tmp_path / 'ofs.bin'
+    f.write_bytes(data)
+    assert cli.main(['roots', str(f), '--base', '0x2000', '--kinds', 'ofs']) == 0
+    out = capsys.readouterr()
+    assert '002100 ofs' in out.out and 'offset table 002040: base 002080, 4-byte entries, offset at +2, x2, added at 002014: 4 targets' in out.err
