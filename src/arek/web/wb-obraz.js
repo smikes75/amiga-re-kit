@@ -33,9 +33,13 @@
 // 1.8 (kit 1.0.32, Xenon 2 KIT-GAP 12): new Screen(gameEl, canvas, { crtEnhanced: 'original' }) - a game whose Enhanced only
 // smooths the motion (the Original picture, the same scale) draws the Original CRT in both modes; Screen.info().crtLook
 // names the pattern drawn and `arek web test` expects it. Default 'screen': Enhanced keeps its own fixed grid of device pixels.
+// 1.10 (kit 1.0.88, the user 2026-11-17): Enhanced shows the CRT without the darkened edges (the vignette .game::after,
+// --crt-edge): Screen.crt() sets --crt-edge 0 on the game element in Enhanced - inline, so a page's own copy of the
+// rule obeys too; Original keeps the edges by the detail. new Screen(gameEl, canvas, { edgeEnhanced: true }) keeps them
+// in Enhanced; Screen.info().crtEdge says whether the edges are drawn.
 'use strict';
 const WBOBRAZ = (() => {
-    const VERSION = '1.9';
+    const VERSION = '1.10';
     const CRT_DETAILS = ['fine', 'standard', 'strong'];
     const CRT_SHAPES = ['lines', 'grid'];
     // 1.3 values (Alien Breed / Turrican II, 2026-10-22: larger steps between the levels)
@@ -470,6 +474,8 @@ const WBOBRAZ = (() => {
         constructor(gameEl, canvas, opts) {
             this.game = gameEl; this.canvas = canvas;
             this.crtEnhanced = (opts && opts.crtEnhanced) || 'screen';           // 1.8: 'original' = Enhanced draws the Original CRT
+            this.edgeEnhanced = !!(opts && opts.edgeEnhanced);                  // 1.10: the darkened edges in Enhanced too
+            this.edge = true;
             this.look = null;
             this.layer = gameEl.querySelector('.crt-layer');
             if (!this.layer) {
@@ -494,6 +500,8 @@ const WBOBRAZ = (() => {
             this.on = o.on;
             this.game.style.setProperty('--crt-on', (+o.on).toFixed(3));
             this.game.dataset.crt = o.detail; this.game.dataset.mode = o.mode;
+            const edge = o.mode !== 'enhanced' || this.edgeEnhanced;             // 1.10: Enhanced without the vignette
+            if (edge !== this.edge) { this.edge = edge; if (edge) this.game.style.removeProperty('--crt-edge'); else this.game.style.setProperty('--crt-edge', '0'); }
             return this.pd;
         }
         /** §1.4 (1.3): the top left corner of the canvas content on a whole device pixel, by left/top. */
@@ -513,7 +521,7 @@ const WBOBRAZ = (() => {
                      backing: [this.canvas.width, this.canvas.height], crtLayer: [this.layer.width, this.layer.height],
                      box: [(r.width - 2 * (this.canvas.clientLeft || 0)) * dpr, (r.height - 2 * (this.canvas.clientTop || 0)) * dpr],   // 1.9: the canvas's content box in device pixels - it must be the backing (a border with border-box shrinks it: the picture is resampled)
                      crtOrigin: [l.left * dpr, l.top * dpr], crtOn: this.on, crtP: this.pd.P, crtD: this.pd.D, crtShape: this.pd.shape,
-                     crtMode: this.game.dataset.mode, crtLook: this.look || this.game.dataset.mode, crtDetail: this.game.dataset.crt, offset: [this.ax, this.ay] };
+                     crtMode: this.game.dataset.mode, crtLook: this.look || this.game.dataset.mode, crtDetail: this.game.dataset.crt, crtEdge: this.edge, offset: [this.ax, this.ay] };
         }
     }
     return { VERSION, CRT_DETAILS, CRT_SHAPES, CRT_ROW, CRT_SCREEN, CRT_LINE, CRT_RGB, MODE_MS, VIEW_DEFAULTS, WORDS,

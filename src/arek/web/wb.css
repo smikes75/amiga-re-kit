@@ -26,7 +26,7 @@ input[type=checkbox]{accent-color:var(--wb-blue)}.wbnote{display:block;margin:4p
 #stage{flex:1;min-height:0;min-width:0;display:grid;grid-template-columns:minmax(0,1fr);place-items:safe center;padding:12px;overflow:auto}
 .game{position:relative;width:610px;max-width:100%;line-height:0}.game canvas{display:block;image-rendering:pixelated;background:#000;outline:0}
 /* CRT (WB-OBRAZ-CRT.md 2): the scanlines and the R/G/B mask are a second canvas .crt-layer in device pixels (WBOBRAZ.drawCrt;
-   a CSS gradient blurred over two display rows in Chromium at dpr 1.25 / 1.5), ::after is only the vignette; --crt-on = the
+   a CSS gradient blurred over two display rows in Chromium at dpr 1.25 / 1.5), ::after is only the vignette (none in Enhanced: wb-obraz 1.10 sets --crt-edge 0); --crt-on = the
    opacity (blended during a mode change), the layer starts inside the canvas's 1 px frame (--crt-border). */
 .game .crt-layer{box-shadow:none;border:0;background:none;width:auto;position:absolute;left:var(--crt-border,0px);top:var(--crt-border,0px);pointer-events:none;image-rendering:pixelated;opacity:var(--crt-on,0);transition:opacity .36s ease-in-out}
 .game::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:var(--crt-on,0);transition:opacity .36s ease-in-out;box-shadow:inset 0 0 42px rgba(0,0,0,var(--crt-edge,.5))}

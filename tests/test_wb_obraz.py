@@ -22,7 +22,7 @@ def js(expr):
 
 
 def test_version_and_scale():
-    assert js('O.VERSION') == '1.9'
+    assert js('O.VERSION') == '1.10'
     assert js('O.deviceScale(2, 320, 320, 1.25, 10)') == 3          # round(2 * 1.25)
     assert js('O.deviceScale(2, 336, 448, 2, 10)') == 3             # wider window: zoom counts in W0
     assert js('O.deviceScale(6, 320, 320, 2, 2.4)') == 4            # limited by the window
@@ -104,7 +104,7 @@ def test_web_copy_and_package_files(tmp_path, capsys):
     assert cli.main(['web', 'copy', str(tmp_path / 'web')]) == 0
     out = capsys.readouterr().out
     data = (tmp_path / 'web' / 'wb-obraz.js').read_bytes()
-    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.9' in out
+    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.10' in out
 
 
 def test_png_decoder_reads_the_kits_png():
@@ -347,3 +347,39 @@ def test_the_original_crt_in_enhanced_on_the_demo_page():
     o, e = out['']
     assert o[0] != e[0] and e[3] == 'enhanced' and e[1] == 4 and e[2] == 1             # the default: Enhanced's own grid
     assert r['checks'] > 20 and r['fails'] == [], r['fails'][:5]
+
+
+def test_enhanced_crt_without_the_darkened_edges():
+    """1.10 (kit 1.0.88, the user 2026-11-17): the CRT vignette (.game::after, --crt-edge) by the detail in Original, none
+    in Enhanced (an inline --crt-edge 0, which a page's own copy of the rule obeys too); { edgeEnhanced: true } keeps it."""
+    pytest.importorskip('playwright')
+    import re
+    import threading
+    from playwright.sync_api import sync_playwright
+    from arek import web
+    srv = web.serve(WEB, 0)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    edge = """(() => { const g = document.querySelector('.game'); return [getComputedStyle(g, '::after').boxShadow, g.style.getPropertyValue('--crt-edge')]; })()"""
+    try:
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            out = {}
+            for tail in ('', '?edge=1'):
+                p = b.new_page(viewport={'width': 1280, 'height': 900})
+                p.goto('http://127.0.0.1:%d/demo.html%s' % (port, tail))
+                p.wait_for_function('window.wbObrazTest')
+                for mode in ('original', 'enhanced', 'original'):
+                    info = p.evaluate("(m) => wbObrazTest.set(m, {zoom: 2, crtDetail: 'strong', crt: true, blur: 0, par: 1})", mode)
+                    sh, inline = p.evaluate(edge)
+                    a = re.match(r'rgba\(0, 0, 0, ([0-9.]+)\)', sh)
+                    out.setdefault(tail, []).append((float(a.group(1)) if a else (1.0 if sh.startswith('rgb(0, 0, 0)') else None), inline,
+                                                     info.get('crtEdge')))
+                p.close()
+            b.close()
+    finally:
+        srv.shutdown()
+    o1, e, o2 = out['']
+    assert abs(o1[0] - .65) < 1e-6 and o1[1] == '' and e[0] == 0 and e[1].strip() == '0' and o2 == o1, out
+    assert all(abs(x[0] - .65) < 1e-6 and x[1] == '' for x in out['?edge=1']), out
+    assert [x[2] for x in out['']] in ([True, False, True], [None] * 3), out   # info().crtEdge when the page's set() passes it on

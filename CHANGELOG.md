@@ -3,6 +3,20 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.88 (2026-11-17)
+
+- `wb-obraz.js` 1.10: the CRT in Enhanced without the darkened edges (the user's wish for all games): `Screen.crt()` sets
+  `--crt-edge` 0 on the game element in Enhanced - inline, so a page's own copy of the vignette rule obeys it too - and
+  takes it away in Original, where the edges stay by the detail (fine .25, standard .5, strong .65);
+  `new Screen(game, canvas, { edgeEnhanced: true })` keeps them in Enhanced, `info().crtEdge` says which. Measured on the
+  game pages (read-only builds, only the module swapped in the browser): SWIV, Xenon 2 and Turrican II - Original's
+  vignette unchanged (.65 / .5 / .65), Enhanced's from .65 / .5 / .65 to 0. Chromium test on the demo page (WB-RECIPE.md)
+- SWIV adopted `wb-kresba.js` 1.0 (its commits 330504b, eb3b2b9, not deployed): every paint compared with its own
+  `sw_draw.js`, 51 044 paints in all 7 landscapes, two players, the title and the options screen - 0 pixels and 0
+  positions differ, no kit gap; `arek web smooth` 3x each path (Chrome, 60 Hz, TOWN): object jitter max 0.004-0.008 px
+  on both, paint median 0.95-1.11 ms against 0.88-0.97 ms; its own drawing code removed (sw_draw.js 181 -> 110 lines,
+  the adapter and the record)
+
 ## 1.0.87 (2026-11-17)
 
 - `wb-kresba.js` 1.0: Enhanced drawn from the game's state (decision 2026-11-17) - wb-scene's composition painted on a 2D

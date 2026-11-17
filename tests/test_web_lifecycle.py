@@ -101,7 +101,7 @@ def test_web_copy_writes_a_manifest_and_keeps_an_edited_file(tmp_path, capsys):
     d = str(tmp_path)
     assert cli.main(['web', 'copy', d]) == 0
     man = json.loads((tmp_path / 'wb-kit.json').read_text())
-    assert man['kit'] and set(man['files']) == set(web.FILES) and man['files']['wb-obraz.js']['version'] == '1.9'
+    assert man['kit'] and set(man['files']) == set(web.FILES) and man['files']['wb-obraz.js']['version'] == '1.10'
     assert cli.main(['web', 'copy', d, '--check']) == 0 and all(st == 'current' for _, st, _ in web.status(d))
     takt = tmp_path / 'wb-takt.js'
     takt.write_text(takt.read_text() + '\n// the game changed this\n')
