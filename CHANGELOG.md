@@ -3,6 +3,19 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.89 (2026-11-17)
+
+- `wb-pad.js` 1.0: gamepads and joysticks for every page - the games' own pad.js (Alien Breed II: two players, Superfrog:
+  a jump button) made general. `WBPAD.create({ players: 2 }).poll()` once a frame gives each player's joystick bits (right
+  1, left 2, up 4, down 8, fire 16 - SWIV's and Alien Breed II's order - or the page's own `bits`); a standard controller
+  moves by the d-pad and the left stick past 0.4 and fires by A / B / X / the right trigger, any other by axes 0 / 1, the
+  hat on axis 9 and buttons 0-3, 7; per player a chosen controller ('auto': player 1 the first connected, player 2 the
+  next), a fire button that fires alone and an up (jump) button that no longer fires; `rows()` are wb-nastaveni 1.4 rows
+  (Controls: controller, fire, jump), `fromMenu()` applies them, `status()` names the controllers. Measured on SWIV's test
+  build (read-only, the module and a fake controller only in the browser, its bits turned into SWIV's own keys): the
+  helicopter moves as on the keyboard - right +108 / +108, left -102 / -102, up -113 / -120, down +96 / +97 world px in
+  0.7 s (the pad / the keys; the scroll alone -11), A fires. Node test with fake controllers (README, WB-RECIPE.md)
+
 ## 1.0.88 (2026-11-17)
 
 - `wb-obraz.js` 1.10: the CRT in Enhanced without the darkened edges (the user's wish for all games): `Screen.crt()` sets
