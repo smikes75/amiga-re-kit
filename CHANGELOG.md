@@ -3,6 +3,19 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.87 (2026-11-17)
+
+- `wb-kresba.js` 1.0: Enhanced drawn from the game's state (decision 2026-11-17) - wb-scene's composition painted on a 2D
+  canvas: the terrain by world rows from the game's adapter (its buffer, its map), the objects by their picture's identity
+  (`frame(ob)`: the disk's graphics, a frame built at run time), the foreground cover cut out of an object behind it at its
+  fractional position, shadows and flashes in a colour of the row, the palette per world row (per screen row for what is
+  fixed on the screen), extras after an object, stage hooks; a fractional camera on both axes; returns where each object
+  was drawn and the paint's time for `arek web smooth`. It is SWIV's `sw_draw.js` made general: on SWIV's page (read-only)
+  every 10th paint of `sw_draw.js` painted again by `wb-kresba.js` with an adapter of sw_draw's rules - SCIFI, GRASS, RIVER
+  (twice), DESERT, 6 193 paints, 0 pixels differ, the drawn positions equal (water in 379 of them, 763 objects behind the
+  foreground, 1 444 rotor discs, 7 969 shadows). Chromium test: at a whole camera the reference picture pixel for pixel
+  (WB-KRESBA.md)
+
 ## 1.0.86 (2026-11-17)
 
 - `engine_picture(0)` (natively `--no-picture`, Node `picture(false)` / `open({ picture: false })`): the engine leaves the
