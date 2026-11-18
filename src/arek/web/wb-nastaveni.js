@@ -36,11 +36,16 @@
 //     so a page that moves to 'auto' moves its old visitors too; "Default picture" makes it unchosen again. In 'auto' the
 //     slider stands on the largest step (the one auto uses) and shows "auto (3×)". The page calls menu.refreshZoom({ keep:
 //     true }) after a resize, a full screen change and a devicePixelRatio change (WBOBRAZ.watchDpr, wb-obraz 1.11).
+//   1.6 (kit 1.0.92, the user 2026-11-18: a stepless zoom): spec.stepless = true adds the row 'stepless' (Display, a check,
+//     off by default; without spec.stepless the row is left out and off). While it is on, the slider runs from 1x to
+//     spec.zoomFit() (the zoom that fills the window: limit * par * W / W0) in 0.01 steps and an exact zoom (zoomSteps)
+//     within 0.04 catches it; the buttons stay ('auto' then fills the window - WBOBRAZ.stepless). Turned off, the zoom goes
+//     back to the nearest exact step. The page draws with WBOBRAZ.stepless(zoom, ...) -> { S, shrink } while it is on.
 //
 // The file is wb-nastaveni.js (not wb-menu.js: that name is the games' own Workbench bar). Every value is kept per mode (original / enhanced). Test hooks (arek web test §6): window.wbMenuTest = menu.testHooks().
 'use strict';
 const WBNASTAVENI = (() => {
-    const VERSION = '1.5';
+    const VERSION = '1.6';
     const MODES = ['original', 'enhanced'];
     const ITEMS = {
         display: [
@@ -57,6 +62,7 @@ const WBNASTAVENI = (() => {
             { id: 'blue', kind: 'range', unit: '%', min: 50, max: 150, step: 1, def: 100 },
             { id: 'par', kind: 'range', digits: 2, min: 1, max: 1.1, step: 0.01, def: { original: 1, enhanced: 1.04 } },
             { id: 'smooth', kind: 'check', def: { original: false, enhanced: true } },
+            { id: 'stepless', kind: 'check', def: false },                     // 1.6: only with spec.stepless
         ],
         sound: [
             { id: 'sound', kind: 'check', def: true },
@@ -69,13 +75,13 @@ const WBNASTAVENI = (() => {
     };
     const TEXTS = {
         en: { display: { _: 'Display', zoom: 'Zoom', crt: 'CRT', 'crt-detail': 'CRT detail', 'crt-shape': 'CRT shape', blur: 'Blur', brightness: 'Brightness',
-                         contrast: 'Contrast', saturation: 'Saturation', red: 'Red', green: 'Green', blue: 'Blue', par: 'Pixel width', smooth: 'Smooth motion', defaults: 'Default picture for this mode',
+                         contrast: 'Contrast', saturation: 'Saturation', red: 'Red', green: 'Green', blue: 'Blue', par: 'Pixel width', smooth: 'Smooth motion', stepless: 'Stepless zoom', defaults: 'Default picture for this mode',
                          fit: 'auto', fitTitle: 'the largest exact zoom that fits the window, follows it', fine: 'fine', standard: 'standard', strong: 'strong', lines: 'lines', grid: 'grid' },
               sound: { _: 'Sound', sound: 'Sound', volume: 'Volume', 'filter-fixed': 'Amiga 500 filter', 'filter-led': 'LED filter', 'filter-hp': 'High-pass',
                        stereo: 'Stereo width', defaults: 'Default sound for this mode', auto: 'as the game', on: 'on', off: 'off' },
               modes: { original: 'Original', enhanced: 'Enhanced' }, game: { changes: 'changes the game' } },
         cs: { display: { _: 'Obraz', zoom: 'Zvětšení', crt: 'CRT', 'crt-detail': 'Stupeň CRT', 'crt-shape': 'Tvar CRT', blur: 'Rozmazání', brightness: 'Jas',
-                         contrast: 'Kontrast', saturation: 'Sytost', red: 'Červená', green: 'Zelená', blue: 'Modrá', par: 'Šířka bodu', smooth: 'Plynulé zobrazení', defaults: 'Výchozí obraz tohoto režimu',
+                         contrast: 'Kontrast', saturation: 'Sytost', red: 'Červená', green: 'Zelená', blue: 'Modrá', par: 'Šířka bodu', smooth: 'Plynulé zobrazení', stepless: 'Plynulé zvětšení', defaults: 'Výchozí obraz tohoto režimu',
                          fit: 'auto', fitTitle: 'největší přesné zvětšení, které se vejde do okna; mění se s ním', fine: 'jemný', standard: 'střední', strong: 'silný', lines: 'řádky', grid: 'mřížka' },
               sound: { _: 'Zvuk', sound: 'Zvuk', volume: 'Hlasitost', 'filter-fixed': 'Filtr Amigy 500', 'filter-led': 'Filtr LED', 'filter-hp': 'Horní propust',
                        stereo: 'Šířka sterea', defaults: 'Výchozí zvuk tohoto režimu', auto: 'podle hry', on: 'zapnuto', off: 'vypnuto' },
@@ -158,7 +164,10 @@ const WBNASTAVENI = (() => {
 
     class Menu {
         constructor(host, spec) {
-            this.spec = spec || {}; this.host = host;
+            this.spec = Object.assign({}, spec || {}); this.host = host;
+            if (!this.spec.stepless || this.spec.zoom !== 'snap') {                     // 1.6: the stepless row only when the page draws it
+                const om = Object.assign({}, this.spec.omit || {}); om.display = [...new Set([...(om.display || []), 'stepless'])]; this.spec.omit = om;
+            }
             this.lang = this.spec.lang || 'en';
             this.texts = { display: Object.assign({}, (TEXTS[this.lang] || TEXTS.en).display, (this.spec.texts && this.spec.texts.display) || {}),
                            sound: Object.assign({}, (TEXTS[this.lang] || TEXTS.en).sound, (this.spec.texts && this.spec.texts.sound) || {}),
@@ -273,7 +282,9 @@ const WBNASTAVENI = (() => {
             }
             ctl.id = 'wb-' + it.id; ctl.dataset.section = section; ctl.dataset.item = it.id;
             const out = d.createElement('output'); out.htmlFor = ctl.id; out.className = 'wb-nastaveni-value';
-            if (ctl.dataset.snap) ctl.addEventListener('input', () => { const st = this.zoomSteps(); const k = Math.min(st.length - 1, Math.max(0, +ctl.value)); if (st[k]) this.set(section, it.id, st[k].value); });
+            if (ctl.dataset.snap) ctl.addEventListener('input', () => {
+                if (this.stepless()) { this.set(section, it.id, this.catchZoom(+ctl.value)); return; }      // 1.6: a value, not a step index
+                const st = this.zoomSteps(); const k = Math.min(st.length - 1, Math.max(0, +ctl.value)); if (st[k]) this.set(section, it.id, st[k].value); });
             else ctl.addEventListener(it.kind === 'range' ? 'input' : 'change', () => this.set(section, it.id, it.kind === 'check' ? ctl.checked : ctl.value));
             row.appendChild(label); row.appendChild(ctl); if (it.kind === 'range' || ctl.dataset.snap) row.appendChild(out);
             this.controls[section][it.id] = { ctl, out, it, row };
@@ -314,8 +325,21 @@ const WBNASTAVENI = (() => {
             return (this.spec.zoomSteps() || []).map((z) => (typeof z === 'number' ? { value: z, label: this.num(z) + '×' } : z))
                 .filter((z) => z && typeof z.value === 'number').sort((a, b) => a.value - b.value);
         }
-        /** The nearest exact zoom to `v` (0 = fit stays fit). */
+        /** 1.6: the stepless zoom is on (the page asked for it and the row is ticked). */
+        stepless() { return !!(this.spec.stepless && this.spec.zoom === 'snap' && this.state[this.mode].display.stepless); }
+        /** 1.6: the zoom that fills the window (spec.zoomFit), else the largest exact step. */
+        zoomFit() {
+            const f = typeof this.spec.zoomFit === 'function' ? Number(this.spec.zoomFit()) : NaN, st = this.zoomSteps().filter((z) => z.value > 0);
+            return f > 0 ? +f.toFixed(2) : st.length ? st[st.length - 1].value : 1;
+        }
+        /** 1.6: a stepless value, caught by an exact zoom within 0.04. */
+        catchZoom(v) {
+            const st = this.zoomSteps().filter((z) => z.value > 0), near = st.find((z) => Math.abs(z.value - v) <= 0.04);
+            return near ? near.value : +Number(v).toFixed(2);
+        }
+        /** The nearest exact zoom to `v` (0 = fit stays fit); 1.6: stepless - any zoom from 1x to the window. */
         snapZoom(v) {
+            if (this.stepless()) return v > 0 ? Math.min(Math.max(1, v), Math.max(1, this.zoomFit())) : v;
             const st = this.zoomSteps(); if (!st.length || !(v > 0)) return v;
             return st.reduce((best, z) => (Math.abs(z.value - v) < Math.abs(best - v) ? z.value : best), st[0].value);
         }
@@ -341,7 +365,16 @@ const WBNASTAVENI = (() => {
             for (const section of ['display', 'sound']) for (const it of ITEMS[section]) {
                 const c = this.controls[section][it.id], v = this.state[this.mode][section][it.id];
                 if (!c) continue;                                                       // 1.3: a row left out
+                if (c.ctl.dataset.snap && this.stepless()) {                              // 1.6: 1x .. the zoom that fills the window
+                    const st = this.zoomSteps(), fit = this.zoomFit();
+                    c.ctl.min = 1; c.ctl.max = String(Math.max(1, fit)); c.ctl.step = 0.01;
+                    c.ctl.value = String(v > 0 ? v : fit);
+                    if (c.out) c.out.value = v > 0 ? this.num(v) + '×' : this.texts.display.fit + ' (' + this.num(fit) + '×)';
+                    this.zoomButtonsFill(st, v);
+                    continue;
+                }
                 if (c.ctl.dataset.snap) {
+                    c.ctl.min = 0; c.ctl.step = 1;
                     const st = this.zoomSteps(); c.ctl.max = Math.max(0, st.length - 1);
                     const near = v > 0 ? this.snapZoom(v) : v, k = st.findIndex((z) => Math.abs(z.value - near) < 1e-9);   // off-step: nearest, value unchanged
                     const top = st.length - 1, kk = k >= 0 ? k : v > 0 ? 0 : top;      // 1.5: auto stands on the largest step (the one it uses)
@@ -375,6 +408,7 @@ const WBNASTAVENI = (() => {
             const it = (ITEMS[section] || []).find((x) => x.id === id); if (!it || omitted(this.spec.omit, section).has(id)) return;
             this.state[this.mode][section][id] = (id === 'zoom' && this.spec.zoom === 'snap') ? this.snapZoom(Number(value) || 0) : coerce(it, value);
             if (id === 'zoom' && this.spec.zoom === 'snap') this.zoomOwn[this.mode] = true;   // 1.5: the player's choice
+            if (id === 'stepless' && !value) { const d = this.state[this.mode].display; d.zoom = this.snapZoom(d.zoom); }   // 1.6: back to an exact step
             this.refresh(); this.save(); this.emit(section, { cause: 'set', id });
         }
         reset(section) {

@@ -3,6 +3,24 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.92 (2026-11-18)
+
+- `wb-obraz.js` 1.12 + `wb-nastaveni.js` 1.6: a stepless zoom (the user: "and how about a smooth zoom"). Plain stretching
+  makes game pixels 2 and 3 device pixels at random and the rows ripple as SWIV scrolls; plain linear blurs. Now the game
+  is drawn at the next whole scale as always (the framebuffer, wb-scene, the test pattern) and the presenter's last pass
+  shrinks it to the real size with a linear sample - inside every game pixel one colour, its edge blended over at most one
+  device pixel. `WBOBRAZ.stepless(zoom, W0, W, dpr, limit, par)` -> `{ S, shrink, real }` (zoom 0: the whole window),
+  `Presenter.size(..., shrink)`, `contentSize(..., shrink)`, `Screen.crt({ ..., shrink })`: the canvas stays its backing on
+  whole device pixels (§1 holds, no CSS resize), the Original CRT keeps one line per game row at the fractional period
+  (lines and grid), the Enhanced grid stays in device pixels; shrink 1 = 1.11. The menu: `spec.stepless` (+
+  `spec.zoomFit()`) adds 'Stepless zoom' (off by default), the slider then runs from 1x to the window in 0.01 steps, an
+  exact zoom within 0.04 catches it, the buttons stay; off again - back to the nearest exact zoom. Measured in Chromium on
+  the WebGL and the 2D path, dpr 1 and 2, at 2.37x / 2.5x / 4.62x: every game row of the row pattern has a device row of
+  exactly its colour, no device row any other colour, one CRT line at the end of every game row; below 2x (1.6x) some rows
+  are only blends - inherent. On SWIV's test build 3a3019e (read-only copy, wired as the README says), Chromium, first
+  visit with the row on: dpr 1 1920x960 Original 3.55x (exact 3x), Enhanced 2.99x (exact 2x); dpr 2 1440x820 Enhanced
+  2.53x (exact 2.5x); box = backing in every case
+
 ## 1.0.91 (2026-11-18)
 
 - `wb-nastaveni.js` 1.5 + `wb-obraz.js` 1.11: zoom buttons and an automatic zoom (the user: "buttons 2x 3x under the

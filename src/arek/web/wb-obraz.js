@@ -42,9 +42,17 @@
 // each their own way (SWIV k / dpr left the aspect out); watchDpr(fn) calls fn(dpr) when devicePixelRatio changes (the
 // window moved to a monitor of another scale, the browser zoom) - a resize event does not always come then; zoom 0 is
 // called 'auto' (WORDS.fit): the largest exact zoom that fits, following the window.
+// 1.12 (kit 1.0.92, the user 2026-11-18: a stepless zoom): stepless(zoom, w0, w, dpr, limit, par) -> { S, shrink, real } -
+// any zoom (auto: the whole window) as real device pixels per game row; the game is drawn at the next whole S as always
+// (the framebuffer, wb-scene, the test pattern) and the presenter's last pass shrinks it to real = S * shrink with a linear
+// sample: the inside of every game pixel stays one colour, its edge blends over at most one device pixel, no row is
+// doubled or lost. Presenter.size(W, H, S, par, dpr, shrink), contentSize(W, H, S, par, shrink), blit(..., shrink) and
+// Screen.crt({ ..., shrink }) take it; the canvas stays on whole device pixels (box = backing, §1 holds). The Original CRT
+// keeps one line per game row at the fractional period (P * shrink, antialiased edges), the Enhanced grid stays in device
+// pixels. shrink 1 (or none) = the whole-pixel picture of 1.11, byte for byte.
 'use strict';
 const WBOBRAZ = (() => {
-    const VERSION = '1.11';
+    const VERSION = '1.12';
     const CRT_DETAILS = ['fine', 'standard', 'strong'];
     const CRT_SHAPES = ['lines', 'grid'];
     // 1.3 values (Alien Breed / Turrican II, 2026-10-22: larger steps between the levels)
@@ -91,16 +99,35 @@ const WBOBRAZ = (() => {
     }
     /** The game content in device pixels (1.4): [round(W*S*par), H*S] - the aspect stretches the picture horizontally
      *  inside the backing, rows stay S device pixels each. */
-    function contentSize(W, H, S, par) {
-        par = par > 0 ? par : 1;
-        return [Math.round(W * S * par), Math.round(H * S)];                    // 1.6: S may be fractional during a mode transition
+    function contentSize(W, H, S, par, shrink) {
+        par = par > 0 ? par : 1; const k = shrink > 0 && shrink < 1 ? shrink : 1;   // 1.12: the stepless shrink
+        return [Math.round(W * S * par * k), Math.round(H * S * k)];            // 1.6: S may be fractional during a mode transition
+    }
+    /** 1.12: a stepless zoom - real device pixels per game row for `zoom` (multiples of w0; 0 = auto: the whole window,
+     *  limit * dpr), at least 1, at most the window; S = the whole scale the game is drawn at (ceil), shrink = real / S
+     *  (1 when real is whole within 1/1000). */
+    function stepless(zoom, w0, w, dpr, limit, par) {
+        par = par > 0 ? par : 1; dpr = dpr > 0 ? dpr : 1;
+        const top = Math.max(1, limit * dpr);
+        const real = Math.min(top, Math.max(1, zoom > 0 ? zoom * w0 / w * dpr / par : top)), whole = Math.round(real);
+        if (Math.abs(real - whole) < 1e-3) return { S: whole, shrink: 1, real: whole };
+        const S = Math.ceil(real);
+        return { S, shrink: real / S, real };
     }
     let blitTmp = null;
     /** Draw the W x H game picture `src` (a canvas, image or bitmap) into the backing `c` as its content (1.4): every
      *  game row exactly S device rows; with par = 1 every column exactly S device columns (no smoothing), otherwise the
      *  columns are resampled horizontally only (a W*S*par x H pass with smoothing, then rows replicated without). */
-    function blit(c, src, W, H, S, par) {
-        const [w, h] = contentSize(W, H, S, par), g = c.getContext('2d');
+    let blitBig = null;
+    function blit(c, src, W, H, S, par, shrink) {
+        const [w, h] = contentSize(W, H, S, par, shrink), g = c.getContext('2d');
+        if (shrink > 0 && shrink < 1) {                                           // 1.12: whole S first, then the linear shrink
+            if (!blitBig) blitBig = (typeof OffscreenCanvas !== 'undefined') ? new OffscreenCanvas(W * S, H * S) : document.createElement('canvas');
+            if (blitBig.width !== W * S || blitBig.height !== H * S) { blitBig.width = W * S; blitBig.height = H * S; }
+            const t = blitBig.getContext('2d'); t.imageSmoothingEnabled = false; t.drawImage(src, 0, 0, W, H, 0, 0, W * S, H * S);
+            g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; g.drawImage(blitBig, 0, 0, W * S, H * S, 0, 0, w, h);
+            return [w, h];
+        }
         if (w === W * S) { g.imageSmoothingEnabled = false; g.drawImage(src, 0, 0, W, H, 0, 0, w, h); return [w, h]; }
         if (!blitTmp) blitTmp = (typeof OffscreenCanvas !== 'undefined') ? new OffscreenCanvas(w, H) : document.createElement('canvas');
         if (blitTmp.width !== w || blitTmp.height !== H) { blitTmp.width = w; blitTmp.height = H; }
@@ -118,8 +145,10 @@ const WBOBRAZ = (() => {
     }
     /** Scanlines and R/G/B mask into a canvas whose backing is w x h device pixels (§2). shape 'grid' also darkens
      *  the end of every column period (squares), crossings only once. Returns { P, D, shape }. */
-    function drawCrt(c, mode, detail, S, dpr, w, h, shape) {
-        const { P, D } = crtParams(mode, detail, S);
+    function drawCrt(c, mode, detail, S, dpr, w, h, shape, shrink) {
+        const { P: P0, D: D0 } = crtParams(mode, detail, S);
+        const sh = mode === 'original' && shrink > 0 && shrink < 1 ? shrink : 1;  // 1.12: the Original lines follow the game rows
+        const P = P0 * sh, D = D0 * sh;
         const line = (CRT_LINE[mode] || CRT_LINE.enhanced)[detail] || .35, rgb = CRT_RGB[detail] || .03;
         c.width = w; c.height = h;
         if (c.style) { c.style.width = w / dpr + 'px'; c.style.height = h / dpr + 'px'; }
@@ -129,12 +158,12 @@ const WBOBRAZ = (() => {
             for (let x = k; x < w; x += 3) g.fillRect(x, 0, 1, h);
         });
         g.fillStyle = 'rgba(0,0,0,' + line + ')';
-        if (shape === 'grid')
-            for (let y = 0; y < h; y += P) {
-                const bot = Math.min(h, y + P - D);
-                for (let x = P - D; x < w; x += P) g.fillRect(x, y, D, bot - y);
+        if (shape === 'grid')                                                     // 1.12: by index - a fractional period does not drift
+            for (let r = 0; r * P < h; r++) {
+                const y = r * P, bot = Math.min(h, y + P - D);
+                for (let q = 1; q * P - D < w; q++) g.fillRect(q * P - D, y, D, bot - y);
             }
-        for (let y = P - D; y < h; y += P) g.fillRect(0, y, w, D);
+        for (let n = 1; n * P - D < h; n++) g.fillRect(0, n * P - D, w, D);
         return { P, D, shape: shape === 'grid' ? 'grid' : 'lines' };
     }
     /** CSS filter of the game canvas (§3): monitor knobs only when not 100 %, blur = blur/100 * 0.8 * pixel
@@ -233,9 +262,9 @@ const WBOBRAZ = (() => {
               '  if (lin == 1) { o = vec4(texture(tex, vec2((float(x) + 0.5) / float(rect.z), (float(y) + 0.5) / float(rect.w))).rgb, 1.0); return; }\n' +
               '  o = vec4(texelFetch(tex, ivec2((x * src.x) / rect.z, (y * src.y) / rect.w), 0).rgb, 1.0); }',
         final: '#version 300 es\nprecision highp float; uniform sampler2D tex; uniform vec2 size; uniform vec2 content; uniform float pad;\n' +
-               'uniform float par; uniform float sigma; uniform vec4 look; out vec4 o;\n' +
-               'vec3 fetch(float x, float y) { vec2 uv = vec2((x + 0.5) / par, floor(y) + 0.5) / size;\n' +
-               '  return (par == 1.0 ? texelFetch(tex, ivec2(int(x), int(y)), 0) : texture(tex, uv)).rgb; }\n' +
+               'uniform float par; uniform float shrink; uniform float sigma; uniform vec4 look; out vec4 o;\n' +
+               'vec3 fetch(float x, float y) { vec2 uv = vec2((x + 0.5) / (par * shrink), (floor(y) + 0.5) / shrink) / size;\n' +
+               '  return (par == 1.0 && shrink == 1.0 ? texelFetch(tex, ivec2(int(x), int(y)), 0) : texture(tex, uv)).rgb; }\n' +
                'void main() { float x = floor(gl_FragCoord.x), y = floor(gl_FragCoord.y) - pad;\n' +
                '  if (x >= content.x || y < 0.0) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }\n' +
                '  vec3 c;\n' +
@@ -251,7 +280,8 @@ const WBOBRAZ = (() => {
 
     /** The visible game canvas (1.5): the WebGL2 path when the browser has it and opts.gl is not 'off' ('on' insists:
      *  no fallback), otherwise the 2D path - the same API, so a page is written once; .gl is true on the WebGL path. Methods:
-     *    size(W, H, S, par, dpr) -> { backing, content, redrawn }   allocates the backing (padded, §1.4), the framebuffer
+     *    size(W, H, S, par, dpr, shrink) -> { backing, content, redrawn }   allocates the backing (padded, §1.4), the framebuffer
+     *        (W*S x H*S always; 1.12: shrink < 1 - the stepless zoom - makes the content W*S*par*shrink x H*S*shrink, sampled linearly)
      *        and the textures in one call (W, H may change every frame, e.g. during the mode transition), sets the CSS size;
      *        1.5.1: a resized canvas shows the last picture again at once (redrawn) - from the last frame when W x H is
      *        the same, from the framebuffer when W*S x H*S is; otherwise (redrawn false) present() in the same frame
@@ -322,15 +352,17 @@ const WBOBRAZ = (() => {
             this.u = {};
             for (const [name, pr] of [['scale', this.pScale], ['blur', this.pBlur], ['final', this.pFinal], ['rect', this.pRect]]) {
                 this.u[name] = {};
-                for (const n of ['tex', 'geo', 'sigma', 'size', 'content', 'pad', 'par', 'look', 'rect', 'src', 'lin', 'fh']) this.u[name][n] = gl.getUniformLocation(pr, n);
+                for (const n of ['tex', 'geo', 'sigma', 'size', 'content', 'pad', 'par', 'shrink', 'look', 'rect', 'src', 'lin', 'fh']) this.u[name][n] = gl.getUniformLocation(pr, n);
             }
             this.fboSize = [0, 0]; this.frameSize = [0, 0]; this.copy = null;
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
         }
-        size(W, H, S, par, dpr) {
+        size(W, H, S, par, dpr, shrink) {
             par = par > 0 ? par : 1; dpr = dpr || dprNow();
-            this.W = W; this.H = H; this.S = S; this.par = par; this.dpr = dpr;
-            const [cw, ch] = contentSize(W, H, S, par), bw = padded(cw, dpr), bh = padded(ch, dpr);
+            shrink = shrink > 0 && shrink < 1 ? shrink : 1;                     // 1.12: the stepless shrink of the last pass
+            const same = this.shrink === shrink;
+            this.W = W; this.H = H; this.S = S; this.par = par; this.dpr = dpr; this.shrink = shrink;
+            const [cw, ch] = contentSize(W, H, S, par, shrink), bw = padded(cw, dpr), bh = padded(ch, dpr);
             this.content = [cw, ch]; this.backing = [bw, bh];
             const c = this.canvas, resized = c.width !== bw || c.height !== bh;
             if (resized) { c.width = bw; c.height = bh; }                          // clears the canvas (both paths)
@@ -359,7 +391,7 @@ const WBOBRAZ = (() => {
             // at once: the last frame from its texture (pixels / source, same W x H), else the framebuffer (a draw()
             // content, same W*S x H*S); when neither survives the page must present() in the same display frame.
             let redrawn = false;
-            if ((resized || fboChanged) && this.last) {
+            if ((resized || fboChanged || !same) && this.last) {
                 if (!gl) { if (this.last.src && this.last.W === W && this.last.H === H) { this._blit2d(this.last.src); redrawn = true; } }
                 else if (this.last.kind === 'frame' && !frameChanged) { this._scale(); this._finish(); redrawn = true; }
                 else if (!fboChanged) { this._finish(); redrawn = true; }
@@ -374,7 +406,7 @@ const WBOBRAZ = (() => {
         _blit2d(src) {
             const g = this.ctx, [bw, bh] = this.backing;
             g.fillStyle = '#000'; g.fillRect(0, 0, bw, bh);
-            blit(this.canvas, src, this.W, this.H, this.S, this.par);
+            blit(this.canvas, src, this.W, this.H, this.S, this.par, this.shrink);
         }
         _scale() {
             const gl = this.g, [fw, fh] = this.fboSize;
@@ -393,13 +425,14 @@ const WBOBRAZ = (() => {
             }
             this._pass(this.pFinal, null, bw, bh, tex);
             gl.uniform1i(this.u.final.tex, 0); gl.uniform2f(this.u.final.size, fw, fh); gl.uniform2f(this.u.final.content, cw, ch);
-            gl.uniform1f(this.u.final.pad, bh - ch); gl.uniform1f(this.u.final.par, this.par); gl.uniform1f(this.u.final.sigma, sigma);
+            gl.uniform1f(this.u.final.pad, bh - ch); gl.uniform1f(this.u.final.par, this.par); gl.uniform1f(this.u.final.sigma, sigma * (this.shrink || 1));
+            gl.uniform1f(this.u.final.shrink, this.shrink || 1);                     // 1.12
             gl.uniform4f(this.u.final.look, k(l.brightness), k(l.contrast), k(l.saturation), 0);
             gl.drawArrays(gl.TRIANGLES, 0, 3);
         }
         look(v) {
             this.lookv = Object.assign({}, this.lookv, v || {});
-            if (!this.g && this.canvas.style) this.canvas.style.filter = filter(this.lookv, this.S / this.dpr);
+            if (!this.g && this.canvas.style) this.canvas.style.filter = filter(this.lookv, this.S * (this.shrink || 1) / this.dpr);
             return this.lookv;
         }
         _upload(content) {
@@ -466,8 +499,9 @@ const WBOBRAZ = (() => {
                     this.rectFrame.getContext('2d').putImageData(content.pixels.data && !isShared(content.pixels.data) ? content.pixels : new ImageData(new Uint8ClampedArray(p.buffer, p.byteOffset, sz[0] * sz[1] * 4), sz[0], sz[1]), 0, 0); src = this.rectFrame;
                 }
                 g.fillStyle = '#000'; g.fillRect(0, 0, bw, bh);
-                g.imageSmoothingEnabled = !!content.smooth; if (content.smooth) g.imageSmoothingQuality = 'high';
-                g.drawImage(src, 0, 0, sz[0], sz[1], Math.round(rx * S * par), dr[1], Math.round(rw * S * par), dr[3]);
+                const k = this.shrink || 1;
+                g.imageSmoothingEnabled = !!content.smooth || k < 1; if (content.smooth || k < 1) g.imageSmoothingQuality = 'high';                                         // 1.12: the stepless shrink on the 2D path
+                g.drawImage(src, 0, 0, sz[0], sz[1], Math.round(rx * S * par * k), Math.round(ry * S * k), Math.round(rw * S * par * k), Math.round(rh * S * k));
                 this.last = null;
                 return true;
             }
@@ -490,10 +524,10 @@ const WBOBRAZ = (() => {
             return true;
         }
         fill(kind) {
-            if (!this.g) { testPattern(this.canvas, kind, this.W, this.H, this.S, this.par); this.last = null; return true; }
+            if (!this.g && !(this.shrink < 1)) { testPattern(this.canvas, kind, this.W, this.H, this.S, this.par); this.last = null; return true; }   // 1.12: shrunk - through present
             return this.present({ pixels: patternPixels(kind, this.W, this.H) });
         }
-        info() { return { gl: this.gl, content: this.content, backing: this.backing, lost: this.lost, restores: this.restores }; }
+        info() { return { gl: this.gl, content: this.content, backing: this.backing, lost: this.lost, restores: this.restores, shrink: this.shrink || 1 }; }
     }
 
     /** The game box .game: the CRT layer (redrawn only when its key changes), --crt-on, data-crt / data-mode,
@@ -522,8 +556,8 @@ const WBOBRAZ = (() => {
         /** o = { mode, detail, shape, S, dpr, w, h, on }: w, h = the game content in device pixels (W*S x H*S). */
         crt(o) {
             const look = o.mode === 'enhanced' && this.crtEnhanced === 'original' ? 'original' : o.mode;   // 1.8
-            const key = [o.w, o.h, o.S, o.dpr, look, o.detail, o.shape].join(':');
-            if (key !== this.key) { this.key = key; this.pd = Object.assign(drawCrt(this.layer, look, o.detail, o.S, o.dpr, Math.max(1, o.w), Math.max(1, o.h), o.shape), { look }); }
+            const key = [o.w, o.h, o.S, o.dpr, look, o.detail, o.shape, o.shrink || 1].join(':');
+            if (key !== this.key) { this.key = key; this.pd = Object.assign(drawCrt(this.layer, look, o.detail, o.S, o.dpr, Math.max(1, o.w), Math.max(1, o.h), o.shape, o.shrink), { look }); }
             this.look = look;
             this.on = o.on;
             this.game.style.setProperty('--crt-on', (+o.on).toFixed(3));
@@ -553,7 +587,7 @@ const WBOBRAZ = (() => {
         }
     }
     return { VERSION, CRT_DETAILS, CRT_SHAPES, CRT_ROW, CRT_SCREEN, CRT_LINE, CRT_RGB, MODE_MS, VIEW_DEFAULTS, WORDS,
-             deviceScale, zoomSteps, watchDpr, contentSize, blit, crtParams, drawCrt, filter, crtOn, smoothstep, zoomLabel, quantum, padded, snap,
+             deviceScale, zoomSteps, watchDpr, stepless, contentSize, blit, crtParams, drawCrt, filter, crtOn, smoothstep, zoomLabel, quantum, padded, snap,
              testPattern, patternPixels, GLSL, Presenter, Screen };
 })();
 if (typeof globalThis !== 'undefined') globalThis.WBOBRAZ = WBOBRAZ;

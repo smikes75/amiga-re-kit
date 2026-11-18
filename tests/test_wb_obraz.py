@@ -22,7 +22,7 @@ def js(expr):
 
 
 def test_version_and_scale():
-    assert js('O.VERSION') == '1.11'
+    assert js('O.VERSION') == '1.12'
     assert js('O.deviceScale(2, 320, 320, 1.25, 10)') == 3          # round(2 * 1.25)
     assert js('O.deviceScale(2, 336, 448, 2, 10)') == 3             # wider window: zoom counts in W0
     assert js('O.deviceScale(6, 320, 320, 2, 2.4)') == 4            # limited by the window
@@ -104,7 +104,7 @@ def test_web_copy_and_package_files(tmp_path, capsys):
     assert cli.main(['web', 'copy', str(tmp_path / 'web')]) == 0
     out = capsys.readouterr().out
     data = (tmp_path / 'web' / 'wb-obraz.js').read_bytes()
-    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.11' in out
+    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.12' in out
 
 
 def test_png_decoder_reads_the_kits_png():
@@ -142,7 +142,7 @@ def test_presenter_2d_path_and_patterns():
         return { gl: p.gl, sz, noDraw, css: c.style, w: c.width, h: c.height, calls: calls.length, rows: calls.filter((k) => k[0] === 'fill' && k[1].startsWith('rgb(')).map((k) => k.slice(2)), info: p.info() }; })()""")
     assert r['gl'] is False and r['noDraw'] is False and r['sz'] == {'backing': [20, 5], 'content': [16, 4], 'redrawn': False}
     assert r['w'] == 20 and r['h'] == 5 and r['css']['width'] == '16px' and r['css']['height'] == '4px'   # padded to the quantum 5 at dpr 1.25
-    assert r['rows'] == [[0, 0, 16, 2], [0, 2, 16, 2]] and r['info'] == {'gl': False, 'content': [16, 4], 'backing': [20, 5], 'lost': False, 'restores': 0}
+    assert r['rows'] == [[0, 0, 16, 2], [0, 2, 16, 2]] and r['info'] == {'gl': False, 'content': [16, 4], 'backing': [20, 5], 'lost': False, 'restores': 0, 'shrink': 1}
     assert js("(() => { try { new O.Presenter({ getContext: () => null }, { gl: 'on' }); return 'no'; } catch (e) { return e.message; } })()") == 'wb-obraz: no WebGL2'
 
 
@@ -408,3 +408,82 @@ def test_watch_dpr_follows_the_ratio():
         return [got, ls.map((m) => m.q), ls.map((m) => m.l.length)]; })()""")
     assert r[0] == [2, 1.5]
     assert r[1] == ['(resolution: 1dppx)', '(resolution: 2dppx)', '(resolution: 1.5dppx)'] and r[2] == [0, 0, 0]
+
+
+def test_stepless_scale():
+    """1.12: stepless - real device pixels per game row, drawn at the next whole S and shrunk; whole values stay exact."""
+    r = js('[O.stepless(2.37, 320, 320, 1, 3), O.stepless(0, 320, 320, 1, 2.6), O.stepless(3, 320, 320, 2, 9), O.stepless(9, 320, 320, 1, 2.5), '
+           'O.stepless(.3, 320, 320, 1, 3), O.stepless(2.5, 320, 320, 1, 9, 1.25)]')
+    assert r[0]['S'] == 3 and abs(r[0]['shrink'] - .79) < 1e-9 and abs(r[0]['real'] - 2.37) < 1e-9
+    assert r[1]['S'] == 3 and abs(r[1]['real'] - 2.6) < 1e-9                          # auto: the whole window
+    assert r[2] == {'S': 6, 'shrink': 1, 'real': 6}                                    # whole: exact, as 1.11
+    assert r[3]['S'] == 3 and abs(r[3]['real'] - 2.5) < 1e-9                          # at most the window
+    assert r[4] == {'S': 1, 'shrink': 1, 'real': 1}                                    # at least one device pixel per row
+    assert r[5] == {'S': 2, 'shrink': 1, 'real': 2}                                    # the pixel width divides
+    assert js('[O.contentSize(320, 256, 3, 1, .79), O.contentSize(320, 256, 3, 1, 1), O.contentSize(320, 256, 3, 1)]') == [[758, 607], [960, 768], [960, 768]]
+
+
+STEPLESS_PAGE = """<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="wb.css">
+<style>.game::after,.game::before{display:none!important}.crt-layer{transition:none!important}body{margin:0;background:#000}.game{width:auto;display:inline-block}</style>
+<div class="game"><canvas id="screen"></canvas></div>
+<script src="wb-obraz.js"></script><script>
+const O = WBOBRAZ, W = 320, H = 256, q = new URLSearchParams(location.search);
+const game = document.querySelector('.game'), c = document.getElementById('screen');
+const pr = new O.Presenter(c, { gl: q.get('gl') === '0' ? 'off' : 'on' }), scr = new O.Screen(game, c, {});
+window.run = (real, kind, crt, shape) => {
+  const dpr = devicePixelRatio, st = O.stepless(real / dpr, W, W, dpr, 100, 1);
+  const r = pr.size(W, H, st.S, 1, dpr, st.shrink); pr.fill(kind);
+  scr.crt({ mode: 'original', detail: 'strong', shape: shape || 'lines', S: st.S, dpr, w: r.backing[0], h: r.backing[1], on: crt ? 1 : 0, shrink: st.shrink }); scr.align();
+  game.querySelector('.crt-layer').style.display = crt ? '' : 'none';
+  return Object.assign({ content: r.content }, scr.info());
+};
+</script>"""
+
+
+@pytest.mark.parametrize('gl', ['1', '0'])
+def test_stepless_rows_and_crt_in_the_browser(tmp_path, gl):
+    """1.12 in Chromium (the WebGL and the 2D path): a stepless picture keeps every game row - each has a device row of
+    exactly its colour, no device row has a colour that is not its row's or a neighbour's - the canvas is its backing (no
+    CSS resize), and the Original CRT has one line at the end of every game row (lines and grid); dpr 1 and 2."""
+    pw = pytest.importorskip('playwright.sync_api')
+    np = pytest.importorskip('numpy')
+    Image = pytest.importorskip('PIL.Image')
+    import io
+    import threading
+    from arek import web
+    for f in ('wb-obraz.js', 'wb.css'):
+        shutil.copy(WEB / f, tmp_path / f)
+    (tmp_path / 'p.html').write_text(STEPLESS_PAGE)
+    srv = web.serve(str(tmp_path), 0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    grey = lambda y: 32 + 24 * (y % 8)
+    H, res = 256, []
+    try:
+        with pw.sync_playwright() as p:
+            try:
+                b = p.chromium.launch()
+            except Exception as e:                                # no browser installed
+                pytest.skip(str(e))
+            for dpr in (1, 2):
+                pg = b.new_page(viewport={'width': 1600, 'height': 1300}, device_scale_factor=dpr)
+                pg.goto('http://127.0.0.1:%d/p.html?gl=%s' % (srv.server_address[1], gl))
+                pg.wait_for_function('() => !!window.run')
+                for real in (2.37, 2.5, 4.62):
+                    info = pg.evaluate('([r]) => run(r, "rows", false)', [real])
+                    a = np.asarray(Image.open(io.BytesIO(pg.locator('#screen').screenshot())).convert('RGB'))[:, :, 0].astype(int)
+                    cw, ch = info['content']; col = a[:ch, cw // 2]
+                    lost = [y for y in range(H) if not (abs(col[int(np.floor(y * ch / H)):int(np.ceil((y + 1) * ch / H))] - grey(y)) <= 2).any()]
+                    bad = sum(1 for j, v in enumerate(col) if not any(abs(v - grey(min(H - 1, max(0, int((j + .5) * H / ch) + d)))) <= 2 or
+                              min(grey(min(H - 1, max(0, int((j + .5) * H / ch) + d))) for d in (-1, 0, 1)) - 2 <= v <= max(grey(min(H - 1, max(0, int((j + .5) * H / ch) + d))) for d in (-1, 0, 1)) + 2 for d in (-1, 0, 1)))
+                    lines = []
+                    for shape in ('lines', 'grid'):
+                        pg.evaluate('([r, s]) => run(r, "grey", true, s)', [real, shape])
+                        g = np.asarray(Image.open(io.BytesIO(pg.locator('#screen').screenshot())).convert('L')).astype(int)[:ch, 100:112].max(axis=1)
+                        lines.append(sum(1 for y in range(1, H - 1) if (lambda band: band.max() - band.min() > 8)(g[int(np.floor(y * ch / H)):int(np.ceil((y + 1) * ch / H))])))
+                    res.append((dpr, real, info['box'] == info['backing'], len(lost), bad, lines))
+                pg.close()
+            b.close()
+    finally:
+        srv.shutdown()
+    for dpr, real, boxok, lost, bad, lines in res:
+        assert boxok and lost == 0 and bad == 0 and lines == [H - 2, H - 2], (gl, dpr, real, boxok, lost, bad, lines)

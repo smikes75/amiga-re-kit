@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.91 on PyPI, 2865 tests. Extracted from five game
+- **The kit:** version 1.0.92 on PyPI, 2869 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -155,6 +155,8 @@ arek web smooth http://127.0.0.1:8920/smooth-demo.html  # the canon's limits in 
 #    wb-obraz 1.8 (kit 1.0.32): new Screen(game, canvas, {crtEnhanced: 'original'}) - Enhanced that only smooths the motion keeps the Original CRT
 #    wb-obraz 1.11 + wb-nastaveni 1.5 (kit 1.0.91): zoomSteps: () => WBOBRAZ.zoomSteps(W0, W, devicePixelRatio, limit(), par()); buttons under the
 #    zoom slider ('auto' + the exact zooms), 'auto' the default; WBOBRAZ.watchDpr(() => { layout(); menu.refreshZoom({ keep: true }); })
+#    wb-obraz 1.12 + wb-nastaveni 1.6 (kit 1.0.92): stepless zoom - spec { stepless: true, zoomFit: () => limit() * par() * W / W0 }; in layout()
+#    const sl = c.stepless ? WBOBRAZ.stepless(c.zoom, W0, W, dpr, limit(), par()) : null; pr.size(W, H, S, par(), dpr, sl ? sl.shrink : 1); scr.crt({ ..., shrink })
 arek web replay http://127.0.0.1:8920/scene-demo.html --hz 50,60,120,144 --frames 300 --route 1:120,2:60,0:120
 #    the display never touches the game: the page under a virtual clock at four rates, the same inputs by game frame, one state fingerprint (H)
 arek docs WB-PLYNULOST                                   # the kit's documents ship with it (arek docs: the list; --path: the file)

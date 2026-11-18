@@ -55,7 +55,7 @@ def test_filters_and_process():
 
 
 def test_menu_defaults_coerce_merge():
-    assert js('M.VERSION') == '1.5' and js('M.MODES') == ['original', 'enhanced']
+    assert js('M.VERSION') == '1.6' and js('M.MODES') == ['original', 'enhanced']
     d = js("M.defaults('display', 'enhanced')")
     assert d['par'] == 1.04 and d['smooth'] is True and d['zoom'] == 3 and d['crt-detail'] == 'fine'
     assert js("M.defaults('display', 'original').par") == 1 and js("M.defaults('display', 'original').smooth") is False
@@ -127,6 +127,25 @@ def test_menu_zoom_auto_default_and_the_players_choice():
     assert r[3] == [0, 0]
     assert r[4] == [2, 0, {'original': True, 'enhanced': False}]
     assert r[5] == [0, False] and r[6] == 3
+
+
+def test_menu_stepless_zoom():
+    """1.6: the stepless row only for a page that asks (spec.stepless with snapping); while it is on the zoom is any value
+    from 1x to spec.zoomFit(), an exact zoom within 0.04 catches it; turned off, the zoom goes back to the nearest exact step."""
+    r = js("""(() => { const st = () => [1, 2, 3], o = [];
+        const plain = new M.Menu(null, {zoom: 'snap', zoomSteps: st}); o.push(plain.testHooks().ids().includes('wb-stepless'), plain.get('display').stepless);
+        const m = new M.Menu(null, {zoom: 'snap', zoomSteps: st, stepless: true, zoomFit: () => 3.4});
+        o.push(m.testHooks().ids().includes('wb-stepless'), m.get('display').stepless);
+        m.set('display', 'zoom', 2.37); o.push(m.get('display').zoom);                             // off: snapped
+        m.set('display', 'stepless', true); m.set('display', 'zoom', 2.37); o.push(m.get('display').zoom);
+        o.push([m.catchZoom(2.03), m.catchZoom(1.97), m.catchZoom(2.06), m.snapZoom(9), m.snapZoom(.5), m.snapZoom(0)]);
+        m.set('display', 'stepless', false); o.push(m.get('display').zoom);
+        m.setMode('enhanced'); o.push(m.stepless());                                                // per mode
+        return o; })()""")
+    assert r[0] is False and r[1] is False and r[2] is True and r[3] is False
+    assert r[4] == 2 and r[5] == 2.37
+    assert r[6] == [2, 2, 2.06, 3.4, 1, 0]
+    assert r[7] == 2 and r[8] is False
 
 
 def test_package_files_and_copy(tmp_path, capsys):
@@ -300,7 +319,8 @@ def test_zoom_buttons_in_the_browser(tmp_path):
     (tmp_path / 'zoom.html').write_text("""<!doctype html><meta charset="utf-8"><div id="menu"></div>
 <script src="wb-nastaveni.js"></script><script>
 window.steps = [0.5, 1, 1.5, 2, 2.5, 3];
-window.menu = WBNASTAVENI.build(document.getElementById('menu'), { lang: 'cs', zoom: 'snap', zoomSteps: () => steps.map((v) => ({ value: v, label: v + '×' })) });
+window.menu = WBNASTAVENI.build(document.getElementById('menu'), { lang: 'cs', zoom: 'snap', zoomSteps: () => steps.map((v) => ({ value: v, label: v + '×' })),
+  stepless: /stepless/.test(location.search), zoomFit: () => 3.4 });
 </script>""")
     import threading
     srv = web.serve(str(tmp_path), 0)
@@ -323,6 +343,14 @@ window.menu = WBNASTAVENI.build(document.getElementById('menu'), { lang: 'cs', z
                 steps = [1, 2]; menu.refreshZoom({ keep: true }); o.small = [btns(), menu.get('display').zoom];
                 q('#wb-zoom-buttons button').click(); o.auto = [menu.get('display').zoom, btns()[0], q('#wb-zoom').value];
                 return o; }""")
+            pg.goto('http://127.0.0.1:%d/zoom.html?stepless=1' % port)
+            s = pg.evaluate("""() => { const q = (s) => document.querySelector(s), z = q('#wb-zoom'), o = {};
+                const st = q('#wb-stepless'); st.checked = true; st.dispatchEvent(new Event('change'));
+                o.on = [z.min, z.max, z.step, z.value, z.parentNode.querySelector('output').value];
+                z.value = '2.37'; z.dispatchEvent(new Event('input')); o.v = [menu.get('display').zoom, z.parentNode.querySelector('output').value];
+                z.value = '2.52'; z.dispatchEvent(new Event('input')); o.caught = menu.get('display').zoom;
+                st.checked = false; st.dispatchEvent(new Event('change')); o.off = [menu.get('display').zoom, z.max, z.step];
+                return o; }""")
             b.close()
     finally:
         srv.shutdown()
@@ -331,3 +359,5 @@ window.menu = WBNASTAVENI.build(document.getElementById('menu'), { lang: 'cs', z
     assert r['two'] == [2, ['auto', '1×', '1.5×', '2×*', '2.5×', '3×'], '3', True]
     assert r['small'] == [['auto', '1×', '2×*'], 2]
     assert r['auto'] == [0, 'auto*', '1']
+    assert s['on'] == ['1', '3.4', '0.01', '3.4', 'auto (3,4×)']                            # 1.6: stepless - 1x .. the window, auto fills
+    assert s['v'] == [2.37, '2,37×'] and s['caught'] == 2.5 and s['off'] == [2.5, '5', '1']
