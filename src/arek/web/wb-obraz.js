@@ -37,9 +37,14 @@
 // --crt-edge): Screen.crt() sets --crt-edge 0 on the game element in Enhanced - inline, so a page's own copy of the
 // rule obeys too; Original keeps the edges by the detail. new Screen(gameEl, canvas, { edgeEnhanced: true }) keeps them
 // in Enhanced; Screen.info().crtEdge says whether the edges are drawn.
+// 1.11 (kit 1.0.91, the user 2026-11-18: zoom buttons, an automatic zoom): zoomSteps(w0, w, dpr, limit, par) - the zooms
+// this display shows exactly (S = 1 .. the largest that fits, each as a zoom in multiples of w0), the list the pages built
+// each their own way (SWIV k / dpr left the aspect out); watchDpr(fn) calls fn(dpr) when devicePixelRatio changes (the
+// window moved to a monitor of another scale, the browser zoom) - a resize event does not always come then; zoom 0 is
+// called 'auto' (WORDS.fit): the largest exact zoom that fits, following the window.
 'use strict';
 const WBOBRAZ = (() => {
-    const VERSION = '1.10';
+    const VERSION = '1.11';
     const CRT_DETAILS = ['fine', 'standard', 'strong'];
     const CRT_SHAPES = ['lines', 'grid'];
     // 1.3 values (Alien Breed / Turrican II, 2026-10-22: larger steps between the levels)
@@ -50,7 +55,7 @@ const WBOBRAZ = (() => {
     const MODE_MS = 450;
     const VIEW_DEFAULTS = { original: { zoom: 2, crt: true, crtDetail: 'strong', crtShape: 'lines', blur: 0 },
                             enhanced: { zoom: 3, crt: true, crtDetail: 'fine', crtShape: 'lines', blur: 20 } };
-    const WORDS = { fit: 'fit', limited: 'limited to', actual: 'actually' };   // games pass their own (Czech: do okna, omezeno na, skutečně)
+    const WORDS = { fit: 'auto', limited: 'limited to', actual: 'actually' };  // games pass their own (Czech: auto, omezeno na, skutečně); 1.11: 'fit' -> 'auto'
     const dprNow = () => (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
 
     /** S, whole device pixels per game row (§1). zoom = window width in multiples of w0 (0 = fit), w = logical
@@ -60,6 +65,29 @@ const WBOBRAZ = (() => {
         par = par > 0 ? par : 1;
         const floor = Math.max(1, Math.floor(limit * dpr + 1e-6));
         return zoom > 0 ? Math.min(Math.max(1, Math.round(zoom * w0 / w * dpr / par)), floor) : floor;
+    }
+    /** 1.11: the zooms this display shows exactly - one per whole device scale S = 1 .. floor(limit * dpr) (at least 1),
+     *  each as the zoom deviceScale turns back into S: S * w * par / (w0 * dpr), 4 decimals. For wb-nastaveni's
+     *  spec.zoomSteps: `zoomSteps: () => WBOBRAZ.zoomSteps(W0, W, devicePixelRatio, limit(), par())`. */
+    function zoomSteps(w0, w, dpr, limit, par) {
+        par = par > 0 ? par : 1; dpr = dpr > 0 ? dpr : 1;
+        const top = Math.max(1, Math.floor(limit * dpr + 1e-6)), out = [];
+        for (let S = 1; S <= top; S++) out.push(+(S * w * par / (w0 * dpr)).toFixed(4));
+        return out;
+    }
+    /** 1.11: fn(dpr) whenever devicePixelRatio changes (a monitor of another scale, the browser zoom); returns stop().
+     *  One media query for the current ratio, armed again after each change. No window (Node): stop() only. */
+    function watchDpr(fn) {
+        let mq = null, stopped = false;
+        const arm = () => {
+            if (stopped || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+            mq = window.matchMedia('(resolution: ' + dprNow() + 'dppx)');
+            const on = () => { mq.removeEventListener('change', on); arm(); fn(dprNow()); };
+            mq.addEventListener('change', on);
+            mq._wbOn = on;
+        };
+        arm();
+        return () => { stopped = true; if (mq && mq._wbOn) mq.removeEventListener('change', mq._wbOn); };
     }
     /** The game content in device pixels (1.4): [round(W*S*par), H*S] - the aspect stretches the picture horizontally
      *  inside the backing, rows stay S device pixels each. */
@@ -525,7 +553,7 @@ const WBOBRAZ = (() => {
         }
     }
     return { VERSION, CRT_DETAILS, CRT_SHAPES, CRT_ROW, CRT_SCREEN, CRT_LINE, CRT_RGB, MODE_MS, VIEW_DEFAULTS, WORDS,
-             deviceScale, contentSize, blit, crtParams, drawCrt, filter, crtOn, smoothstep, zoomLabel, quantum, padded, snap,
+             deviceScale, zoomSteps, watchDpr, contentSize, blit, crtParams, drawCrt, filter, crtOn, smoothstep, zoomLabel, quantum, padded, snap,
              testPattern, patternPixels, GLSL, Presenter, Screen };
 })();
 if (typeof globalThis !== 'undefined') globalThis.WBOBRAZ = WBOBRAZ;

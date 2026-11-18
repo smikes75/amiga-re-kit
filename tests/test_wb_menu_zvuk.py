@@ -55,7 +55,7 @@ def test_filters_and_process():
 
 
 def test_menu_defaults_coerce_merge():
-    assert js('M.VERSION') == '1.4' and js('M.MODES') == ['original', 'enhanced']
+    assert js('M.VERSION') == '1.5' and js('M.MODES') == ['original', 'enhanced']
     d = js("M.defaults('display', 'enhanced')")
     assert d['par'] == 1.04 and d['smooth'] is True and d['zoom'] == 3 and d['crt-detail'] == 'fine'
     assert js("M.defaults('display', 'original').par") == 1 and js("M.defaults('display', 'original').smooth") is False
@@ -93,6 +93,40 @@ def test_menu_zoom_snap():
         const plain = new M.Menu(null, {store: 'g', mode: 'enhanced'});
         return [before, m.get('display').zoom, plain.get('display').zoom, M.coerce(M.ITEMS.display[0], 9, true), M.coerce(M.ITEMS.display[0], 'x', true)]; })()""")
     assert abs(r[0] - 2 * 448 / 293) < 1e-9 and abs(r[1] - 2 * 448 / 293) < 1e-9 and r[2] == 3 and r[3] == 6 and r[4] == 1
+
+
+def test_menu_zoom_buttons_rule():
+    """1.5: the exact zooms that get a button - from 1x, the whole and half ones when two are exact, else all, at most 7."""
+    b = lambda v: js('M.zoomButtons(%s)' % json.dumps(v))
+    assert b([1, 2, 3]) == [1, 2, 3]                                                  # a monitor at 100 %
+    assert b([.5, 1, 1.5, 2, 2.5, 3]) == [1, 1.5, 2, 2.5, 3]                          # Retina: 0.5 left out
+    assert b([.8, 1.6, 2.4, 3.2]) == [1.6, 2.4, 3.2]                                  # Windows 125 %: no whole or half one
+    assert b([.6667, 1.3333, 2, 2.6667, 3.3333]) == [1.3333, 2, 2.6667, 3.3333]       # Windows 150 %: only 2x is - all
+    assert b([.5 * k for k in range(1, 13)]) == [1, 2, 3, 4, 5, 6]                    # a large Retina window: the whole ones
+    assert b(list(range(1, 11))) == [4, 5, 6, 7, 8, 9, 10]                            # 4K at 100 %: the 7 largest
+    assert b([.5]) == [] and b([]) == [] and b([0, 1, 2]) == [1, 2]                   # 0 (auto) is a button of its own
+
+
+def test_menu_zoom_auto_default_and_the_players_choice():
+    """1.5: a snap page without a zoom default starts in auto (0); a zoom the player has not chosen (a 1.4 store, a reset)
+    follows the page's default; a chosen one survives a reload; pages without snapping keep their stored zoom."""
+    r = js("""(() => { const box = {}; globalThis.localStorage = { getItem: (k) => box[k] ?? null, setItem: (k, v) => { box[k] = String(v); } };
+        const steps = () => [1, 2, 3], o = [];
+        o.push(new M.Menu(null, {zoom: 'snap', zoomSteps: steps}).get('display').zoom);                                  // no default: auto
+        o.push(new M.Menu(null, {zoom: 'snap', zoomSteps: steps, defaults: {display: {original: {zoom: 2}}}}).get('display').zoom);
+        o.push(new M.Menu(null, {}).get('display').zoom);                                                               // no snap: the kit's 2
+        const old = JSON.stringify({ mode: 'original', version: '1.4', original: { display: { zoom: 3 } }, enhanced: { display: { zoom: 2 } } }); box.old = old;
+        const sp = {zoom: 'snap', zoomSteps: steps, store: 'old'}, a = new M.Menu(null, sp);
+        o.push([a.getMode('original', 'display').zoom, a.getMode('enhanced', 'display').zoom]);                        // 1.4 store: not chosen
+        a.set('display', 'zoom', 2);
+        const b = new M.Menu(null, sp); o.push([b.getMode('original', 'display').zoom, b.getMode('enhanced', 'display').zoom, Object.assign({}, b.zoomOwn)]);
+        b.reset('display'); const c = new M.Menu(null, sp); o.push([c.get('display').zoom, c.zoomOwn.original]);
+        box.plain = old; o.push(new M.Menu(null, {store: 'plain'}).get('display').zoom);                          // no snap: kept
+        return o; })()""")
+    assert r[0] == 0 and r[1] == 2 and r[2] == 2
+    assert r[3] == [0, 0]
+    assert r[4] == [2, 0, {'original': True, 'enhanced': False}]
+    assert r[5] == [0, False] and r[6] == 3
 
 
 def test_package_files_and_copy(tmp_path, capsys):
@@ -255,3 +289,45 @@ window.menu = WBNASTAVENI.build(document.getElementById('menu'), { lang: 'cs', m
     assert r['shadowOpts'] == ['black, as the original', '0,75', '0,5']                   # labels, else the number in the menu's language
     assert r['screenOpts'][-1] == 'play64 (mění hru)' and r['livesLabel'] == 'Unlimited lives (mění hru)'
     assert r['inDebug'] and r['inDisplay'] and r['fadingHidden'] and r['fadingShown'] and r['ran'] == 1 and r['rotorHiddenInOriginal']
+
+
+def test_zoom_buttons_in_the_browser(tmp_path):
+    """1.5: the buttons under the slider - auto pressed on a first visit, the slider on the largest step, "auto (3×)";
+    a button sets its zoom and is pressed; new steps (a smaller window) build the buttons again; Czech texts."""
+    pw = pytest.importorskip('playwright.sync_api')
+    from arek import web
+    shutil.copy(WEB / 'wb-nastaveni.js', tmp_path / 'wb-nastaveni.js')
+    (tmp_path / 'zoom.html').write_text("""<!doctype html><meta charset="utf-8"><div id="menu"></div>
+<script src="wb-nastaveni.js"></script><script>
+window.steps = [0.5, 1, 1.5, 2, 2.5, 3];
+window.menu = WBNASTAVENI.build(document.getElementById('menu'), { lang: 'cs', zoom: 'snap', zoomSteps: () => steps.map((v) => ({ value: v, label: v + '×' })) });
+</script>""")
+    import threading
+    srv = web.serve(str(tmp_path), 0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        port = srv.server_address[1]
+        with pw.sync_playwright() as p:
+            try:
+                b = p.chromium.launch()
+            except Exception as e:                                # no browser installed
+                pytest.skip(str(e))
+            pg = b.new_page()
+            pg.goto('http://127.0.0.1:%d/zoom.html' % port)
+            r = pg.evaluate("""() => { const q = (s) => document.querySelector(s), o = {};
+                const btns = () => [...document.querySelectorAll('#wb-zoom-buttons button')].map((x) => x.textContent + (x.getAttribute('aria-pressed') === 'true' ? '*' : ''));
+                o.first = btns(); o.slider = [q('#wb-zoom').value, q('#wb-zoom').max]; o.out = q('#wb-zoom').parentNode.querySelector('output').value;
+                o.title = q('#wb-zoom-buttons button').title; o.under = q('#wb-zoom').closest('.wb-nastaveni-row').nextElementSibling.id;
+                [...document.querySelectorAll('#wb-zoom-buttons button')].find((x) => x.textContent === '2×').click();
+                o.two = [menu.get('display').zoom, btns(), q('#wb-zoom').value, menu.zoomOwn.original];
+                steps = [1, 2]; menu.refreshZoom({ keep: true }); o.small = [btns(), menu.get('display').zoom];
+                q('#wb-zoom-buttons button').click(); o.auto = [menu.get('display').zoom, btns()[0], q('#wb-zoom').value];
+                return o; }""")
+            b.close()
+    finally:
+        srv.shutdown()
+    assert r['first'] == ['auto*', '1×', '1.5×', '2×', '2.5×', '3×'] and r['slider'] == ['5', '5'] and r['out'] == 'auto (3×)'
+    assert r['title'].startswith('největší přesné') and r['under'] == 'wb-zoom-buttons'
+    assert r['two'] == [2, ['auto', '1×', '1.5×', '2×*', '2.5×', '3×'], '3', True]
+    assert r['small'] == [['auto', '1×', '2×*'], 2]
+    assert r['auto'] == [0, 'auto*', '1']

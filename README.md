@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.90 on PyPI, 2860 tests. Extracted from five game
+- **The kit:** version 1.0.91 on PyPI, 2865 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -153,6 +153,8 @@ arek web smooth http://127.0.0.1:8920/smooth-demo.html  # the canon's limits in 
 #    the 0.9.15 transition and 0.9.16 freshSprites removed - counterproductive in every game (G60), the presenter's transition stays;
 #    wb-obraz 1.7 (kit 1.0.3): present({source | pixels + size, rect, smooth}) - a source of any size into a rectangle of the content (a hires title, an interlude)
 #    wb-obraz 1.8 (kit 1.0.32): new Screen(game, canvas, {crtEnhanced: 'original'}) - Enhanced that only smooths the motion keeps the Original CRT
+#    wb-obraz 1.11 + wb-nastaveni 1.5 (kit 1.0.91): zoomSteps: () => WBOBRAZ.zoomSteps(W0, W, devicePixelRatio, limit(), par()); buttons under the
+#    zoom slider ('auto' + the exact zooms), 'auto' the default; WBOBRAZ.watchDpr(() => { layout(); menu.refreshZoom({ keep: true }); })
 arek web replay http://127.0.0.1:8920/scene-demo.html --hz 50,60,120,144 --frames 300 --route 1:120,2:60,0:120
 #    the display never touches the game: the page under a virtual clock at four rates, the same inputs by game frame, one state fingerprint (H)
 arek docs WB-PLYNULOST                                   # the kit's documents ship with it (arek docs: the list; --path: the file)
@@ -203,7 +205,7 @@ asks for (see `examples/profile.example.json`).
 | `docs/REBUILD-PLAYBOOK.md`, `host/arek_host_engine_node.js` | the method of the whole-game rebuilds (milestones, the start from the disks without a Kickstart, module discovery, the page's events at exact frames, the scene record, the public build checklist) and the Node harness that drives the wasm engine for a project's measurements | Alien Breed II, Superfrog, Turrican II |
 | `host/` (`arek host copy`) | the host of a translation: time from the bus model, the beam, interrupts 1-6, CIA-A with the E clock, Paula, the picture line by line in C (`arek_display.h`, 0 px against the emulator), the trace driver (`arek_host_trace.c`), `arek host state` from a capture, disk images at run time (`arek_host_disk.h`), a data disk the game writes (`arek_host_datadisk.h`), the web engine (`arek_host_engine.c`, Emscripten ASYNCIFY, `arek host engine`, held against its native build by `arek_host_engine_check.js`) (`docs/HOST.md`) | Alien Breed II |
 | `bus/arek_bus_paula.h` | Paula's audio DMA for the bus model: the channels' slots and output bytes, exact against the emulator (`arek selftest audio`) | Alien Breed II |
-| `web/wb-nastaveni.js`, `web/wb-zvuk.js` | the shared Display / Sound menu of the rebuilds (same ids, ranges, defaults per mode, storage, optional zoom snapping to the whole-device-pixel zooms; the game adds its items and texts) and the sound contract 1.1: one stereo-width rule, 20 ms gain ramps, the Amiga 500's filters from the schematic in prescribed digital forms, test hooks for `arek web test` §6 | Alien Breed, Superfrog |
+| `web/wb-nastaveni.js`, `web/wb-zvuk.js` | the shared Display / Sound menu of the rebuilds (same ids, ranges, defaults per mode, storage, optional zoom snapping to the whole-device-pixel zooms with buttons and 'auto' - the largest exact zoom that fits, following the window; the game adds its items and texts) and the sound contract 1.1: one stereo-width rule, 20 ms gain ramps, the Amiga 500's filters from the schematic in prescribed digital forms, test hooks for `arek web test` §6 | Alien Breed, Superfrog |
 | `web/wb-menu.js`, `web/wb.css` | the Workbench 1.3 bar of a rebuild's page (Project / Display / Game / Sound / ?): an open menu or requester suspends the game, Esc and the arrow keys, a notice line; the markup is the page's (docs/WB-RECIPE.md) | Alien Breed II, Superfrog |
 | `web/wb-takt.js` | the clock of a page (canon C): the game's frames allowed by the display's clock, the lock on a k x 50 Hz display, the timeline of the frames, the picture behind the game with pairs for the interpolation and extrapolation, keys at the event; the synthetic page `smooth-demo.html` runs on it | Alien Breed II, Superfrog (Sonnet) |
 | `web/wb-zvuk-worklet.js`, `web/wb-zvuk-out.js` | Paula's output into Web Audio (canon D): an AudioWorklet over a ring of stereo int16 - the engine's ring in shared memory with written / read counters (a stalled main thread does not interrupt the sound, the engine computes on when the reserve runs low) or the game's frames by messages; the reserve, dropouts and output latency for the hooks | Alien Breed II, Superfrog (Sonnet) |

@@ -3,6 +3,21 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.91 (2026-11-18)
+
+- `wb-nastaveni.js` 1.5 + `wb-obraz.js` 1.11: zoom buttons and an automatic zoom (the user: "buttons 2x 3x under the
+  slider, 2.5x if the resolution allows; detect the monitor and preset it"). With `zoom: 'snap'` the zoom row gets buttons:
+  'auto' and the exact zooms from 1x up - the whole and half ones when two of them are exact here (a monitor at 100 %: 1 2
+  3 4, a Retina: 1 1.5 2 2.5 3), else every exact one (Windows at 125 %: 1.6 2.4; at 150 %: 1.33 2); at most 7. 'auto'
+  (zoom 0, formerly 'fit') is the largest exact zoom that fits the window and follows it (resize, full screen, a monitor of
+  another scale); it is the default of a snap page that gives no zoom default, and a zoom the player has not chosen
+  (`zoomOwn` in the store; a 1.4 store has none) follows the page's default. `WBOBRAZ.zoomSteps(W0, W, dpr, limit, par)`
+  gives the exact zooms (SWIV's own k / dpr left the pixel width out), `WBOBRAZ.watchDpr(fn)` a devicePixelRatio change.
+  Measured on SWIV's test build 3a3019e (read-only copy, the two modules swapped, its default 2.5 dropped): first visit at
+  dpr 1 1280x720 2x (was 2.5 limited to 2x), 1920x1080 4x (was 3x), dpr 1.25 1536x864 2.4x, dpr 1.5 1280x720 2x, dpr 2
+  1440x900 3x (was 2.5x), 2560x1440 5x (was 2.5x); a chosen 2x kept through a smaller window and a reload, 'auto' follows
+  the window back; a 1.4 store with zoom 3 / 1.5 starts in 'auto'
+
 ## 1.0.90 (2026-11-18)
 
 - `wb-pad.js` 1.1: the automatic controller choice (the user: "the automatic detection does not work well"). 'auto' took

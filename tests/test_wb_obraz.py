@@ -22,7 +22,7 @@ def js(expr):
 
 
 def test_version_and_scale():
-    assert js('O.VERSION') == '1.10'
+    assert js('O.VERSION') == '1.11'
     assert js('O.deviceScale(2, 320, 320, 1.25, 10)') == 3          # round(2 * 1.25)
     assert js('O.deviceScale(2, 336, 448, 2, 10)') == 3             # wider window: zoom counts in W0
     assert js('O.deviceScale(6, 320, 320, 2, 2.4)') == 4            # limited by the window
@@ -77,7 +77,7 @@ def test_crt_params_and_drawing():
 def test_zoom_label_with_an_aspect():
     assert js("O.zoomLabel(2, 4, 2, 320, 320, null, 1)") == '2×'
     assert js("O.zoomLabel(2, 4, 2, 320, 320, null, 1.5)") == '2× · actually 3×'
-    assert js("O.zoomLabel(0, 2, 1, 320, 320, null, 1.5)") == 'fit (3×)'
+    assert js("O.zoomLabel(0, 2, 1, 320, 320, null, 1.5)") == 'auto (3×)'                 # 1.11: zoom 0 is 'auto'
 
 
 def test_check_layout_with_an_aspect():
@@ -104,7 +104,7 @@ def test_web_copy_and_package_files(tmp_path, capsys):
     assert cli.main(['web', 'copy', str(tmp_path / 'web')]) == 0
     out = capsys.readouterr().out
     data = (tmp_path / 'web' / 'wb-obraz.js').read_bytes()
-    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.10' in out
+    assert hashlib.sha256(data).hexdigest() in out and 'wb-obraz 1.11' in out
 
 
 def test_png_decoder_reads_the_kits_png():
@@ -383,3 +383,28 @@ def test_enhanced_crt_without_the_darkened_edges():
     assert abs(o1[0] - .65) < 1e-6 and o1[1] == '' and e[0] == 0 and e[1].strip() == '0' and o2 == o1, out
     assert all(abs(x[0] - .65) < 1e-6 and x[1] == '' for x in out['?edge=1']), out
     assert [x[2] for x in out['']] in ([True, False, True], [None] * 3), out   # info().crtEdge when the page's set() passes it on
+
+
+def test_zoom_steps_are_the_exact_zooms():
+    """1.11: zoomSteps - one zoom per whole device scale that fits, each turned back into that S by deviceScale."""
+    assert js('O.zoomSteps(320, 320, 1, 3.4)') == [1, 2, 3]
+    assert js('O.zoomSteps(320, 320, 2, 2.6)') == [.5, 1, 1.5, 2, 2.5]
+    assert js('O.zoomSteps(320, 320, 1.25, 2.6)') == [.8, 1.6, 2.4]
+    assert js('O.zoomSteps(320, 320, 1, .4)') == [1]                                   # at least S = 1
+    for w0, w, dpr, lim, par in ((320, 320, 1.5, 3.1, 1), (320, 320, 1, 4.2, 1.04), (336, 448, 2, 2.2, 1), (320, 384, 1.25, 3, 1.04)):
+        ok = js('O.zoomSteps(%s, %s, %s, %s, %s).map((z, i) => O.deviceScale(z, %s, %s, %s, %s, %s) === i + 1)' % (w0, w, dpr, lim, par, w0, w, dpr, lim, par))
+        assert ok and all(ok), (w0, w, dpr, lim, par)
+    assert js("typeof O.watchDpr(() => 0)") == 'function'                               # Node: no window, stop() only
+
+
+def test_watch_dpr_follows_the_ratio():
+    """1.11: watchDpr arms one media query for the current ratio and again after each change; stop() ends it. (A headless
+    Chromium fires neither the query nor resize on an emulated ratio change - the browser part is a fake here.)"""
+    r = js("""(() => { const ls = []; let dpr = 1;
+        globalThis.window = { get devicePixelRatio() { return dpr; }, matchMedia: (q) => { const m = { q, l: [],
+            addEventListener: (e, f) => m.l.push(f), removeEventListener: (e, f) => { m.l = m.l.filter((x) => x !== f); } }; ls.push(m); return m; } };
+        const got = [], fire = () => ls[ls.length - 1].l.slice().forEach((f) => f()), stop = O.watchDpr((d) => got.push(d));
+        dpr = 2; fire(); dpr = 1.5; fire(); stop(); dpr = 1; fire();
+        return [got, ls.map((m) => m.q), ls.map((m) => m.l.length)]; })()""")
+    assert r[0] == [2, 1.5]
+    assert r[1] == ['(resolution: 1dppx)', '(resolution: 2dppx)', '(resolution: 1.5dppx)'] and r[2] == [0, 0, 0]

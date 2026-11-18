@@ -28,10 +28,19 @@
 //     control's id is 'wb-' + id; ids are unique across the menu. get(section) has the rows' values (a hidden row keeps its
 //     value), set / reset / the listeners / the store treat them as the kit's own; a button keeps no value.
 //
+//   1.5 (kit 1.0.91, the user 2026-11-18: buttons under the slider, an automatic zoom): with spec.zoom = 'snap' the zoom row
+//     gets buttons (.zoom-buttons): 'auto' (zoom 0 - the largest exact zoom that fits, following the window) and the exact
+//     zooms from 1x up (zoomButtons: the whole and half ones when at least two are exact here, else every exact one; at most
+//     7, the whole ones first when there are more). The zoom a page gives no default for is 'auto'. A zoom the player has not
+//     chosen (slider, button, menu.set - stored as zoomOwn per mode; a store from 1.4 has none) follows the page's default,
+//     so a page that moves to 'auto' moves its old visitors too; "Default picture" makes it unchosen again. In 'auto' the
+//     slider stands on the largest step (the one auto uses) and shows "auto (3×)". The page calls menu.refreshZoom({ keep:
+//     true }) after a resize, a full screen change and a devicePixelRatio change (WBOBRAZ.watchDpr, wb-obraz 1.11).
+//
 // The file is wb-nastaveni.js (not wb-menu.js: that name is the games' own Workbench bar). Every value is kept per mode (original / enhanced). Test hooks (arek web test §6): window.wbMenuTest = menu.testHooks().
 'use strict';
 const WBNASTAVENI = (() => {
-    const VERSION = '1.4';
+    const VERSION = '1.5';
     const MODES = ['original', 'enhanced'];
     const ITEMS = {
         display: [
@@ -61,13 +70,13 @@ const WBNASTAVENI = (() => {
     const TEXTS = {
         en: { display: { _: 'Display', zoom: 'Zoom', crt: 'CRT', 'crt-detail': 'CRT detail', 'crt-shape': 'CRT shape', blur: 'Blur', brightness: 'Brightness',
                          contrast: 'Contrast', saturation: 'Saturation', red: 'Red', green: 'Green', blue: 'Blue', par: 'Pixel width', smooth: 'Smooth motion', defaults: 'Default picture for this mode',
-                         fit: 'fit', fine: 'fine', standard: 'standard', strong: 'strong', lines: 'lines', grid: 'grid' },
+                         fit: 'auto', fitTitle: 'the largest exact zoom that fits the window, follows it', fine: 'fine', standard: 'standard', strong: 'strong', lines: 'lines', grid: 'grid' },
               sound: { _: 'Sound', sound: 'Sound', volume: 'Volume', 'filter-fixed': 'Amiga 500 filter', 'filter-led': 'LED filter', 'filter-hp': 'High-pass',
                        stereo: 'Stereo width', defaults: 'Default sound for this mode', auto: 'as the game', on: 'on', off: 'off' },
               modes: { original: 'Original', enhanced: 'Enhanced' }, game: { changes: 'changes the game' } },
         cs: { display: { _: 'Obraz', zoom: 'Zvětšení', crt: 'CRT', 'crt-detail': 'Stupeň CRT', 'crt-shape': 'Tvar CRT', blur: 'Rozmazání', brightness: 'Jas',
                          contrast: 'Kontrast', saturation: 'Sytost', red: 'Červená', green: 'Zelená', blue: 'Modrá', par: 'Šířka bodu', smooth: 'Plynulé zobrazení', defaults: 'Výchozí obraz tohoto režimu',
-                         fit: 'do okna', fine: 'jemný', standard: 'střední', strong: 'silný', lines: 'řádky', grid: 'mřížka' },
+                         fit: 'auto', fitTitle: 'největší přesné zvětšení, které se vejde do okna; mění se s ním', fine: 'jemný', standard: 'střední', strong: 'silný', lines: 'řádky', grid: 'mřížka' },
               sound: { _: 'Zvuk', sound: 'Zvuk', volume: 'Hlasitost', 'filter-fixed': 'Filtr Amigy 500', 'filter-led': 'Filtr LED', 'filter-hp': 'Horní propust',
                        stereo: 'Šířka sterea', defaults: 'Výchozí zvuk tohoto režimu', auto: 'podle hry', on: 'zapnuto', off: 'vypnuto' },
               modes: { original: 'Originál', enhanced: 'Vylepšeno' }, game: { changes: 'mění hru' } },
@@ -99,7 +108,7 @@ const WBNASTAVENI = (() => {
         const out = {}, o = (over && over[section] && over[section][mode]) || {}, om = omitted(omit, section);
         for (const it of ITEMS[section]) {
             const d = it.def !== null && typeof it.def === 'object' ? it.def[mode] : it.def;
-            out[it.id] = om.has(it.id) && 'none' in it ? it.none : it.id in o ? coerce(it, o[it.id], snap) : d;   // 1.3: a row the page left out has no effect
+            out[it.id] = om.has(it.id) && 'none' in it ? it.none : it.id in o ? coerce(it, o[it.id], snap) : snap && it.id === 'zoom' ? 0 : d;   // 1.3: a row the page left out has no effect; 1.5: snap - auto
         }
         return out;
     }
@@ -107,6 +116,17 @@ const WBNASTAVENI = (() => {
      *  has no rows for them. A row left out is not built, takes no stored value and cannot be set; its value is the item's
      *  `none` (the filters: off) or, where an item has none, the default of the mode (the page's override wins). */
     function omitted(omit, section) { return new Set((omit && omit[section]) || []); }
+    /** 1.5: the exact zooms (values > 0) that get a button: from 1x up; the whole and half ones when at least two of them
+     *  are exact here (a monitor at 100 %: 1 2 3, a Retina: 1 1.5 2 2.5 3), else every exact one (Windows at 125 %:
+     *  1.6 2.4 3.2); more than 7 - the whole ones if at least two, then the 7 largest. */
+    function zoomButtons(values) {
+        const near = (v, k) => Math.abs(v * k - Math.round(v * k)) < 1e-3;
+        const big = (values || []).filter((v) => typeof v === 'number' && v >= 1 - 1e-3).sort((a, b) => a - b);
+        const half = big.filter((v) => near(v, 2));
+        let out = half.length >= 2 ? half : big;
+        if (out.length > 7) { const whole = out.filter((v) => near(v, 1)); if (whole.length >= 2) out = whole; }
+        return out.slice(-7);
+    }
     /** A value into the item's domain (range clamped and rounded to the step, options checked, booleans). With zoom
      *  snapping (snap = true) the zoom is any number 0..the largest option: the exact steps are the page's, snapZoom picks. */
     function coerce(it, v, snap) {
@@ -155,6 +175,11 @@ const WBNASTAVENI = (() => {
                 this.state[m] = { display: merge('display', m, stored, this.spec.defaults, snap, this.spec.omit), sound: merge('sound', m, stored, this.spec.defaults, false, this.spec.omit) };
                 for (const sec of this.sections) this.state[m][sec] = Object.assign(this.state[m][sec] || {}, this.rowValues(sec, m, stored && stored[m] && stored[m][sec]));
             }
+            this.zoomOwn = {};                                                         // 1.5: the player chose the zoom (per mode)
+            for (const m of MODES) {
+                this.zoomOwn[m] = !!(snap && stored && stored.zoomOwn && stored.zoomOwn[m]);
+                if (snap && !this.zoomOwn[m]) this.state[m].display.zoom = defaults('display', m, this.spec.defaults, true, this.spec.omit).zoom;
+            }
             this.shared = {};
             for (const sec of this.sections) this.shared[sec] = this.rowValues(sec, null, stored && stored.shared && stored.shared[sec]);
             if (stored && MODES.includes(stored.mode) && !this.spec.mode) this.mode = stored.mode;
@@ -166,7 +191,7 @@ const WBNASTAVENI = (() => {
             try { const raw = this.spec.store && localStorage.getItem(this.spec.store); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
         }
         save() {
-            try { if (this.spec.store) localStorage.setItem(this.spec.store, JSON.stringify(Object.assign({ mode: this.mode, version: VERSION, shared: this.shared }, this.state))); } catch (e) { /* private window, blocked storage */ }
+            try { if (this.spec.store) localStorage.setItem(this.spec.store, JSON.stringify(Object.assign({ mode: this.mode, version: VERSION, shared: this.shared, zoomOwn: this.zoomOwn }, this.state))); } catch (e) { /* private window, blocked storage */ }
         }
         /** 1.4: the values of a section's rows for a mode (mode null: the rows kept for both modes), stored values coerced
          *  over the defaults. */
@@ -195,7 +220,14 @@ const WBNASTAVENI = (() => {
             for (const section of ['display', 'sound']) {
                 const fs = d.createElement('fieldset'); fs.className = 'wb-nastaveni-' + section;
                 const lg = d.createElement('legend'); lg.textContent = this.texts[section]._; fs.appendChild(lg);
-                for (const it of ITEMS[section]) if (!omitted(this.spec.omit, section).has(it.id)) fs.appendChild(this.row(d, section, it));
+                for (const it of ITEMS[section]) if (!omitted(this.spec.omit, section).has(it.id)) {
+                    fs.appendChild(this.row(d, section, it));
+                    if (it.id === 'zoom' && this.spec.zoom === 'snap') {                // 1.5: the buttons under the slider
+                        const box = d.createElement('div'); box.className = 'zoom-buttons wb-nastaveni-zoom-buttons'; box.id = 'wb-zoom-buttons';
+                        box.setAttribute('role', 'group'); box.setAttribute('aria-label', this.texts.display.zoom);
+                        fs.appendChild(box); this.zoomBox = box;
+                    }
+                }
                 for (const r of this.rows) if (r.section === section) fs.appendChild(this.row(d, section, r));   // 1.4
                 const ex = d.createElement('div'); ex.className = 'wb-nastaveni-extras'; fs.appendChild(ex); this.extras[section] = ex;
                 const btn = d.createElement('button'); btn.type = 'button'; btn.id = 'wb-defaults-' + section; btn.className = 'wb-nastaveni-defaults';
@@ -258,6 +290,24 @@ const WBNASTAVENI = (() => {
             const t = this.texts[section][String(o)];
             return t || (typeof o === 'number' ? this.num(o) + '×' : String(o));
         }
+        /** 1.5: the buttons under the slider - built again when the exact zooms change, the one in use pressed. */
+        zoomButtonsFill(st, v) {
+            const box = this.zoomBox; if (!box) return;
+            const pick = zoomButtons(st.map((z) => z.value)), key = pick.join(' ');
+            if (box.dataset.steps !== key) {
+                const d = box.ownerDocument; box.textContent = '';
+                const add = (value, text, title) => {
+                    const b = d.createElement('button'); b.type = 'button'; b.dataset.zoom = String(value); b.textContent = text;
+                    if (title) b.title = title;
+                    b.addEventListener('click', () => this.set('display', 'zoom', value)); box.appendChild(b);
+                };
+                add(0, this.texts.display.fit, this.texts.display.fitTitle);
+                for (const z of pick) { const s = st.find((x) => Math.abs(x.value - z) < 1e-9); add(z, s ? s.label : this.num(z) + '×'); }
+                box.dataset.steps = key;
+            }
+            const near = v > 0 ? this.snapZoom(v) : 0;
+            for (const b of box.children) b.setAttribute('aria-pressed', Math.abs(Number(b.dataset.zoom) - near) < 1e-9 ? 'true' : 'false');
+        }
         /** The zooms this display shows exactly (spec.zoomSteps), as [{value, label}] sorted by value; [] without snapping. */
         zoomSteps() {
             if (this.spec.zoom !== 'snap' || typeof this.spec.zoomSteps !== 'function') return [];
@@ -294,8 +344,11 @@ const WBNASTAVENI = (() => {
                 if (c.ctl.dataset.snap) {
                     const st = this.zoomSteps(); c.ctl.max = Math.max(0, st.length - 1);
                     const near = v > 0 ? this.snapZoom(v) : v, k = st.findIndex((z) => Math.abs(z.value - near) < 1e-9);   // off-step: nearest, value unchanged
-                    c.ctl.value = String(k < 0 ? 0 : k);
-                    if (c.out) c.out.value = v > 0 ? (st[k] ? st[k].label : this.num(v) + '×') : this.texts.display.fit;
+                    const top = st.length - 1, kk = k >= 0 ? k : v > 0 ? 0 : top;      // 1.5: auto stands on the largest step (the one it uses)
+                    c.ctl.value = String(Math.max(0, kk));
+                    if (c.out) c.out.value = v > 0 ? (st[k] ? st[k].label : this.num(v) + '×')
+                        : this.texts.display.fit + (st[top] && st[top].value > 0 ? ' (' + st[top].label + ')' : '');
+                    this.zoomButtonsFill(st, v);
                     continue;
                 }
                 if (it.kind === 'check') c.ctl.checked = !!v; else c.ctl.value = String(v);
@@ -321,6 +374,7 @@ const WBNASTAVENI = (() => {
             }
             const it = (ITEMS[section] || []).find((x) => x.id === id); if (!it || omitted(this.spec.omit, section).has(id)) return;
             this.state[this.mode][section][id] = (id === 'zoom' && this.spec.zoom === 'snap') ? this.snapZoom(Number(value) || 0) : coerce(it, value);
+            if (id === 'zoom' && this.spec.zoom === 'snap') this.zoomOwn[this.mode] = true;   // 1.5: the player's choice
             this.refresh(); this.save(); this.emit(section, { cause: 'set', id });
         }
         reset(section) {
@@ -328,6 +382,7 @@ const WBNASTAVENI = (() => {
                 this.state[this.mode][sec] = Object.assign(KIT_SECTIONS.includes(sec) ? defaults(sec, this.mode, this.spec.defaults, sec === 'display' && this.spec.zoom === 'snap', this.spec.omit) : {},
                                                            this.rowValues(sec, this.mode, null));
                 this.shared[sec] = this.rowValues(sec, null, null);                    // 1.4: the rows kept for both modes too
+                if (sec === 'display') this.zoomOwn[this.mode] = false;                 // 1.5: the zoom follows the default again
             }
             this.refresh(); this.save(); this.emit(section || 'all', { cause: 'reset', section: section || 'all' });
         }
@@ -342,7 +397,7 @@ const WBNASTAVENI = (() => {
                      rows: () => this.rows.map((r) => 'wb-' + r.id), shown: () => this.rows.filter((r) => this.visible(r)).map((r) => 'wb-' + r.id) };
         }
     }
-    return { VERSION, MODES, ITEMS, TEXTS, defaults, coerce, merge, omitted, rowsOf, rowDefault, Menu, build: (host, spec) => new Menu(host, spec) };
+    return { VERSION, MODES, ITEMS, TEXTS, defaults, coerce, merge, omitted, zoomButtons, rowsOf, rowDefault, Menu, build: (host, spec) => new Menu(host, spec) };
 })();
 if (typeof globalThis !== 'undefined') { globalThis.WBNASTAVENI = WBNASTAVENI; if (!globalThis.WBMENU) globalThis.WBMENU = WBNASTAVENI; }   // WBMENU: the 0.6.0 name
 if (typeof module !== 'undefined') module.exports = WBNASTAVENI;
