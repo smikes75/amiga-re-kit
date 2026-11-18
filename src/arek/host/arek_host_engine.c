@@ -163,8 +163,18 @@ static void e_apply_keys(void) {
         int v = E_KQ[kr % E_KEYQ], c = v & 0x7f; __atomic_store_n(&E_KQ_R, kr + 1, __ATOMIC_SEQ_CST);
         H_CIAA_SDR = (uint8_t)~((c << 1) | ((v & 0x100) ? 0 : 1)); H_CIAA_ICR |= 0x08; h_cia_raise(0); }   /* 1.0.12: SP in ICR raises PORTS when the game enabled it (Turrican II KIT-GAPS 19) */
 }
+static volatile double E_GAIN[8][2];                     /* 1.0.93: engine_aud_gain - the page's mixer, taken at the next frame's start */
+static volatile int E_GAIN_PEND = 0;
+static volatile double E_MIX[HOST_AUD_GROUPS];               /* 1.0.93: engine_aud_mix - the groups' levels, taken at the next frame's start */
+static volatile uint64_t E_MIX_PEND = 0;
+static uint64_t G_AUDH = 1469598103934665603ULL; static long G_AUDS = 0; static int G_AUDHASH = 0;   /* 1.0.93: --audhash */
+static FILE *G_AUDOUT = 0;                                /* 1.0.93: --audout FILE - every sample, stereo int16 little-endian */
 static volatile int E_CPU_PEND = 0, E_DAC_PEND = 0, E_PIC_PEND = 0;   /* E_DAC_PEND: 1 = the Amiga's converter, 2 = the monitor; E_PIC_PEND: 1 = picture on, 2 = off */
 static void e_frame_start(void) { e_apply_keys(); if (E_CPU_PEND) { H_CPU_NUM = E_CPU_PEND; E_CPU_PEND = 0; }
+    { int pend = __atomic_exchange_n(&E_GAIN_PEND, 0, __ATOMIC_SEQ_CST);   /* 1.0.93: the gains ramp across this frame */
+      for (int c = 0; c < 8; c++) if (pend & (1 << c)) ara_gain_to(c, E_GAIN[c][0], E_GAIN[c][1]); }
+    { uint64_t pend = __atomic_exchange_n(&E_MIX_PEND, 0, __ATOMIC_SEQ_CST);   /* 1.0.93: the mixer's groups */
+      for (int g = 0; g < HOST_AUD_GROUPS; g++) if (pend & (1ULL << g)) host_aud_mix(g, E_MIX[g]); }
     if (E_PIC_PEND) { ARD_PICTURE = E_PIC_PEND == 1; E_PIC_PEND = 0; } }   /* 1.0.86: a whole frame with or without its picture */
 /* the frame is drawn (ARD_PIX): its screenshot, its samples into the ring, its record; the page may now read them */
 static void e_frame_done(void) {
@@ -174,6 +184,8 @@ static void e_frame_done(void) {
     ara_until(H_PAULA.frame_base + (double)H_LINES * HOST_HPOS);
     f->frame = H_FRAME0 + H_FRAME; f->led = H_LED_OFF < 0 ? -1 : !H_LED_OFF; f->aud0 = G_AW; f->naud = ARA_N;
     for (int i = 0; i < ARA_N; i++) { int w = (G_AW + i) % G_AUDN; G_AUD[2 * w] = ARA_BUF[2 * i]; G_AUD[2 * w + 1] = ARA_BUF[2 * i + 1]; }
+    if (G_AUDOUT && ARA_N) fwrite(ARA_BUF, 4, (size_t)ARA_N, G_AUDOUT);
+    if (G_AUDHASH) for (int i = 0; i < 2 * ARA_N; i++) { uint16_t v = (uint16_t)ARA_BUF[i]; G_AUDH = (G_AUDH ^ (v & 0xff)) * 1099511628211ULL; G_AUDH = (G_AUDH ^ (v >> 8)) * 1099511628211ULL; G_AUDS++; }
     G_AW = (G_AW + ARA_N) % G_AUDN; __atomic_store_n(&G_AWT, G_AWT + ARA_N, __ATOMIC_SEQ_CST); ARA_N = 0;
     if (G_HASHON) g_hash_now();
 #ifdef ENGINE_FRAME_RECORD
@@ -317,6 +329,26 @@ API void engine_dac(int on) { E_DAC_PEND = on ? 1 : 2; }
  * Copper, the DMA slots, the sprite lines and the scene hooks run on - for a page that draws from the game's state; 1 = the picture
  * again from the next whole frame; -1 = ask. Returns the picture's state now (a pending change counts from the next frame). */
 API int engine_picture(int on) { if (on >= 0) E_PIC_PEND = on ? 1 : 2; return ARD_PICTURE; }
+/* 1.0.93 (SWIV, the user 2026-11-18: a sound mixer): channel ch's place in the stereo picture - 0-3 Paula, 4-7 the host's voices
+ * (arek_host.h host_voice_*): left and right gain (the Amiga's wiring = 1/0 or 0/1; 0 silences, up to 2 = +6 dB). Taken at the
+ * next frame's start and ramped linearly across that frame (no click); a gain above 1 or a sounding voice puts the
+ * compressor-limiter in (arek_audio.h) - without them the output is bit for bit the plain mix. Call it at most once a
+ * frame per channel. engine_aud_limit_min(): the lowest gain the limiter applied since the start (1 = never). */
+API void engine_aud_gain(int ch, double l, double r) {
+    ch &= 7; E_GAIN[ch][0] = l < 0 ? 0 : l > 4 ? 4 : l; E_GAIN[ch][1] = r < 0 ? 0 : r > 4 ? 4 : r;
+    __atomic_or_fetch(&E_GAIN_PEND, 1 << ch, __ATOMIC_SEQ_CST);
+}
+API double engine_aud_limit_min(void) { return ARA_LIMIT_MIN; }
+/* 1.0.93: the level of the game's sound kind `group` (0-63, arek_host.h host_aud_tag: the game's hook tags each sound at
+ * its start) - 0 silences, 1 as the game, up to 4; taken at the next frame's start, also for the sounds of it playing now.
+ * A level above 1 puts the limiter in. engine_aud_counts(): int32[64][3] - per group the sounds played on Paula, on the host's
+ * voices, and dropped (counters since the start; the page lights a group when its counts move). */
+API void engine_aud_mix(int group, double level) {
+    if (group < 0 || group >= HOST_AUD_GROUPS) return;
+    E_MIX[group] = level < 0 ? 0 : level > 4 ? 4 : level;
+    __atomic_or_fetch(&E_MIX_PEND, 1ULL << group, __ATOMIC_SEQ_CST);
+}
+API int32_t *engine_aud_counts(void) { return &H_AUDCOUNT[0][0]; }
 API int engine_rgb_w(void) { return ARD_SHOT_W; }
 API int engine_rgb_h(void) { return ARD_SHOT_H; }
 API uint16_t *engine_pix(void) { return &ARD_PIX[0][0]; }   /* 12-bit colours, ARD_LINES x ARD_WIDTH */
@@ -378,6 +410,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--dump") && i + 1 < argc) dump = argv[++i];
         else if (!strcmp(argv[i], "--no-picture")) ARD_PICTURE = 0;   /* 1.0.86: engine_picture(0) from the first frame (the hash: chip RAM only) */
+        else if (!strcmp(argv[i], "--audhash")) G_AUDHASH = 1;
+        else if (!strcmp(argv[i], "--audout") && i + 1 < argc) { G_AUDOUT = fopen(argv[++i], "wb"); if (!G_AUDOUT) { fprintf(stderr, "--audout %s\n", argv[i]); return 2; } }   /* 1.0.93: a hash of every output sample (the sound bit for bit) */
     }
 #ifdef ENGINE_THREAD
     if (engine_run()) { fprintf(stderr, "engine_run failed\n"); return 2; }
@@ -397,6 +431,8 @@ int main(int argc, char **argv) {
 #endif
     if (G_ERR) fprintf(stderr, "unknown routine %06x\n", G_ERR);
     printf("frames %d frame %ld hash %s\n", G_DONE, G_DONE ? G_FR[(G_DONE - 1) % G_NFR].frame : -1L, engine_hash_hex());
+    if (G_AUDHASH) printf("audio %ld samples hash %016llx limit %.4f\n", G_AUDS, (unsigned long long)G_AUDH, ARA_LIMIT_MIN);
+    if (G_AUDOUT) fclose(G_AUDOUT);
     if (shot) { FILE *f = fopen(shot, "wb"); if (f) { fwrite(ARD_RGB, 1, sizeof ARD_RGB, f); fclose(f); } }
     if (dump) { FILE *f = fopen(dump, "wb"); if (f) { fwrite(MEM, 1, MEMSZ, f); fclose(f); } }
     return G_ERR ? 3 : 0;

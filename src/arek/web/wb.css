@@ -50,3 +50,14 @@ input[type=checkbox]{accent-color:var(--wb-blue)}.wbnote{display:block;margin:4p
 .wbpanel .wb-nastaveni-defaults{display:block;width:100%;margin-top:4px;padding:2px 14px;border:0;background:none;color:inherit;font:inherit;text-align:left}
 .wbpanel .wb-nastaveni-defaults:hover,.wbpanel .wb-nastaveni-defaults:focus-visible{background:var(--wb-blue);color:var(--wb-white)}
 .wb-nastaveni-extras{border-top:2px dotted var(--wb-blue);margin:5px 8px 0;padding-top:4px}
+/* wb-mixer.js 1.0 (kit 1.0.93): the sound mixer window - fixed at the top right, not modal (the game plays on, you hear the change) */
+.wb-mixer{position:fixed;z-index:25;right:8px;top:calc(var(--bar-height) + 8px);width:420px;max-width:calc(100vw - 16px);max-height:calc(100dvh - var(--bar-height) - 16px);overflow:auto;text-align:left;font-size:13px}
+.wb-mixer-row{display:flex;align-items:center;gap:8px;padding:1px 14px}.wb-mixer-row:hover{background:#dde8f4}
+.wb-mixer-light{width:10px;height:10px;flex:none;border:1px solid var(--wb-blue);border-radius:50%;background:var(--wb-white);transition:background .3s}.wb-mixer-light.none{visibility:hidden}
+.wb-mixer-light[data-light]{transition:none}.wb-mixer-light[data-light=played]{background:#22aa22}.wb-mixer-light[data-light=extra]{background:var(--wb-orange)}.wb-mixer-light[data-light=silenced]{background:#dd2222}
+.wb-mixer-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-mixer-row input[type=range]{flex:0 1 130px;width:130px;min-width:60px;accent-color:var(--wb-blue)}
+.wb-mixer-value{min-width:3.4em;text-align:right;font-variant-numeric:tabular-nums}.wb-mixer-row.changed .wb-mixer-value{color:#c05a00}
+.wb-mixer[data-off] .wb-mixer-rows{opacity:.55}.wb-mixer hr{border:0;border-top:2px dotted var(--wb-blue);margin:4px 8px}
+.wb-mixer-buttons{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 14px}.wb-mixer-buttons button{padding:0 6px}.wb-mixer-msg{font-size:12px;overflow-wrap:anywhere}
+@media(max-width:480px){.wb-mixer{right:4px;left:4px;width:auto;max-width:none}.wb-mixer-row{padding:1px 8px}.wb-mixer-row input[type=range]{flex-basis:90px;width:90px}}

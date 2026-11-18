@@ -109,6 +109,22 @@ static void (*h_wr_cb)(uint32_t off, uint32_t v) = 0;
 static void (*h_pc_cb)(M68 *m, uint32_t pc) = 0;
 static void (*h_sample_cb)(int ch, double t, int value) = 0;
 static ArekPaula H_PAULA;
+/* 1.0.93 (SWIV, the user 2026-11-18): the host's voices - a second Paula of four channels that only sounds. A game's hook
+ * plays a sound the machine would drop (SWIV's allocator rejects a request, or cuts one off) on it: host_voice_reg(v, reg,
+ * value) writes AUDxLCH (0) / LCL (2) / LEN (4) / PER (6) / VOL (8) / DAT (0xA) of voice v 0-3 at the instruction's time,
+ * host_voice_dma(v, on) starts / stops its DMA, host_voice_side(v, l, r) places it (default: 0 and 3 left, 1 and 2 right),
+ * host_voice_busy(v) says whether it still plays. The same state machine as Paula's (arek_bus_paula.h): it reads the samples
+ * from chip RAM, but its slots go into a map of its own (the machine's DMA, the blitter, the CPU never see them) and it
+ * raises no interrupt - the machine's state is the same with the voices or without them. Mixed as channels 4-7
+ * (arek_audio.h: the limiter while one sounds). A voice in DMA mode loops its block until host_voice_dma(v, 0). */
+static ArekPaula H_VOICES;
+static ArekBus H_VBUS;
+static uint8_t H_VOWN[HOST_MAXLINES * HOST_HPOS];
+/* 1.0.93: the mixer's sound kinds (host_aud_tag below) */
+#define HOST_AUD_GROUPS 64
+static double H_MIXLVL[HOST_AUD_GROUPS]; static uint8_t H_MIXSET[HOST_AUD_GROUPS];   /* a group never set has level 1 */
+static int H_CHGRP[8];                                           /* channel -> group + 1 (0 = none) */
+static int32_t H_AUDCOUNT[HOST_AUD_GROUPS][3];                   /* played / extra / dropped */
 static char *H_SHOT_PREFIX = 0; static long H_SHOT_FIRST = 0, H_SHOT_LAST = -1;
 
 #ifndef FR_SET
@@ -256,6 +272,14 @@ static int h_cia_reg(uint32_t a, int *i) {           /* the CIA and register of 
     return -1;
 }
 static void h_sample(void *ctx, int ch, double t, int value) { (void)ctx; ara_event(ch, t, value); if (h_sample_cb) h_sample_cb(ch, t, value); }
+static void h_vsample(void *ctx, int ch, double t, int value) { (void)ctx; ara_event(4 + ch, t, value); }   /* 1.0.93: the host's voices */
+static void h_vstate(void *ctx, int ch, double t, int st) { (void)ctx; if (st == AREK_PAULA_000) ara_event(4 + ch, t, 0); }   /* a stopped voice is silent (Paula would hold its last byte: a DC offset in the mix) */
+static void h_voices_bus(void) {                                /* 1.0.93: the voices' own map, the machine's geometry and chip RAM */
+    const ArekBus *b = arek_glue_bus();
+    H_VBUS.hpos = b->hpos; H_VBUS.lines = b->lines; H_VBUS.maxlines = b->maxlines; H_VBUS.own = H_VOWN;
+    H_VBUS.rd16 = b->rd16; H_VBUS.ctx = b->ctx; H_VBUS.chipmask = b->chipmask;
+    memset(H_VOWN, 0, sizeof H_VOWN);
+}
 static void h_audio_irq(void *ctx, int ch, double t) { (void)ctx; (void)t; H_INTREQ |= (uint16_t)(0x80 << ch); }   /* AUDx: level 4 (HOST_L4) */
 
 /* 1.0.64 (SWIV: a wave table the game rewrites while a channel loops over it): Paula's events were run at instruction
@@ -299,7 +323,37 @@ static void host_init(double t0) {
     H_PAULA.irq_cb = h_audio_irq;
     AREK_GLUE_ACCESS_CB = H_CIA_SYNC ? h_access_cb : 0;
     arek_paula_frame(&H_PAULA, (double)H_FRAME0 * H_LINES * HOST_HPOS);
+    memset(&H_VBUS, 0, sizeof H_VBUS); h_voices_bus();             /* 1.0.93: the host's voices start silent */
+    arek_paula_init(&H_VOICES, &H_VBUS, h_vsample, 0);
+    H_VOICES.state_cb = h_vstate;
+    arek_paula_frame(&H_VOICES, H_PAULA.frame_base);
     ara_reset();
+    for (int c = 0; c < 8; c++) { H_CHGRP[c] = 0; ARA_LVL[c] = 1; }   /* 1.0.93: no sound tagged yet (the groups' levels stay: the page's) */
+}
+/* 1.0.93: the host's voices (see H_VOICES) */
+static void host_voice_reg(int v, int reg, uint16_t value) { arek_paula_write(&H_VOICES, h_abs(), 0xa0 + 16u * (uint32_t)(v & 3) + (uint32_t)(reg & 0xe), value); }
+static void host_voice_dma(int v, int on) { arek_paula_write(&H_VOICES, h_abs(), 0x096, (uint16_t)((on ? 0x8000 : 0) | (1 << (v & 3)))); }
+static void host_voice_side(int v, double l, double r) { ara_gain(4 + (v & 3), l, r); }
+static int host_voice_busy(int v) { const ArekPaulaChan *c = &H_VOICES.ch[v & 3]; return c->on || c->st != AREK_PAULA_000; }
+/* 1.0.93: the mixer's sound kinds. A game's hook names the kind (group 0-63, the game's own numbering - SWIV: the
+ * groups of its mixer window; it may give its extra voices groups of their own so the page can set them apart) of the sound
+ * that starts on channel ch (0-3 Paula, 4-7 the host's voices) at the start: host_aud_tag(ch, group) - from that instant
+ * the channel plays at the group's level (arek_audio.h ara_level_at, in time with the samples; group -1 = none, level 1).
+ * host_aud_dropped(group): a sound of that kind the game did not play. host_aud_mix(group, level) (the page through
+ * engine_aud_mix, once a frame at most) sets a group's level, also for the sounds of it playing now. H_AUDCOUNT[group]
+ * counts played (0-3) / extra voice (4-7) / dropped - the page's lights (engine_aud_counts). Nothing here touches the
+ * machine; with every level at 1 the mix is the plain one. */
+static double h_mixlvl(int g) { return g >= 0 && g < HOST_AUD_GROUPS && H_MIXSET[g] ? H_MIXLVL[g] : 1.0; }
+static void host_aud_tag(int ch, int group) {
+    ch &= 7; int g = group >= 0 && group < HOST_AUD_GROUPS ? group : -1;
+    H_CHGRP[ch] = g + 1; ara_level_at(ch, h_abs(), h_mixlvl(g));
+    if (g >= 0) H_AUDCOUNT[g][ch < 4 ? 0 : 1]++;
+}
+static void host_aud_dropped(int group) { if (group >= 0 && group < HOST_AUD_GROUPS) H_AUDCOUNT[group][2]++; }
+static void host_aud_mix(int group, double level) {
+    if (group < 0 || group >= HOST_AUD_GROUPS) return;
+    H_MIXLVL[group] = level < 0 ? 0 : level > 4 ? 4 : level; H_MIXSET[group] = 1;
+    for (int c = 0; c < 8; c++) if (H_CHGRP[c] == group + 1) ara_level_at(c, h_abs(), H_MIXLVL[group]);
 }
 #define ARD_DMACON_KNOWN 1               /* 1.0.40: the host's DMACON is the machine's - 0 is all DMA off, not "unknown" */
 #include "arek_display.h"
@@ -505,6 +559,7 @@ static void host_events(void) {
           while (H_COP_IDX < cb->cop_irq_n) { h_irq_mark(); H_INTREQ |= cb->cop_irq[H_COP_IDX].bits; H_EVT_T = H_PAULA.frame_base + cb->cop_irq[H_COP_IDX].t + H_COP_LAT; h_irq_mark(); H_COP_IDX++; } }
         if (H_OWN_DUMP) { fwrite(&H_FRAME, sizeof H_FRAME, 1, H_OWN_DUMP); fwrite(OWN, 1, (size_t)H_LINES * HOST_HPOS, H_OWN_DUMP); }
         arek_paula_run(&H_PAULA, H_PAULA.frame_base + len - 1e-9);
+        arek_paula_run(&H_VOICES, H_PAULA.frame_base + len - 1e-9);   /* 1.0.93 */
         ard_until(ARD_LINES);
         { long fr = H_FRAME0 + H_FRAME;
           if (H_SHOT_PREFIX && fr >= H_SHOT_FIRST && fr <= H_SHOT_LAST) {
@@ -519,6 +574,7 @@ static void host_events(void) {
         ARD_LAST = H_LINES - 1;
         arek_glue_frame(H_LINES);
         arek_paula_frame(&H_PAULA, H_PAULA.frame_base + len);
+        h_voices_bus(); arek_paula_frame(&H_VOICES, H_PAULA.frame_base);   /* 1.0.93 */
         arek_glue_bus()->ahead_to = 0; arek_glue_frame_carry();     /* 1.0.56: an access that waited for a blit across the frame's end, after the audio slots are planned */
         { ArekBus *bb = arek_glue_bus(); if (bb->poll_carried) { H_POLL_T = H_PAULA.frame_base + bb->pat_poll; bb->poll_carried = 0; } }   /* 1.0.61: the carried cycle sampled the interrupt level in the new frame */
         H_FRAME++; H_COP_DONE = 0; H_COP_IDX = 0; H_NEXTMAP = 0;

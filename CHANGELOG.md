@@ -3,6 +3,28 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.93 (2026-11-18)
+
+- Enhanced sound for SWIV (the user: SWIV-projekt's "pretty good Enhanced sound - playing the channels that would be dropped
+  - and the audio mixer"): the host's voices, the sound kinds and `wb-mixer.js` 1.0. `arek_host.h`: four output-only
+  voices (`host_voice_reg` / `host_voice_dma` / `host_voice_side` / `host_voice_busy`) - a second Paula state machine
+  reading chip RAM with a slot map of its own, no DMA slot, no interrupt, no write; a stopped voice is silent (no DC
+  offset). `arek_audio.h`: eight channels (4-7 the voices), a stereo-linked compressor-limiter (-6 dBFS, ratio 8, knee
+  6 dB, attack 3 ms, release 150 ms - SWIV-projekt's values) only while a voice sounds or a gain or a level is above 1,
+  letting go by its release; a mixer level per channel as an event in time with the samples (`ara_level_at`). The sound
+  kinds: a game's hook tags the sound starting on a channel (`host_aud_tag(ch, kind)`, from that instant at the kind's
+  level - an explosion after a shot on the same channel is never a frame at the shot's level) and counts the ones it
+  drops (`host_aud_dropped`); the page sets a kind's level with `engine_aud_mix(kind, level)` (also for the sounds
+  playing now) and reads `engine_aud_counts()`; `engine_aud_gain(ch, l, r)` places a channel (ramped over a frame),
+  `engine_aud_limit_min()`; the native engine's `--audhash` / `--audout FILE`. `wb-mixer.js` 1.0: the page's groups
+  (kind i on Paula, 32 + i on an extra voice), master and extra voices, 0-200 %, lights (played / extra voice / silenced),
+  defaults / all 100 % / copy values, a double-click gives a row its default, only the player's own values are stored;
+  Original all 100 %. `wb-zvuk-worklet.js` 1.1 (SWIV KIT-GAP 21, a click at the end of the game): a dropout holds the
+  last level and fades it over 100 ms instead of jumping to zero, the sound comes back with a 5 ms crossfade. Measured on
+  SWIV's native engine (build of its game code, scratch, deleted): 9000 frames from its state - the state hash
+  1d9c717cb9d076bc and the audio hash 244549409091af6e (17 305 628 samples) the same as with kit 1.0.92, the limiter
+  never in; the voices leave the machine's hash and chip RAM alone, tags at level 1 keep the mix bit for bit (synthetic)
+
 ## 1.0.92 (2026-11-18)
 
 - `wb-obraz.js` 1.12 + `wb-nastaveni.js` 1.6: a stepless zoom (the user: "and how about a smooth zoom"). Plain stretching

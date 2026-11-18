@@ -70,3 +70,24 @@ def test_page_side_loads():
     code = "const O = require(%s); console.log(JSON.stringify([O.VERSION, O.PRESETS.shared, typeof O.create]));" % json.dumps(str(WEB / 'wb-zvuk-out.js'))
     assert json.loads(subprocess.run([node, '-e', code], capture_output=True, text=True, check=True).stdout) == ['1.1', {'prefill': 20, 'target': 30, 'low': 15}, 'function']
     assert 'wb-zvuk-out.js' in web.FILES and 'wb-zvuk-worklet.js' in web.FILES
+
+
+def test_a_gap_holds_the_level_and_comes_back_without_a_step():
+    """1.1 (SWIV KIT-GAPS 21): Paula holds a level (SWIV's ending); a dropout used to jump to 0 and click. Now the last
+    level is held and fades slowly, and the sound comes back through a 5 ms crossfade: no sample-to-sample step above
+    0.01 across the gap and the return, the held level still near the old one 10 ms into the gap."""
+    r = js("""p.port.onmessage({ data: { prefill: 20, target: 30 } });
+        const seq = [];
+        p.port.onmessage({ data: frame(10000) }); p.port.onmessage({ data: frame(10000) });
+        let n = 0, wasPrimed = false;
+        while (n < 60) { p.process(null, out); seq.push(...out[0][0]); if (p.primed) wasPrimed = true; if (wasPrimed && !p.primed) break; n++; }
+        const gapAt = seq.length;
+        for (let k = 0; k < 8; k++) { p.process(null, out); seq.push(...out[0][0]); }       // 8 blocks (21 ms) without samples
+        p.port.onmessage({ data: frame(8000) }); p.port.onmessage({ data: frame(8000) });
+        for (let k = 0; k < 12; k++) { p.process(null, out); seq.push(...out[0][0]); }
+        let step = 0; for (let i = 1; i < seq.length; i++) step = Math.max(step, Math.abs(seq[i] - seq[i - 1]));
+        console.log(JSON.stringify({ under: p.under, step, held: seq[gapAt + 480], end: seq[seq.length - 1], first: seq[0] }));""")
+    assert r['under'] == 1 and r['first'] > 0.3                                   # the start is not faded (as 1.0)
+    assert r['step'] < 0.01, r['step']                                           # no click: was 0.305 -> 0
+    assert 0.25 < r['held'] < 0.31                                               # ~10 ms into the gap: the level held (fading with 100 ms)
+    assert abs(r['end'] - 8000 / 32768) < 1e-4                                   # back to the stream exactly

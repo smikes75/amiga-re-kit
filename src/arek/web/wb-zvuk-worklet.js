@@ -1,4 +1,4 @@
-// wb-zvuk-worklet.js 1.0 - Paula's output into Web Audio (amiga-re-kit, docs/WB-PLYNULOST.md, module D): an
+// wb-zvuk-worklet.js 1.1 - Paula's output into Web Audio (amiga-re-kit, docs/WB-PLYNULOST.md, module D): an
 // AudioWorkletProcessor over a ring of stereo int16 at 48 kHz. Extracted from the Alien Breed II page (audio-worklet.js)
 // and Superfrog's. Only the source: the Amiga 500's filters, the stereo width and the volume follow it in the kit's
 // chain (wb-zvuk.js). Two modes:
@@ -12,15 +12,19 @@
 // 0.16 % more than 48 000/s); `prefill` before the first sample after a start or an underrun; running out counts as
 // a dropout (under) and primes again; a frame that would overflow is dropped (drop). The state goes to the page
 // every 250 ms: {fill: ms, under, drop, primed, shared}. Messages: 'flush', {prefill, target} (ms), {sab, ...}, a frame.
+// 1.1 (kit 1.0.93, SWIV KIT-GAPS 21): a gap no longer drops to 0 - Paula holds a level (SWIV's ending: RMS 0.118) and
+// every dropout clicked. The last output is held and fades with 100 ms (below the chain's high-pass: inaudible); after
+// the gap (or a flush) the sound comes back through a 5 ms crossfade from the held level. Playing on is unchanged.
 class WbPaula extends AudioWorkletProcessor {
   constructor() {
     super();
     this.n = 48000; this.ring = new Int16Array(this.n * 2); this.w = 0; this.rd = 0; this.primed = false;
     this.shared = null; this.prefill = 1920; this.target = 2400;
     this.under = 0; this.drop = 0; this.fillSum = 0; this.fillN = 0; this.last = 0;
+    this.hl = 0; this.hr = 0; this.xf = 1;                // 1.1: the held level, the crossfade back (1 = none)
     this.port.onmessage = (e) => {
       const d = e.data;
-      if (d === 'flush') { if (this.shared) this.rd = Atomics.load(this.shared.w, 0); else { this.w = 0; this.rd = 0; } this.primed = false; return; }
+      if (d === 'flush') { if (this.shared) this.rd = Atomics.load(this.shared.w, 0); else { this.w = 0; this.rd = 0; } this.primed = false; this.xf = 0; return; }
       if (d && d.sab) {                                    // the engine's ring in shared memory
         this.shared = { ring: new Int16Array(d.sab, d.ring, d.n * 2), w: new Int32Array(d.sab, d.widx, 1), r: new Int32Array(d.sab, d.ridx, 1), n: d.n };
         this.rd = Atomics.load(this.shared.w, 0); this.primed = false; return;
@@ -43,12 +47,18 @@ class WbPaula extends AudioWorkletProcessor {
     if (fill > 2 * T + 960) rd = w - T;                    // the game far ahead (after a pause, a jump): keep the target
     if (!this.primed && fill >= this.prefill) this.primed = true;
     let gap = false;
+    const dec = Math.exp(-1 / (0.1 * sampleRate)), xin = 1 / (0.005 * sampleRate);
     for (let i = 0; i < L.length; i++) {
-      let l = 0, r = 0;
+      let l, r;
       if (this.primed && rd + 1 < w) {
         const k = Math.floor(rd), f = rd - k, o = (k % n) * 2, o2 = ((k + 1) % n) * 2;
         l = (ring[o] * (1 - f) + ring[o2] * f) / 32768; r = (ring[o + 1] * (1 - f) + ring[o2 + 1] * f) / 32768; rd += step;
-      } else if (this.primed) { gap = true; }
+        if (this.xf < 1) { this.xf = Math.min(1, this.xf + xin); l = this.hl + (l - this.hl) * this.xf; r = this.hr + (r - this.hr) * this.xf; }
+        this.hl = l; this.hr = r;
+      } else {                                             // 1.1: no sample - the last level held, fading
+        if (this.primed) gap = true;
+        this.hl *= dec; this.hr *= dec; l = this.hl; r = this.hr; this.xf = 0;
+      }
       L[i] = l; R[i] = r;
     }
     if (gap) { this.under++; this.primed = false; }        // ran dry: a dropout, prime again
