@@ -3,6 +3,24 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.90 (2026-11-18)
+
+- `wb-pad.js` 1.1: the automatic controller choice (the user: "the automatic detection does not work well"). 'auto' took
+  the first device the browser lists - often not the controller (a receiver, a headset, a virtual device) or the same
+  controller listed twice. Now 'auto' gives player 1 the device used first (a button, the stick or the hat off where it
+  rests - centred on a standard mapping, as first seen on any other device) and player 2 the next one used, in the poll it
+  is first used, so no input is lost; a device nobody used is never given, nor the twin of another player's device
+  (first used in the same poll, until the two differ - used or not, the directions - for 10 polls in a row; among twins
+  the standard-mapped one). `status()` reads the devices itself, names each player's slot as the menu does ("Controller
+  2") and the devices nobody uses, and asks for a button while no player has one. `create({ reserve: [1] })` +
+  `button(i, n)`: a page's own buttons, no longer auto fire (Turrican II: B = Space); a chosen fire button does nothing
+  else (not the d-pad, not the up button). Measured on SWIV's test build cdb0ab7 (read-only, its own two-player wiring,
+  only the module swapped and fake devices in the browser), stick right for 0.7 s: one controller - 1.0 and 1.1 alike,
+  the helicopter +21; a receiver listed before the controller - 1.0 gave player 1 the receiver (left held, the
+  helicopter did not move) and player 2 the controller (the jeep drove right), 1.1 player 1 the controller (+27) and
+  player 2 nothing; one controller listed twice - 1.0 drove the jeep with the helicopter's stick, 1.1 not. Node test
+  with fake devices (README, WB-RECIPE.md)
+
 ## 1.0.89 (2026-11-17)
 
 - `wb-pad.js` 1.0: gamepads and joysticks for every page - the games' own pad.js (Alien Breed II: two players, Superfrog:
