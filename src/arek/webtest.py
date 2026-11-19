@@ -21,6 +21,7 @@ and every game column exactly S device columns; 1.4: the same layouts with a pix
 the rows and cols patterns at par 1 must be identical pixel by pixel in the content.
 Tolerances: Chromium keeps layout in 1/64 CSS px, so positions within 0.05 and sizes within
 0.025 device pixels.
+1.6.1 (kit 1.0.98, Turrican KIT-GAP 39): a fractional CRT period or content size is a §5.4 / §5.4b failure that names it.
 1.6 (kit 1.0.95, SWIV KIT-GAP 23): every set() pins ``crtShape: 'lines'`` and ``stepless: false`` - §5 measures the
 whole-scale path with the line CRT, so a page whose defaults are the grid or the stepless zoom (SWIV's Enhanced) is
 measured the same; the grid and the stepless zoom have their own tests in the kit (wb-obraz 1.12).
@@ -153,6 +154,20 @@ EXTRA_JS = """(() => {
 })()"""                                      # the game canvases beside the CRT layer: one (the presenter's); an overlay canvas opts out with data-wb-overlay
 
 
+def _whole_period(info, tag, fails):
+    """1.6.1 (kit 1.0.98, Turrican KIT-GAP 39): §5.4 measures whole device pixels - a fractional CRT period or content size
+    (a page that drew the stepless zoom although set() asked stepless: false) is a failure that says so, not a TypeError."""
+    vals = [info.get('P')] + list(info.get('content', info.get('backing')) or [])
+    if all(isinstance(v, (int, float)) and float(v).is_integer() for v in vals):
+        info['P'] = int(info['P'])
+        if 'content' in info:
+            info['content'] = [int(v) for v in info['content']]
+        return True
+    fails.append('%s: the CRT period P %s or the content %s is not whole device pixels - does the page honour set({stepless: false})?'
+                 % (tag, info.get('P'), info.get('content', info.get('backing'))))
+    return False
+
+
 def run(url, quick=False, log=print):
     """Run the checks; returns {'checks': n, 'fails': [...]} (raises ImportError without playwright)."""
     from playwright.sync_api import sync_playwright
@@ -218,6 +233,8 @@ def run(url, quick=False, log=print):
                 checks += 1
                 if not _inside(info, sw, sh, '§5.4 ' + tag, fails):
                     continue
+                if not _whole_period(info, '§5.4 ' + tag, fails):  # 1.6.1 (Turrican KIT-GAP 39): a failure, not a TypeError
+                    continue
                 x0, y0 = round(info['origin'][0]), round(info['origin'][1])
                 bw, bh = info.get('content', info['backing'])
                 im = _crop(rows, x0, y0, bw, bh)
@@ -237,7 +254,7 @@ def run(url, quick=False, log=print):
                 page.wait_for_timeout(450)
                 sw, sh, rows = png_rgb(page.screenshot())
                 checks += 1
-                if not _inside(info, sw, sh, '§5.4b ' + tag, fails):
+                if not _inside(info, sw, sh, '§5.4b ' + tag, fails) or not _whole_period(info, '§5.4b ' + tag, fails):
                     continue
                 x0, y0 = round(info['origin'][0]), round(info['origin'][1])
                 bw, bh = info.get('content', info['backing'])

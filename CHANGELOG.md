@@ -3,6 +3,25 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.98 (2026-11-19)
+
+- `arek_bus_paula.h`: a DMACON write takes effect before the channels' events of its own colour clock (SWIV KIT-GAP 25).
+  vAmiga runs a register change first in a cycle (the REG slot); the model ran Paula up to and including the write's
+  clock, so a period's end on the very clock a channel's DMA went off still went 011 -> 010 and raised a DMA request -
+  vAmiga goes 011 -> 000 (AUDxIP set: no byte, no request, no interrupt). SWIV, frame 26 968: DMACON $0001 at 220:162,
+  effective 220:164 = AUD0's period end (AUD0PER 375); the model's request took slot 221:13, a `bsr.s` the CPU made there
+  ended 1 CCK late, the VBL of the next frame came an instruction earlier and the game's seed ($4380, VHPOSR in its CIA-B
+  sound interrupt) differed - measured by SWIV down to the slot (the original's bus log and audio log against the
+  host's). Before the fix a rule "DMA off = slot free" was tried and dropped: `arek selftest audio` fell to 1007 slots
+  apart; vAmiga serves a pending audxDR in its slot whatever DMACON says (SequencerDas.cpp). Measured: the audio
+  self-test unchanged (37376 slots, every sample, 53541 / 53542 / 53482); SWIV's native engine (scratch build of its
+  game code, deleted) 9000 frames from the TOSEC start, keys alt: the state de9a9a40896e2f59 as before, the audio hash
+  0b8c88c608a54ba3 -> 68ad4422afc1e922 - 32 sample values around frame 2 902, one channel ending on such a tie without
+  its next byte; a synthetic test of the tie (the clock itself and one clock later)
+- `arek web test` 1.6.1 (Turrican KIT-GAP 39): a fractional CRT period or content size (a page that drew the stepless
+  zoom although `set()` asked `stepless: false`) is a §5.4 / §5.4b failure that names the values, not a TypeError.
+  Measured on Turrican's test build d286455: 287 checks, 0 failures
+
 ## 1.0.97 (2026-11-19)
 
 - `wb-nastaveni.js` 1.7 + `wb.css` 1.1: compact menus (the user: "the menus smaller, more compact - setting Display covers

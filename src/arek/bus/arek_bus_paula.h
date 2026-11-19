@@ -190,7 +190,10 @@ static inline void arek_paula_run(ArekPaula *p, double t) {
 
 /* A write at absolute time t: off = $A0-$DE (AUDxLCH/LCL/LEN/PER/VOL/DAT), $96 (DMACON, audio bits 0-3) or $9C (INTREQ). */
 static inline void arek_paula_write(ArekPaula *p, double t, uint32_t off, uint16_t v) {
-    arek_paula_run(p, t);
+    /* 1.0.98 (SWIV KIT-GAP 25): a DMACON write takes effect before the channels' events of its own colour clock - vAmiga's
+     * register change (the REG slot) runs first in a cycle. A period's end on the very clock a channel's DMA goes off is
+     * then 011 -> 000 (no word, no request; vAmiga), not 011 -> 010 with a request whose slot the CPU then waited for */
+    arek_paula_run(p, off == 0x096 ? t - 1e-6 : t);
     if (off >= 0xa0 && off < 0xe0) {
         int ch = (int)((off - 0xa0) >> 4); ArekPaulaChan *c = &p->ch[ch];
         switch (off & 0xf) {

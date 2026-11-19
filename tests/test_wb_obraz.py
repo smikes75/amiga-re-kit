@@ -497,3 +497,14 @@ def test_webtest_pins_the_line_crt_and_the_whole_zoom():
     src = (Path(webtest.__file__)).read_text()
     calls = re.findall(r"wbObrazTest\.set\(m, \{([^}]*)\}\)", src)
     assert len(calls) == 3 and all('crtShape: "lines"' in c and 'stepless: false' in c for c in calls), calls
+
+
+def test_webtest_a_fractional_period_is_a_failure_not_a_crash():
+    """webtest 1.6.1 (kit 1.0.98, Turrican KIT-GAP 39): a page that answers set() with a fractional CRT period or content
+    size (it drew the stepless zoom) gets a §5.4 failure that names the values; whole values pass and become ints."""
+    fails = []
+    good = {'P': 3.0, 'content': [912.0, 768.0]}
+    assert webtest._whole_period(good, '§5.4 t', fails) and good['P'] == 3 and good['content'] == [912, 768] and not fails
+    assert not webtest._whole_period({'P': 2.61, 'content': [793.2, 768]}, '§5.4 t', fails)
+    assert len(fails) == 1 and 'P 2.61' in fails[0] and 'stepless: false' in fails[0]
+    assert not webtest._whole_period({'P': 3, 'backing': [912.5, 768]}, '§5.4b t', fails) and fails[1].startswith('§5.4b t')

@@ -864,3 +864,57 @@ def test_dmaconr_read_by_a_cycle_carried_across_the_frames_end(tmp_path):
     out = subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout.strip()
     f = out.replace('|', ' ').split()
     assert f[1] == '1' and f[3] == '1' and f[5] == '0' and f[10] == '0' and int(f[8]) > 227, out   # busy at the start; the carried read: not busy, as at its slot
+
+
+PAULA_TIE = r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "arek_bus.h"
+#include "arek_bus_paula.h"
+static uint8_t RAM[0x10000];
+static uint16_t rd16(void *c, uint32_t a) { (void)c; a &= 0xfffe; return (uint16_t)((RAM[a] << 8) | RAM[a + 1]); }
+static void sample(void *c, int ch, double t, int v) { (void)c; (void)ch; printf("s %.0f %d\n", t, v); }
+static void state(void *c, int ch, double t, int st) { (void)c; (void)ch; printf("st %.0f %d\n", t, st); }
+int main(int argc, char **argv) {
+    static uint8_t own[313 * 227]; static uint16_t regs[0x100];
+    ArekBus B; arek_bus_init(&B, 227, 313, 313, own, regs, rd16, 0);
+    ArekPaula P; arek_paula_init(&P, &B, sample, 0); P.state_cb = state;
+    for (int i = 0; i < 0x100; i++) RAM[0x1000 + i] = (uint8_t)(i * 7);
+    arek_bus_frame(&B, 313); arek_paula_frame(&P, 0);
+    arek_paula_write(&P, 0, 0xa0, 0); arek_paula_write(&P, 0, 0xa2, 0x1000); arek_paula_write(&P, 0, 0xa4, 0x40);
+    arek_paula_write(&P, 0, 0xa6, 375); arek_paula_write(&P, 0, 0xa8, 64);
+    arek_paula_write(&P, 2320, 0x96, 0x8001);
+    arek_paula_write(&P, 2400, 0x9c, 0x8080);                        /* AUD0IP set, the game never clears it (SWIV) */
+    double off = atof(argv[1]);
+    if (off > 0) arek_paula_write(&P, off, 0x96, 0x0001);           /* as the host does: the write runs Paula up to it */
+    arek_paula_run(&P, 60000);
+    long n = 0; for (long k = 0; k < 313L * 227; k++) if (own[k] == 4) n++;
+    printf("fetches %ld slots %ld\n", P.fetches, n);
+    return 0;
+}
+"""
+
+
+def test_paula_dmacon_off_on_the_clock_a_period_ends(tmp_path):
+    """1.0.98 (SWIV KIT-GAP 25): DMACON clearing a channel's DMA on the very colour clock its period ends (011 -> 010 due)
+    with AUDxIP set: vAmiga takes the register change first in the cycle - the channel goes 011 -> 000 with no byte and no
+    DMA request, so the next line's audio slot stays free (the model raised a request there and the CPU waited 1 CCK for
+    the slot: SWIV frame 26 968, AUD0PER 375). One clock later the period end comes first, as before."""
+    cc = bus.compiler()
+    if not cc:
+        pytest.skip('no C compiler')
+    (tmp_path / 't.c').write_text(PAULA_TIE)
+    subprocess.run([cc, '-O1', '-I', HERE, '-o', str(tmp_path / 't'), str(tmp_path / 't.c'), os.path.join(HERE, 'arek_bus.c'),
+                    os.path.join(HERE, 'arek_bus_vamiga.c'), '-lm'], check=True)
+    run = lambda off: subprocess.run([str(tmp_path / 't'), repr(off)], capture_output=True, text=True, check=True).stdout.splitlines()
+    free = run(0)
+    tie = next(float(l.split()[1]) for l in free if l.startswith('st ') and l.split()[2] == '2' and float(l.split()[1]) > 4000)
+    out = run(tie)
+    st = [(float(l.split()[1]), int(l.split()[2])) for l in out if l.startswith('st ')]
+    assert (tie, 0) in st and (tie, 2) not in st                                  # 011 -> 000 on the tie, not 011 -> 010
+    assert not [l for l in out if l.startswith('s ') and float(l.split()[1]) >= tie]   # no byte from the tie on
+    later = run(tie + 1)
+    assert (tie, 2) in [(float(l.split()[1]), int(l.split()[2])) for l in later if l.startswith('st ')]   # a clock later: the period first
+    f_tie, f_later = (int(o[-1].split()[1]) for o in (out, later))
+    assert f_later == f_tie + 1                                                   # the request raised at the period end is served then
