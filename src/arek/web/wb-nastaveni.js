@@ -41,11 +41,18 @@
 //     spec.zoomFit() (the zoom that fills the window: limit * par * W / W0) in 0.01 steps and an exact zoom (zoomSteps)
 //     within 0.04 catches it; the buttons stay ('auto' then fills the window - WBOBRAZ.stepless). Turned off, the zoom goes
 //     back to the nearest exact step. The page draws with WBOBRAZ.stepless(zoom, ...) -> { S, shrink } while it is on.
+//   1.7 (kit 1.0.97, the user 2026-11-19: "the menus smaller, more compact - setting Display covers nearly the whole game, I
+//     do not see the changes at once"): the colour rows (brightness, contrast, saturation, red, green, blue) sit in one folded
+//     group 'Colours' (its summary says when one is not the default; spec.groups = false keeps them open as before); 'CRT
+//     detail' and 'CRT shape' show only while CRT is on; and while the player adjusts a row (drags a slider, changes a select,
+//     a check or a zoom button) the panel around it turns see-through except that row (class wb-peek on the panel, wb-peek-row
+//     on the row, for 0.9 s after the last change; spec.peek = false turns it off) - the game shows the change in full.
+//     wb.css 1.1 makes the panels narrow (at most 400 px) and the rows dense.
 //
 // The file is wb-nastaveni.js (not wb-menu.js: that name is the games' own Workbench bar). Every value is kept per mode (original / enhanced). Test hooks (arek web test §6): window.wbMenuTest = menu.testHooks().
 'use strict';
 const WBNASTAVENI = (() => {
-    const VERSION = '1.6';
+    const VERSION = '1.7';
     const MODES = ['original', 'enhanced'];
     const ITEMS = {
         display: [
@@ -76,18 +83,20 @@ const WBNASTAVENI = (() => {
     const TEXTS = {
         en: { display: { _: 'Display', zoom: 'Zoom', crt: 'CRT', 'crt-detail': 'CRT detail', 'crt-shape': 'CRT shape', blur: 'Blur', brightness: 'Brightness',
                          contrast: 'Contrast', saturation: 'Saturation', red: 'Red', green: 'Green', blue: 'Blue', par: 'Pixel width', smooth: 'Smooth motion', stepless: 'Stepless zoom', defaults: 'Default picture for this mode',
-                         fit: 'auto', fitTitle: 'the largest exact zoom that fits the window, follows it', fine: 'fine', standard: 'standard', strong: 'strong', lines: 'lines', grid: 'grid' },
+                         colours: 'Colours', changed: 'changed', fit: 'auto', fitTitle: 'the largest exact zoom that fits the window, follows it', fine: 'fine', standard: 'standard', strong: 'strong', lines: 'lines', grid: 'grid' },
               sound: { _: 'Sound', sound: 'Sound', volume: 'Volume', 'filter-fixed': 'Amiga 500 filter', 'filter-led': 'LED filter', 'filter-hp': 'High-pass',
                        stereo: 'Stereo width', defaults: 'Default sound for this mode', auto: 'as the game', on: 'on', off: 'off' },
               modes: { original: 'Original', enhanced: 'Enhanced' }, game: { changes: 'changes the game' } },
         cs: { display: { _: 'Obraz', zoom: 'Zvětšení', crt: 'CRT', 'crt-detail': 'Stupeň CRT', 'crt-shape': 'Tvar CRT', blur: 'Rozmazání', brightness: 'Jas',
                          contrast: 'Kontrast', saturation: 'Sytost', red: 'Červená', green: 'Zelená', blue: 'Modrá', par: 'Šířka bodu', smooth: 'Plynulé zobrazení', stepless: 'Plynulé zvětšení', defaults: 'Výchozí obraz tohoto režimu',
-                         fit: 'auto', fitTitle: 'největší přesné zvětšení, které se vejde do okna; mění se s ním', fine: 'jemný', standard: 'střední', strong: 'silný', lines: 'řádky', grid: 'mřížka' },
+                         colours: 'Barvy', changed: 'změněno', fit: 'auto', fitTitle: 'největší přesné zvětšení, které se vejde do okna; mění se s ním', fine: 'jemný', standard: 'střední', strong: 'silný', lines: 'řádky', grid: 'mřížka' },
               sound: { _: 'Zvuk', sound: 'Zvuk', volume: 'Hlasitost', 'filter-fixed': 'Filtr Amigy 500', 'filter-led': 'Filtr LED', 'filter-hp': 'Horní propust',
                        stereo: 'Šířka sterea', defaults: 'Výchozí zvuk tohoto režimu', auto: 'podle hry', on: 'zapnuto', off: 'vypnuto' },
               modes: { original: 'Originál', enhanced: 'Vylepšeno' }, game: { changes: 'mění hru' } },
     };
     const KIT_SECTIONS = ['display', 'sound'];
+    const COLOUR_ROWS = ['brightness', 'contrast', 'saturation', 'red', 'green', 'blue'];   // 1.7: one folded group
+    const CRT_ROWS = ['crt-detail', 'crt-shape'];                                          // 1.7: shown while CRT is on
 
     /** 1.4: a game row with its kind, section and modes filled in; ids must be unique over the kit's items and the rows. */
     function rowsOf(list) {
@@ -229,7 +238,16 @@ const WBNASTAVENI = (() => {
             for (const section of ['display', 'sound']) {
                 const fs = d.createElement('fieldset'); fs.className = 'wb-nastaveni-' + section;
                 const lg = d.createElement('legend'); lg.textContent = this.texts[section]._; fs.appendChild(lg);
+                let group = null;
                 for (const it of ITEMS[section]) if (!omitted(this.spec.omit, section).has(it.id)) {
+                    if (section === 'display' && this.spec.groups !== false && COLOUR_ROWS.includes(it.id)) {   // 1.7: the colours folded
+                        if (!group) {
+                            group = d.createElement('details'); group.className = 'wb-nastaveni-group'; group.id = 'wb-group-colours';
+                            const sm = d.createElement('summary'); sm.className = 'wb-nastaveni-summary'; sm.textContent = this.texts.display.colours;
+                            group.appendChild(sm); fs.appendChild(group); this.colourGroup = group;
+                        }
+                        group.appendChild(this.row(d, section, it)); continue;
+                    }
                     fs.appendChild(this.row(d, section, it));
                     if (it.id === 'zoom' && this.spec.zoom === 'snap') {                // 1.5: the buttons under the slider
                         const box = d.createElement('div'); box.className = 'zoom-buttons wb-nastaveni-zoom-buttons'; box.id = 'wb-zoom-buttons';
@@ -288,7 +306,25 @@ const WBNASTAVENI = (() => {
             else ctl.addEventListener(it.kind === 'range' ? 'input' : 'change', () => this.set(section, it.id, it.kind === 'check' ? ctl.checked : ctl.value));
             row.appendChild(label); row.appendChild(ctl); if (it.kind === 'range' || ctl.dataset.snap) row.appendChild(out);
             this.controls[section][it.id] = { ctl, out, it, row };
+            if (this.spec.peek !== false) {                                            // 1.7: see the game while adjusting
+                const off = () => this.peek(row, false), on = () => { this.peek(row, true); (row.ownerDocument.defaultView || globalThis).addEventListener('pointerup', off, { once: true }); };
+                if (ctl.type === 'range') {
+                    ctl.addEventListener('pointerdown', on); ctl.addEventListener('pointerup', off); ctl.addEventListener('pointercancel', off);
+                    ctl.addEventListener('input', () => { if (!this.peekHeld) this.peek(row, false, true); });
+                } else ctl.addEventListener('change', () => this.peek(row, false, true));
+            }
             return row;
+        }
+        /** 1.7: the panel around `row` turns see-through but for the row: held while the pointer is down, else 0.9 s after a change. */
+        peek(row, hold, flash) {
+            const panel = (row.closest && (row.closest('.wbpanel') || row.closest('.wb-nastaveni'))) || this.root;
+            if (!panel) return;
+            clearTimeout(this.peekTimer);
+            if (this.peekRow && this.peekRow !== row) this.peekRow.classList.remove('wb-peek-row');
+            this.peekHeld = !!hold;
+            panel.classList.add('wb-peek'); row.classList.add('wb-peek-row'); this.peekRow = row;
+            if (hold) return;
+            this.peekTimer = setTimeout(() => { panel.classList.remove('wb-peek'); row.classList.remove('wb-peek-row'); this.peekRow = null; }, flash ? 900 : 400);
         }
         /** A number as the menu's language writes it (1,04 in Czech), with the item's unit (20 %). */
         num(v, digits) {
@@ -310,7 +346,7 @@ const WBNASTAVENI = (() => {
                 const add = (value, text, title) => {
                     const b = d.createElement('button'); b.type = 'button'; b.dataset.zoom = String(value); b.textContent = text;
                     if (title) b.title = title;
-                    b.addEventListener('click', () => this.set('display', 'zoom', value)); box.appendChild(b);
+                    b.addEventListener('click', () => { this.set('display', 'zoom', value); if (this.spec.peek !== false) this.peek(box, false, true); }); box.appendChild(b);
                 };
                 add(0, this.texts.display.fit, this.texts.display.fitTitle);
                 for (const z of pick) { const s = st.find((x) => Math.abs(x.value - z) < 1e-9); add(z, s ? s.label : this.num(z) + '×'); }
@@ -386,6 +422,12 @@ const WBNASTAVENI = (() => {
                 }
                 if (it.kind === 'check') c.ctl.checked = !!v; else c.ctl.value = String(v);
                 if (c.out) c.out.value = this.valueText(it, v);
+                if (CRT_ROWS.includes(it.id)) c.row.hidden = !this.state[this.mode].display.crt;   // 1.7
+            }
+            if (this.colourGroup) {                                                    // 1.7: the folded colours say when one is changed
+                const def = defaults('display', this.mode, this.spec.defaults, this.spec.zoom === 'snap', this.spec.omit), cur = this.state[this.mode].display;
+                const changed = COLOUR_ROWS.some((id) => id in cur && cur[id] !== def[id]);
+                this.colourGroup.firstChild.textContent = this.texts.display.colours + (changed ? ' · ' + this.texts.display.changed : '');
             }
         }
         get(section) {

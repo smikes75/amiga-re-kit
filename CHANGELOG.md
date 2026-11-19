@@ -3,6 +3,19 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.97 (2026-11-19)
+
+- `wb-nastaveni.js` 1.7 + `wb.css` 1.1: compact menus (the user: "the menus smaller, more compact - setting Display covers
+  nearly the whole game, I do not see the changes at once"). A panel was as wide as the window as soon as it held a long
+  note (`.wbpanel` had only a minimum width): now at most 400 px, the note wraps; dense rows (12 px, 1 px padding), the
+  page's `.mode-picker` (Original / Enhanced) on one line; the six colour rows in one folded group 'Colours' whose summary
+  says "changed" when one is not the default (`spec.groups: false` keeps them open); CRT detail and shape only while CRT is
+  on; and while the player adjusts a row (drags a slider, changes a select, a check or a zoom button) the panel turns
+  see-through except that row - held while the slider is pressed, 0.9 s after a change (`wb-peek`, `spec.peek: false`).
+  Measured on a copy of SWIV's test build 6184feb (only the two kit files swapped, scratch, deleted), 1000 x 560 CSS px at
+  dpr 2, Enhanced in the game: the Display panel 827 x 524 px before (over the game, cut at the bottom), 400 x 454 after
+  (the game beside it), while dragging Blur only its row over the whole game
+
 ## 1.0.96 (2026-11-19)
 
 - The machine profile `A500_OCS_512K` (SWIV KIT-GAP 24): vAmiga's `A500_OCS_1MB` with `mem set SLOW_RAM 0` before the disk

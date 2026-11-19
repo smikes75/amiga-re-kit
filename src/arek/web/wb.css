@@ -1,4 +1,4 @@
-/* wb.css 1.0 - the Workbench 1.3 shell of a rebuild's page (amiga-re-kit 1.0.17, with wb-menu.js): the bar, the panels, the
+/* wb.css 1.1 - the Workbench 1.3 shell of a rebuild's page (amiga-re-kit 1.0.17, with wb-menu.js): the bar, the panels, the
    requesters, the stage, the CRT layer of wb-obraz, the rows of wb-nastaveni (wb-touch.js brings its own style); looks only, no game data.
    Kit 1.0.66: no frame around the game canvas (three rebuilds switched the 1 px box-shadow off). */
 :root{--wb-blue:#0055aa;--wb-white:#fff;--wb-black:#000020;--wb-orange:#ff8800;--bar-height:28px}
@@ -9,7 +9,7 @@
 #wbbar{position:fixed;top:0;left:0;right:0;z-index:20;height:var(--bar-height);display:flex;align-items:stretch;background:var(--wb-white);color:var(--wb-blue);border-bottom:2px solid var(--wb-blue);white-space:nowrap;user-select:none}
 .wbname{padding:2px 12px 0 8px}.wbmenu{flex-shrink:0}.wbtitle{height:100%;padding:0 10px;background:none;border:0;color:inherit}
 .wbtitle:hover,.wbtitle[aria-expanded=true]{background:var(--wb-blue);color:var(--wb-white)}
-.wbtitle.ghost{opacity:.5}.wbpanel{position:fixed;top:var(--bar-height);min-width:min(300px,calc(100vw - 8px));max-width:calc(100vw - 8px);max-height:calc(100dvh - var(--bar-height) - 8px);overflow:auto;padding:4px 0;background:var(--wb-white);color:var(--wb-blue);border:2px solid var(--wb-blue);box-shadow:4px 4px 0 #000;font-size:13px;white-space:normal}
+.wbtitle.ghost{opacity:.5}.wbpanel{position:fixed;top:var(--bar-height);min-width:min(300px,calc(100vw - 8px));max-width:min(400px,calc(100vw - 8px));max-height:calc(100dvh - var(--bar-height) - 8px);overflow:auto;padding:4px 0;background:var(--wb-white);color:var(--wb-blue);border:2px solid var(--wb-blue);box-shadow:4px 4px 0 #000;font-size:13px;white-space:normal}
 .wbwide{width:400px}.wbitem{display:block;width:100%;padding:2px 14px;border:0;background:none;color:inherit;font:inherit;text-align:left;text-decoration:none}
 .wbitem:hover,.wbitem:focus-visible{background:var(--wb-blue);color:var(--wb-white)}
 .wbitem[aria-pressed=true]::before{content:"✓ ";}.wbitem[aria-pressed=false]::before{content:"  ";white-space:pre}
@@ -61,3 +61,16 @@ input[type=checkbox]{accent-color:var(--wb-blue)}.wbnote{display:block;margin:4p
 .wb-mixer[data-off] .wb-mixer-rows{opacity:.55}.wb-mixer hr{border:0;border-top:2px dotted var(--wb-blue);margin:4px 8px}
 .wb-mixer-buttons{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 14px}.wb-mixer-buttons button{padding:0 6px}.wb-mixer-msg{font-size:12px;overflow-wrap:anywhere}
 @media(max-width:480px){.wb-mixer{right:4px;left:4px;width:auto;max-width:none}.wb-mixer-row{padding:1px 8px}.wb-mixer-row input[type=range]{flex-basis:90px;width:90px}}
+/* wb.css 1.1 (kit 1.0.97, the user 2026-11-19: "the menus smaller, more compact"): a panel at most 400 px wide (a long note
+   wraps instead of stretching the panel over the game), dense rows, the mode picker on one line, the folded colour group of
+   wb-nastaveni 1.7 and its see-through panel while a row is adjusted (wb-peek) */
+.wbpanel .wbnote{font-size:11px;line-height:1.35;margin:2px 0}.wbpanel .mode-picker{display:flex;gap:4px;padding:1px 10px}.wbpanel .mode-picker .wbitem{width:auto;flex:1;padding:1px 6px;text-align:center}
+.wb-nastaveni{font-size:12px}.wb-nastaveni-row{padding:1px 10px;gap:6px;min-height:20px}.wbpanel .wb-nastaveni-row select{max-width:170px}
+.wbpanel .wb-nastaveni-row input[type=range]{width:110px;min-width:60px}.wb-nastaveni .zoom-buttons{padding:1px 10px 2px}.wb-nastaveni .zoom-buttons button{padding:0 4px;font-size:11px}
+.wbpanel .wb-nastaveni-defaults{padding:1px 10px;margin-top:2px}.wb-nastaveni-group>summary{padding:1px 10px;list-style-position:inside}.wb-nastaveni-group>summary:hover{background:#dde8f4}
+.wb-nastaveni-group[open]{border-top:0}.wb-nastaveni-group[open]>summary{font-weight:bold}
+.wbpanel.wb-peek,.wb-nastaveni.wb-peek{background:transparent!important;border-color:transparent!important;box-shadow:none!important}
+.wb-peek *{visibility:hidden}.wb-peek .wb-peek-row,.wb-peek .wb-peek-row *{visibility:visible}
+.wb-peek .wb-peek-row{background:var(--wb-white);outline:2px solid var(--wb-blue);box-shadow:4px 4px 0 #000}
+@media(prefers-reduced-motion:no-preference){.wbpanel{transition:background .12s,border-color .12s}}
+

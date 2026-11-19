@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.96 on PyPI, 2886 tests. Extracted from five game
+- **The kit:** version 1.0.97 on PyPI, 2887 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -47,7 +47,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2886 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2887 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -159,6 +159,7 @@ arek web smooth http://127.0.0.1:8920/smooth-demo.html  # the canon's limits in 
 #    const sl = c.stepless ? WBOBRAZ.stepless(c.zoom, W0, W, dpr, limit(), par()) : null; pr.size(W, H, S, par(), dpr, sl ? sl.shrink : 1); scr.crt({ ..., shrink })
 #    wb-mixer 1.0 (kit 1.0.93): const mixer = WBMIXER.build(undefined, { groups, defaults, store, lang, focusGame }); mixer.setMode(mode); once a frame
 #    mixer.apply(E._engine_aud_mix); mixer.lights(counts of E._engine_aud_counts()) - the game's hook: host_aud_tag(ch, i) (Paula) / host_aud_tag(4 + v, 32 + i) (extra voice)
+#    wb-nastaveni 1.7 + wb.css 1.1 (kit 1.0.97): compact menus - panels at most 400 px, the colours folded, CRT rows only with CRT on, the panel see-through while a row is adjusted
 #    wb-mixer 1.1 (kit 1.0.94): { headroom: WBMIXER.VAMIGA } - Enhanced at vAmiga's level (room for the boosts under the limiter); mixer.forget() after a new engine
 arek web replay http://127.0.0.1:8920/scene-demo.html --hz 50,60,120,144 --frames 300 --route 1:120,2:60,0:120
 #    the display never touches the game: the page under a virtual clock at four rates, the same inputs by game frame, one state fingerprint (H)

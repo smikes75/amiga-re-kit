@@ -55,7 +55,7 @@ def test_filters_and_process():
 
 
 def test_menu_defaults_coerce_merge():
-    assert js('M.VERSION') == '1.6' and js('M.MODES') == ['original', 'enhanced']
+    assert js('M.VERSION') == '1.7' and js('M.MODES') == ['original', 'enhanced']
     d = js("M.defaults('display', 'enhanced')")
     assert d['par'] == 1.04 and d['smooth'] is True and d['zoom'] == 3 and d['crt-detail'] == 'fine'
     assert js("M.defaults('display', 'original').par") == 1 and js("M.defaults('display', 'original').smooth") is False
@@ -361,3 +361,62 @@ window.menu = WBNASTAVENI.build(document.getElementById('menu'), { lang: 'cs', z
     assert r['auto'] == [0, 'auto*', '1']
     assert s['on'] == ['1', '3.4', '0.01', '3.4', 'auto (3,4×)']                            # 1.6: stepless - 1x .. the window, auto fills
     assert s['v'] == [2.37, '2,37×'] and s['caught'] == 2.5 and s['off'] == [2.5, '5', '1']
+
+
+def test_compact_panel_colours_folded_crt_rows_and_peek(tmp_path):
+    """wb-nastaveni 1.7 + wb.css 1.1 (kit 1.0.97, the user: "the menus smaller, more compact"): a panel with a long note
+    stays at most 400 px wide; the six colour rows sit in a folded group whose summary says when one is changed; CRT detail
+    and shape show only while CRT is on; adjusting a row makes the panel see-through but for that row, held while the
+    slider is pressed and for 0.9 s after a change; spec.groups = false keeps the rows open as before."""
+    pw = pytest.importorskip('playwright.sync_api')
+    from arek import web
+    import threading
+    for f in ('wb-nastaveni.js', 'wb.css'):
+        shutil.copy(WEB / f, tmp_path / f)
+    (tmp_path / 'p.html').write_text("""<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="wb.css">
+<div id="shell"><nav id="wbbar"><div class="wbmenu"><button class="wbtitle" id="menu-display">Display</button>
+<div id="panel" class="wbpanel"><div class="mode-picker"><button class="wbitem">Original</button><button class="wbitem">Enhanced</button></div>
+<p class="wbnote">""" + 'A long note about the modes and what they do. ' * 12 + """</p><div id="host"></div></div></div></nav></div>
+<script src="wb-nastaveni.js"></script><script>
+window.menu = WBNASTAVENI.build(document.getElementById('host'), { lang: 'en', groups: !/flat/.test(location.search) });
+</script>""")
+    srv = web.serve(str(tmp_path), 0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        port = srv.server_address[1]
+        with pw.sync_playwright() as p:
+            try:
+                b = p.chromium.launch()
+            except Exception as e:                                # no browser installed
+                pytest.skip(str(e))
+            pg = b.new_page(viewport={'width': 1400, 'height': 900})
+            pg.goto('http://127.0.0.1:%d/p.html' % port)
+            r = pg.evaluate("""() => { const q = (s) => document.querySelector(s), o = {};
+                o.width = q('#panel').getBoundingClientRect().width;
+                const g = q('#wb-group-colours'); o.group = !!g && !g.open && ['brightness', 'contrast', 'saturation', 'red', 'green', 'blue'].every((id) => g.contains(q('#wb-' + id)));
+                o.summary = g.querySelector('summary').textContent; menu.set('display', 'brightness', 120); o.summary2 = g.querySelector('summary').textContent;
+                o.crtShown = !q('#wb-crt-detail').closest('.wb-nastaveni-row').hidden; menu.set('display', 'crt', false);
+                o.crtHidden = q('#wb-crt-detail').closest('.wb-nastaveni-row').hidden && q('#wb-crt-shape').closest('.wb-nastaveni-row').hidden;
+                menu.set('display', 'crt', true);
+                const sel = q('#wb-crt-shape'); sel.value = 'grid'; sel.dispatchEvent(new Event('change'));
+                o.peek = q('#panel').classList.contains('wb-peek') && sel.closest('.wb-nastaveni-row').classList.contains('wb-peek-row');
+                o.hiddenOther = getComputedStyle(q('#wb-blur')).visibility; o.shownOwn = getComputedStyle(sel).visibility;
+                return o; }""")
+            pg.wait_for_timeout(1100)
+            r['after'] = pg.evaluate("() => document.querySelector('#panel').classList.contains('wb-peek')")
+            box = pg.locator('#wb-blur').bounding_box()
+            pg.mouse.move(box['x'] + 5, box['y'] + box['height'] / 2)
+            pg.mouse.down()
+            pg.wait_for_timeout(1200)
+            r['held'] = pg.evaluate("() => document.querySelector('#panel').classList.contains('wb-peek')")
+            pg.mouse.up()
+            pg.wait_for_timeout(700)
+            r['released'] = pg.evaluate("() => document.querySelector('#panel').classList.contains('wb-peek')")
+            pg.goto('http://127.0.0.1:%d/p.html?flat' % port)
+            r['flat'] = pg.evaluate("() => !document.querySelector('#wb-group-colours') && !!document.querySelector('#wb-brightness')")
+            b.close()
+    finally:
+        srv.shutdown()
+    assert r['width'] <= 400 and r['group'] and r['summary'] == 'Colours' and r['summary2'] == 'Colours · changed'
+    assert r['crtShown'] and r['crtHidden'] and r['peek'] and r['hiddenOther'] == 'hidden' and r['shownOwn'] == 'visible'
+    assert r['after'] is False and r['held'] is True and r['released'] is False and r['flat']
