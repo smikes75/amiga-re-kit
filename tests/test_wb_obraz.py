@@ -487,3 +487,13 @@ def test_stepless_rows_and_crt_in_the_browser(tmp_path, gl):
         srv.shutdown()
     for dpr, real, boxok, lost, bad, lines in res:
         assert boxok and lost == 0 and bad == 0 and lines == [H - 2, H - 2], (gl, dpr, real, boxok, lost, bad, lines)
+
+
+def test_webtest_pins_the_line_crt_and_the_whole_zoom():
+    """webtest 1.6 (kit 1.0.95, SWIV KIT-GAP 23): every wbObrazTest.set() of `arek web test` asks for the line CRT and the
+    whole-scale path (§5 measures them), so a page whose defaults are the grid or the stepless zoom (SWIV's Enhanced) is
+    measured the same and needs no workaround in its test hook."""
+    import re
+    src = (Path(webtest.__file__)).read_text()
+    calls = re.findall(r"wbObrazTest\.set\(m, \{([^}]*)\}\)", src)
+    assert len(calls) == 3 and all('crtShape: "lines"' in c and 'stepless: false' in c for c in calls), calls

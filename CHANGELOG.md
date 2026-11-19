@@ -3,6 +3,15 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.95 (2026-11-19)
+
+- `arek web test` 1.6 (SWIV KIT-GAP 23): every `wbObrazTest.set()` asks for `crtShape: 'lines'` and `stepless: false` - §5
+  measures the whole-scale path with the line CRT, and a page whose defaults are the grid and the stepless zoom (SWIV's
+  Enhanced since the user's new defaults) failed it (the grid: "columns off the period"; a fractional content size: a
+  TypeError) unless its test hook left those keys out; the grid and the stepless zoom keep their own tests in the kit.
+  Measured on SWIV's test build 115a4ff (Enhanced grid / fine / 2x / stepless by default): `arek web test --quick` 175
+  checks, 0 failures, its hook's workaround not taken (the keys are now sent)
+
 ## 1.0.94 (2026-11-19)
 
 - The host's voices get memory of their own and Enhanced a headroom (SWIV KIT-GAP 22 and the user's choice "only Enhanced

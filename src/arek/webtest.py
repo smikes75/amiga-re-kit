@@ -21,6 +21,9 @@ and every game column exactly S device columns; 1.4: the same layouts with a pix
 the rows and cols patterns at par 1 must be identical pixel by pixel in the content.
 Tolerances: Chromium keeps layout in 1/64 CSS px, so positions within 0.05 and sizes within
 0.025 device pixels.
+1.6 (kit 1.0.95, SWIV KIT-GAP 23): every set() pins ``crtShape: 'lines'`` and ``stepless: false`` - §5 measures the
+whole-scale path with the line CRT, so a page whose defaults are the grid or the stepless zoom (SWIV's Enhanced) is
+measured the same; the grid and the stepless zoom have their own tests in the kit (wb-obraz 1.12).
 """
 import itertools
 import struct
@@ -176,7 +179,7 @@ def run(url, quick=False, log=print):
                 for mode, detail, zoom, par in itertools.product(MODES, DETAILS, zooms, (1, PAR)):
                     if par != 1 and zoom not in (2, 0):
                         continue
-                    info = page.evaluate('([m, d, z, p]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crt: true, blur: 0, par: p})',
+                    info = page.evaluate('([m, d, z, p]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crtShape: "lines", stepless: false, crt: true, blur: 0, par: p})',
                                          [mode, detail, zoom, par])
                     check_layout(info, mode, detail, dpr, fails, 'dpr %s w%d %s/%s zoom %s par %s' % (dpr, width, mode, detail, zoom, par))
                     checks += 1
@@ -205,7 +208,7 @@ def run(url, quick=False, log=print):
             cases = [(m, d, z, 1) for m, d, z in itertools.product(MODES, DETAILS, (2, 3, 0) if not quick else (2,))]
             cases += [('enhanced', 'fine', 2, PAR), ('original', 'strong', 0, PAR)]          # 1.4: with an aspect
             for mode, detail, zoom, par in cases:
-                info = page.evaluate('([m, d, z, p]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crt: true, blur: 0, par: p})',
+                info = page.evaluate('([m, d, z, p]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crtShape: "lines", stepless: false, crt: true, blur: 0, par: p})',
                                      [mode, detail, zoom, par])
                 page.evaluate("wbObrazTest.fill('grey')")
                 page.wait_for_timeout(450)
@@ -228,7 +231,7 @@ def run(url, quick=False, log=print):
                 if bad or badc:
                     fails.append('§5.4 %s: %d rows, %d columns off the period' % (tag, len(bad), len(badc)))
                 # §5.4b: CRT off, a grey per game row - each game row exactly S device rows
-                info = page.evaluate('([m, d, z, p]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crt: false, blur: 0, par: p})',
+                info = page.evaluate('([m, d, z, p]) => wbObrazTest.set(m, {zoom: z, crtDetail: d, crtShape: "lines", stepless: false, crt: false, blur: 0, par: p})',
                                      [mode, detail, zoom, par])
                 page.evaluate("wbObrazTest.fill('rows')")
                 page.wait_for_timeout(450)
