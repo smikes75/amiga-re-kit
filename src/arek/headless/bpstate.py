@@ -382,7 +382,7 @@ def write_capture(folder, st, conf, adf, ram_file, screenshot=False, **extra):
     folder = Path(folder)
     meta = {k: v for k, v in st.items() if k != 'ram'}
     adf = adf or conf.get('ADF1')
-    meta.update(machine=conf.get('MACHINE', 'A500_OCS_1MB'), **extra)
+    meta.update(machine=config.machine(conf)[0], **extra)
     meta.update(ram_base=0, ram_bytes=len(st['ram']), ram_file=ram_file,
                 ram_sha256=hashlib.sha256(st['ram']).hexdigest(),
                 assets={k: hashlib.sha256(Path(p).read_bytes()).hexdigest()

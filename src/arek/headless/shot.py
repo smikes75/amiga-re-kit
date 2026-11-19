@@ -65,8 +65,7 @@ def check_disk(conf, adf):
 
 
 def build_script(conf, adf, events, t_shot, out_png, setup=()):
-    lines = [
-        'regression setup %s "%s"' % (conf.get('MACHINE', 'A500_OCS_1MB'), conf['ROM']),
+    lines = config.machine(conf)[1] + [                 # 1.0.96: a kit profile adds its lines (A500_OCS_512K: no slow memory)
         'amiga set WARP_MODE ALWAYS',
         'denise set FRAME_SKIPPING 0',
     ]

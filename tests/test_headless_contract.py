@@ -111,3 +111,17 @@ def test_contract_compare(tmp_path):
     assert contract.diff_regs(x, y) == {'d0': (0, 7)}
     assert contract.format_runs([]) == 'OK - no differences'
     assert '000100-000104' in contract.format_runs(runs)
+
+
+def test_machine_profiles_and_the_override(monkeypatch):
+    """1.0.96 (SWIV KIT-GAP 24): MACHINE = A500_OCS_512K is vAmiga's A500_OCS_1MB with the slow memory removed, before the
+    disk goes in; AREK_MACHINE overrides MACHINE; any other name goes to vAmiga as it is."""
+    from arek.headless import config
+    monkeypatch.delenv('AREK_MACHINE', raising=False)
+    s = shot.build_script({'ROM': '/r', 'MACHINE': 'A500_OCS_512K'}, '/a.adf', [], 2, '/o.png').splitlines()
+    assert s[0] == 'regression setup A500_OCS_1MB "/r"' and s[1] == 'mem set SLOW_RAM 0'
+    assert s.index('mem set SLOW_RAM 0') < s.index('regression run "/a.adf"')
+    assert config.machine({'ROM': '/r'}) == ('A500_OCS_1MB', ['regression setup A500_OCS_1MB "/r"'])
+    assert config.machine({'ROM': '/r', 'MACHINE': 'A500_ECS_2MB'})[1] == ['regression setup A500_ECS_2MB "/r"']
+    monkeypatch.setenv('AREK_MACHINE', 'A500_OCS_512K')
+    assert config.machine({'ROM': '/r', 'MACHINE': 'A500_OCS_1MB'}) == ('A500_OCS_512K', ['regression setup A500_OCS_1MB "/r"', 'mem set SLOW_RAM 0'])

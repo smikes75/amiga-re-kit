@@ -3,6 +3,17 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.96 (2026-11-19)
+
+- The machine profile `A500_OCS_512K` (SWIV KIT-GAP 24): vAmiga's `A500_OCS_1MB` with `mem set SLOW_RAM 0` before the disk
+  goes in - an A500 with 512 KB chip only. SWIV's original kernel builds its memory list with TypeOfMem and moves its
+  loader and the game into the first fast-type memory, $C00000 on a 1 MB machine, where nothing of the translation lies;
+  the reference for the dumps from the internet (TOSEC, PNS) is the 512 KB machine. `MACHINE` in local.conf names a vAmiga
+  setup or a kit profile (`config.MACHINES`, `config.machine(conf)`), `AREK_MACHINE` overrides it for one run of any
+  headless tool (all of them build their script with `shot.build_script`), `bpstate`'s meta names the machine. Measured
+  with the PNS image (the user's download, read only): a breakpoint on the loader's entry $152 stops at frame 621 with
+  a0 = $100 on `A500_OCS_512K`; on `A500_OCS_1MB` it is never reached
+
 ## 1.0.95 (2026-11-19)
 
 - `arek web test` 1.6 (SWIV KIT-GAP 23): every `wbObrazTest.set()` asks for `crtShape: 'lines'` and `stepless: false` - §5

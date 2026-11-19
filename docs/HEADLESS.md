@@ -8,6 +8,18 @@ changes make it a reliable instrument. They are shipped as patches in
 `src/arek/headless/patches/` (vAmiga is MPL-2.0; publishing modified
 sources is what the licence asks for).
 
+## The machine (`MACHINE` in local.conf)
+
+`MACHINE` names vAmiga's regression setup (`A500_OCS_1MB` by default: 512 KB chip + 512 KB slow memory) or a profile of
+the kit, which is a setup plus lines before the disk goes in (1.0.96, SWIV KIT-GAP 24):
+
+| profile | is | for |
+|---|---|---|
+| `A500_OCS_512K` | `A500_OCS_1MB` + `mem set SLOW_RAM 0` | an A500 with 512 KB chip only - a game's kernel that builds its memory list with TypeOfMem then keeps its loader and the game in chip (SWIV's original kernel moves both to $C00000 when slow memory exists) |
+
+`AREK_MACHINE=A500_OCS_512K arek bpstate ...` overrides `MACHINE` for one run of any headless tool (shot, bpstate, trace run,
+the parity tools); `bpstate`'s meta names the machine used.
+
 ## Build (macOS, Command Line Tools, cmake)
 
 ```sh

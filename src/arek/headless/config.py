@@ -3,13 +3,16 @@
 The file is a flat ``KEY = value`` list (quotes optional, ``#`` comments) and
 is git-ignored in every project. Keys the kit understands::
 
-    MACHINE = A500_OCS_1MB        # vAmiga regression setup name
+    MACHINE = A500_OCS_1MB        # vAmiga regression setup name, or a profile of the kit (MACHINES below)
     ROM     = roms/kick13.rom     # Kickstart image (never in a repo)
     ADF1    = disks/game.adf      # disk images, ADF1.. ADFn
     VAHL    = bin/VAHeadless      # patched headless vAmiga binary
     OBJDUMP = m68k-elf-objdump    # optional, for xref/disrange listings
 
 Relative paths resolve against the directory of the conf file.
+1.0.96 (SWIV KIT-GAP 24): MACHINE may name a profile of the kit - a vAmiga setup plus lines (``A500_OCS_512K``: an A500
+with 512 KB chip and no slow memory, where a game's kernel that sorts the memory by TypeOfMem keeps everything in chip);
+the environment variable ``AREK_MACHINE`` overrides MACHINE for one run of any headless tool.
 """
 import os
 from pathlib import Path
@@ -20,6 +23,15 @@ class ConfigError(RuntimeError):
 
 
 PATH_KEYS = ('VAHL', 'ROM', 'OBJDUMP')
+# 1.0.96: profiles of the kit - name -> (vAmiga regression setup, lines after it, before the disk is inserted)
+MACHINES = {'A500_OCS_512K': ('A500_OCS_1MB', ('mem set SLOW_RAM 0',))}
+
+
+def machine(conf):
+    """(name, the emulator's setup lines) of the conf's machine - AREK_MACHINE over MACHINE over A500_OCS_1MB."""
+    name = os.environ.get('AREK_MACHINE') or conf.get('MACHINE') or 'A500_OCS_1MB'
+    base, extra = MACHINES.get(name, (name, ()))
+    return name, ['regression setup %s "%s"' % (base, conf['ROM'])] + list(extra)
 
 
 def load(path='local.conf', root=None):
