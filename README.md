@@ -27,7 +27,7 @@ demo, [About](https://smikes75.github.io/amiga-re-kit/about.html),
 - **Superfrog** (Team17, 1993): the whole game playable at
   https://arek.fun/superfrog/ with your own four disks; Magic Woods 1–2
   verified against the original with a recorded run.
-- **The kit:** version 1.0.93 on PyPI, 2881 tests. Extracted from five game
+- **The kit:** version 1.0.94 on PyPI, 2884 tests. Extracted from five game
   rebuilds (S.W.I.V., Turrican II, Superfrog, Alien Breed, Alien Breed II)
   and made game-agnostic: one Python package (`arek`), one command line
   (`arek`), and an **MCP server** (`arek-mcp`) so an AI assistant can drive
@@ -47,7 +47,7 @@ stay on your machine, referenced from a git-ignored `local.conf`.
 
 ```sh
 pip install "amiga-re-kit[mcp,web]"  # from PyPI; or from a checkout: pip install -e ".[mcp,dev]"
-python -m pytest                    # 2881 tests: synthetic data + CPU timings measured on Moira
+python -m pytest                    # 2884 tests: synthetic data + CPU timings measured on Moira
 arek --help
 ```
 
@@ -159,6 +159,7 @@ arek web smooth http://127.0.0.1:8920/smooth-demo.html  # the canon's limits in 
 #    const sl = c.stepless ? WBOBRAZ.stepless(c.zoom, W0, W, dpr, limit(), par()) : null; pr.size(W, H, S, par(), dpr, sl ? sl.shrink : 1); scr.crt({ ..., shrink })
 #    wb-mixer 1.0 (kit 1.0.93): const mixer = WBMIXER.build(undefined, { groups, defaults, store, lang, focusGame }); mixer.setMode(mode); once a frame
 #    mixer.apply(E._engine_aud_mix); mixer.lights(counts of E._engine_aud_counts()) - the game's hook: host_aud_tag(ch, i) (Paula) / host_aud_tag(4 + v, 32 + i) (extra voice)
+#    wb-mixer 1.1 (kit 1.0.94): { headroom: WBMIXER.VAMIGA } - Enhanced at vAmiga's level (room for the boosts under the limiter); mixer.forget() after a new engine
 arek web replay http://127.0.0.1:8920/scene-demo.html --hz 50,60,120,144 --frames 300 --route 1:120,2:60,0:120
 #    the display never touches the game: the page under a virtual clock at four rates, the same inputs by game frame, one state fingerprint (H)
 arek docs WB-PLYNULOST                                   # the kit's documents ship with it (arek docs: the list; --path: the file)
@@ -213,7 +214,7 @@ asks for (see `examples/profile.example.json`).
 | `web/wb-menu.js`, `web/wb.css` | the Workbench 1.3 bar of a rebuild's page (Project / Display / Game / Sound / ?): an open menu or requester suspends the game, Esc and the arrow keys, a notice line; the markup is the page's (docs/WB-RECIPE.md) | Alien Breed II, Superfrog |
 | `web/wb-takt.js` | the clock of a page (canon C): the game's frames allowed by the display's clock, the lock on a k x 50 Hz display, the timeline of the frames, the picture behind the game with pairs for the interpolation and extrapolation, keys at the event; the synthetic page `smooth-demo.html` runs on it | Alien Breed II, Superfrog (Sonnet) |
 | `web/wb-zvuk-worklet.js`, `web/wb-zvuk-out.js` | Paula's output into Web Audio (canon D): an AudioWorklet over a ring of stereo int16 - the engine's ring in shared memory with written / read counters (a stalled main thread does not interrupt the sound, the engine computes on when the reserve runs low) or the game's frames by messages; the reserve, dropouts and output latency for the hooks; 1.1: a dropout holds the last level and fades it (100 ms), the sound comes back with a 5 ms crossfade - no click | Alien Breed II, Superfrog (Sonnet), SWIV |
-| `host/arek_host.h` (host voices), `host/arek_audio.h`, `web/wb-mixer.js` | Enhanced sound (1.0.93): four output-only voices for the sounds a game would drop - Paula's state machine over chip RAM with no DMA slot, no interrupt, no write (the machine's state is the same with them); mixed as channels 4-7 through a stereo-linked compressor-limiter only while one sounds or a level is above 1; the sound kinds a game's hook tags at their start (`host_aud_tag`) with the page's level per kind (`engine_aud_mix`) and counters for the lights (`engine_aud_counts`); the mixer window - the page's groups 0-200 %, master and extra voices, lights (played / extra voice / silenced), defaults / all 100 % / copy values, the player's own values kept per game. Original stays the plain mix bit for bit | SWIV (SWIV-projekt's mixer) |
+| `host/arek_host.h` (host voices), `host/arek_audio.h`, `web/wb-mixer.js` | Enhanced sound (1.0.93): four output-only voices for the sounds a game would drop - Paula's state machine over chip RAM with no DMA slot, no interrupt, no write (the machine's state is the same with them); mixed as channels 4-7 through a stereo-linked compressor-limiter only while one sounds or a level is above 1; the sound kinds a game's hook tags at their start (`host_aud_tag`) with the page's level per kind (`engine_aud_mix`) and counters for the lights (`engine_aud_counts`); the mixer window - the page's groups 0-200 %, master and extra voices, lights (played / extra voice / silenced), defaults / all 100 % / copy values, the player's own values kept per game. Original stays the plain mix bit for bit. 1.0.94: the voices' own memory outside the machine (`host_voice_mem()`, address `HOST_VMEM_BASE`) for a game's port of its sound generators; a base level for every channel (`engine_aud_mix(-1, level)`, wb-mixer 1.1 `headroom` - `WBMIXER.VAMIGA` = 0.4096 plays Enhanced at vAmiga's level, the kit's Paula being 7.75 dB louder) | SWIV (SWIV-projekt's mixer) |
 | `web/wb-touch.js` | touch controls for a page: a virtual stick and buttons (fire, the page's keys), shown on touch devices or with `?touch`; `WBTOUCH.bits()` as the keyboard's bits, its own styles | Alien Breed II |
 | `web/wb-pad.js` | gamepads and joysticks: each player's controller, fire button and an optional jump (up) button, read once a frame into the page's joystick bits (`WBPAD.create({ players: 2 }).poll()`); the standard mapping (d-pad, left stick, A / B / X / right trigger) and any other controller (axes, the hat on axis 9); 'auto' gives each player the device they used (1.1: not a receiver listed first, not one controller listed twice); the page's own buttons (`reserve`, `button()`); wb-nastaveni rows for the settings; `status()` names what the browser shows | Alien Breed II, Superfrog (their pad.js), SWIV |
 | `host/arek_host_datadisk.h`, `web/wb-datadisk.js` | the data disk a game writes (Team17's "insert your custom datadisk" for the high-score table): sectors in the host behind the game's disk routine (`--extern`, the project's registers; in the drive for good or only around the game's prompt), kept in the browser's localStorage by the page - loaded before the game runs, saved after every write, cleared on a second click; a file natively | Alien Breed II, Superfrog (Sonnet) |

@@ -1,4 +1,4 @@
-// wb-mixer.js 1.0 - the sound mixer window of a rebuild's page (amiga-re-kit 1.0.93; SWIV, the user 2026-11-18: SWIV-projekt's
+// wb-mixer.js 1.1 - the sound mixer window of a rebuild's page (amiga-re-kit 1.0.93; SWIV, the user 2026-11-18: SWIV-projekt's
 // mixer for SWIV-recomp). The game's sounds by kind: a slider per group of the page (0-200 %), a master and an "extra voices"
 // row, a light per group (played / on an extra voice / silenced), "defaults", "all 100 %", "copy values"; a double-click on a row
 // gives it its default. Only Enhanced: in Original every level is 1 (the engine's mix is then bit for bit the plain one).
@@ -20,10 +20,16 @@
 // moved since the last call (silenced over extra over played).
 // The store keeps only what the player chose (own values); a value never moved follows the page's default, so a page that
 // tunes its defaults moves its old visitors too. Test hooks: window.wbMixerTest = mixer.testHooks().
+// 1.1 (kit 1.0.94, the user 2026-11-19: "only Enhanced quieter"): spec.headroom (0..1, default 1) - Enhanced plays every
+// channel at that base level so the boosts have room under the limiter; the kit's Paula is 7.75 dB louder than vAmiga's
+// (one channel at full volume = 0.496 of full scale against vAmiga's 0.2032), WBMIXER.VAMIGA = 0.4096 gives SWIV-projekt's
+// gain staging, for which its defaults were tuned. apply(fn) also sends fn(-1, base) (engine_aud_mix(-1, level): every
+// channel, tagged or not) - the headroom in Enhanced, 1 in Original (the plain mix, bit for bit). base() says it.
 'use strict';
 const WBMIXER = (() => {
-    const VERSION = '1.0';
+    const VERSION = '1.1';
     const KINDS = 64, EXTRA = 32;
+    const VAMIGA = 0.4096;                     // 1.1: vAmiga's level against the kit's: 0.2048 / 128 per step over 2 / 32768 * 64
     const TEXTS = {
         en: { title: 'Sound mixer', master: 'master volume', extra: 'extra voices', defaults: 'defaults', unity: 'all 100 %', copy: 'copy values',
               copied: 'copied', close: 'Close', enhanced: 'Enhanced: a change applies at once, also to the sounds playing now',
@@ -81,7 +87,9 @@ const WBMIXER = (() => {
             this.mode = this.spec.mode === 'original' ? 'original' : 'enhanced';
             this.listeners = [];
             this.own = {};
-            this.sent = null;
+            this.sent = null; this.sentBase = null;
+            const h = Number(this.spec.headroom);
+            this.headroom = Number.isFinite(h) && h > 0 && h <= 1 ? h : 1;
             this.seen = null;
             this.load();
             this.el = null;
@@ -111,13 +119,19 @@ const WBMIXER = (() => {
         unset(id) { if (id in this.own) { delete this.own[id]; this.save(); this.changed('set', id); } }
         setMode(mode) { this.mode = mode === 'original' ? 'original' : 'enhanced'; this.changed('mode', this.mode); }
         levels() { return levels(this.groups, this.get(), this.mode); }
-        /** fn(kind, level) for each of the engine's kinds whose level changed since the last apply; returns how many. */
+        /** 1.1: every channel's base level - spec.headroom in Enhanced, 1 in Original. */
+        base() { return this.mode === 'original' ? 1 : this.headroom; }
+        /** fn(kind, level) for each of the engine's kinds whose level changed since the last apply, and fn(-1, base) when the
+         *  base changed (1.1); all of them the first time and after forget(); returns how many calls. */
         apply(fn) {
-            const lv = this.levels(); let n = 0;
+            const lv = this.levels(), b = this.base(); let n = 0;
+            if (this.sentBase !== b) { fn(-1, b); n++; this.sentBase = b; }
             for (let k = 0; k < KINDS; k++) if (!this.sent || this.sent[k] !== lv[k]) { fn(k, lv[k]); n++; }
             this.sent = lv;
             return n;
         }
+        /** The next apply sends everything again (a new engine). */
+        forget() { this.sent = null; this.sentBase = null; }
         /** Lights from engine_aud_counts (int32 [64][3]); returns { id: 'played' | 'extra' | 'silenced' } of the groups that moved. */
         lights(counts) {
             const now = Array.from(counts || []).slice(0, KINDS * 3), out = {};
@@ -219,11 +233,11 @@ const WBMIXER = (() => {
         /** window.wbMixerTest for the page's tests. */
         testHooks() {
             return { version: VERSION, ids: () => this.ids.slice(), get: () => this.get(), set: (id, v) => { this.set(id, v); return this.get(); },
-                     reset: (how) => { this.reset(how); return this.get(); }, levels: () => Array.from(this.levels()), mode: () => this.mode,
+                     reset: (how) => { this.reset(how); return this.get(); }, levels: () => Array.from(this.levels()), base: () => this.base(), mode: () => this.mode,
                      setMode: (m) => this.setMode(m), open: () => this.open(), close: () => this.close(), isOpen: () => this.isOpen };
         }
     }
-    return { VERSION, KINDS, EXTRA, TEXTS, coerce, groupsOf, levels, lightOf, Mixer, build: (host, spec) => new Mixer(host, spec) };
+    return { VERSION, KINDS, EXTRA, VAMIGA, TEXTS, coerce, groupsOf, levels, lightOf, Mixer, build: (host, spec) => new Mixer(host, spec) };
 })();
 if (typeof globalThis !== 'undefined') globalThis.WBMIXER = WBMIXER;
 if (typeof module !== 'undefined') module.exports = WBMIXER;

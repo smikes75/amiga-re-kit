@@ -39,7 +39,7 @@ def test_values_defaults_and_the_players_own():
     assert r[3] == {'master': 1, 'extra': 1, 'fire': 2, 'expl': 1, 'jet': 0.45}                    # own values kept, the rest new defaults
     assert r[4] == 1
     assert r[5] == {'master': 1, 'extra': 1, 'fire': 1, 'expl': 1, 'jet': 1}
-    assert r[6] == {'master': 1, 'extra': 1, 'fire': 1.5, 'expl': 1, 'jet': 1} and r[7] == {'version': '1.0', 'own': {}}
+    assert r[6] == {'master': 1, 'extra': 1, 'fire': 1.5, 'expl': 1, 'jet': 1} and r[7] == {'version': '1.1', 'own': {}}
 
 
 def test_engine_levels_apply_and_original():
@@ -49,12 +49,12 @@ def test_engine_levels_apply_and_original():
         const lv = m.levels(); o.push([lv[0], lv[1], lv[2], lv[3], lv[32], lv[33], lv[34], lv[35], lv[63]].map((x) => +x.toFixed(6)));
         o.push(m.apply((k, v) => sent.push([k, v])));
         o.push(m.apply((k, v) => sent.push([k, v])));
-        m.set('expl', 0); o.push(m.apply((k, v) => sent.push([k, +v.toFixed(6)])), sent.slice(64));
+        m.set('expl', 0); o.push(m.apply((k, v) => sent.push([k, +v.toFixed(6)])), sent.slice(65));
         m.set('master', 2); m.set('fire', 2); m.set('extra', 2); o.push(m.levels()[0], m.levels()[32]);
         m.setMode('original'); o.push(Array.from(m.levels()).every((x) => x === 1), m.get().fire);
         return o; })()""" % (GROUPS, DEFAULTS))
     assert r[0] == [2.7, 0.945, 1.35, 1, 2.565, 0.89775, 1.2825, 1, 1]
-    assert r[1] == 64 and r[2] == 0 and r[3] == 2 and r[4] == [[1, 0], [33, 0]]
+    assert r[1] == 65 and r[2] == 0 and r[3] == 2 and r[4] == [[1, 0], [33, 0]]                  # 64 kinds + the base (-1) the first time
     assert r[5] == 4 and r[6] == 4                                                                  # 2 * 2 (* 2) at most 4
     assert r[7] is True and r[8] == 2                                                               # Original: 1, the values stay
 
@@ -138,3 +138,18 @@ window.mixer = WBMIXER.build(undefined, { groups: %s, defaults: %s, store: 'b-mi
     assert r['disabled'] and r['note'].startswith('Originál') and r['enabled']
     assert r['lamp'] == 'silenced' and 300 < r['box'] <= 420
     assert r['afterEsc'] == [True, 'game'] and r['reload'] == 0.5
+
+
+def test_headroom_is_the_base_of_enhanced():
+    """1.1: spec.headroom - apply sends (-1, headroom) in Enhanced and (-1, 1) in Original, only when it changes, and again
+    after forget() (a new engine); the kinds' levels are the same with or without it; WBMIXER.VAMIGA = 0.4096."""
+    r = js("""(() => { const m = X.build(null, { groups: %s, defaults: %s, headroom: X.VAMIGA }), o = [];
+        const base = () => { const b = []; m.apply((k, v) => { if (k < 0) b.push(v); }); return b; };
+        o.push(X.VAMIGA, base(), base(), m.base());
+        m.setMode('original'); o.push(base(), m.base());
+        m.setMode('enhanced'); o.push(base());
+        m.forget(); let n = 0; m.apply(() => n++); o.push(n);
+        o.push(Array.from(m.levels()).slice(0, 3).map((x) => +x.toFixed(6)));
+        o.push(X.build(null, { groups: %s, headroom: 7 }).base(), X.build(null, { groups: %s }).base());
+        return o; })()""" % (GROUPS, DEFAULTS, GROUPS, GROUPS))
+    assert r == [0.4096, [0.4096], [], 0.4096, [1], 1, [0.4096], 65, [2.7, 0.945, 1.35], 1, 1]

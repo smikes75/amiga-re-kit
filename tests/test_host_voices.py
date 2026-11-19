@@ -19,7 +19,11 @@ void engine_aud_gain(int ch, double l, double r);
 void engine_aud_mix(int group, double level);
 static void voice_rec(int n) {
 #if VOICES
-    if (n == 3) { host_voice_reg(0, 0, 0); host_voice_reg(0, 2, 0x1800); host_voice_reg(0, 4, 8); host_voice_reg(0, 6, 254);
+#ifndef SRC
+#define SRC 0
+#endif
+    if (n == 3) { if (SRC) { memset(host_voice_mem() + 0x100, 0x7f, 8); memset(host_voice_mem() + 0x108, 0x81, 8); }   /* 1.0.94: the same square in the host's memory */
+                  host_voice_reg(0, 0, SRC ? 0x0100 : 0); host_voice_reg(0, 2, SRC ? 0x0100 : 0x1800); host_voice_reg(0, 4, 8); host_voice_reg(0, 6, 254);
                   host_voice_reg(0, 8, 64); host_voice_dma(0, 1); }
     if (n == 5) { host_voice_side(1, 0, 1); host_voice_reg(1, 0, 0); host_voice_reg(1, 2, 0x1800); host_voice_reg(1, 4, 8);
                   host_voice_reg(1, 6, 300); host_voice_reg(1, 8, 32); host_voice_dma(1, 1); }
@@ -32,7 +36,8 @@ static void voice_rec(int n) {
 #if TAG
     if (n == 3) host_aud_tag(4, 2);                          /* voice 0's sound is of kind 2, voice 1's of kind 3 */
     if (n == 5) { host_aud_tag(5, 3); host_aud_dropped(3); }
-    if (n == 6 && TAG > 1) engine_aud_mix(2, 0.5);           /* the page: kind 2 at half from frame 7 on */
+    if (n == 6 && TAG == 2) engine_aud_mix(2, 0.5);          /* the page: kind 2 at half from frame 7 on */
+    if (n == 6 && TAG == 3) engine_aud_mix(-1, 0.5);         /* 1.0.94: every channel at half (the base) */
     if (n == 13) printf("counts %d %d %d %d\n", H_AUDCOUNT[2][0], H_AUDCOUNT[2][1], H_AUDCOUNT[3][1], H_AUDCOUNT[3][2]);
 #endif
 }
@@ -129,3 +134,24 @@ def test_sound_kinds_take_the_groups_level(tmp_path):
     assert r_t[:k] == r_n[:k]
     counts = [x for x in lines if x.startswith('counts ')][0].split()[1:]
     assert counts == ['0', '1', '1', '1']                                # kind 2: once on a voice; kind 3: once on a voice, once dropped
+
+
+def test_a_voice_plays_the_hosts_memory(tmp_path):
+    """1.0.94 (SWIV KIT-GAP 22): a voice whose address is HOST_VMEM_BASE (AUDxLCH 0x0100) plays the host's memory - the same
+    square written there by the hook sounds sample for sample as the one in chip RAM, the machine is the same."""
+    lines, l_h, r_h, mem_h = run(tmp_path, 'host', ['VOICES=1', 'GAIN=0', 'TAG=0', 'SRC=1'])
+    chip, l_c, r_c, mem_c = run(tmp_path, 'chip', ['VOICES=1', 'GAIN=0', 'TAG=0', 'SRC=0'])
+    assert l_h == l_c and r_h == r_c and max(abs(v) for v in l_h) > 8000
+    assert mem_h == mem_c and [x for x in lines if x.startswith('frames ')] == [x for x in chip if x.startswith('frames ')]
+
+
+def test_the_base_level_takes_every_channel(tmp_path):
+    """1.0.94: engine_aud_mix(-1, level) multiplies every channel's level from the next frame - tagged (voice 0, kind 2) and
+    untagged alike; before it the mix is the same."""
+    _, l_b, r_b, _ = run(tmp_path, 'base', ['VOICES=1', 'GAIN=0', 'TAG=3'])
+    _, l_n, r_n, _ = run(tmp_path, 'nobase', ['VOICES=1', 'GAIN=0', 'TAG=1'])
+    per = len(l_b) / 14.0
+    k = next(i for i in range(len(l_b)) if l_b[i] != l_n[i])
+    assert 5.5 * per < k < 8 * per and r_b[:k] == r_n[:k]
+    seg = lambda ch, f0, f1: max(abs(v) for v in ch[int(f0 * per):int(f1 * per)])
+    assert 0.5 < seg(l_b, 7.5, 8.8) / seg(l_n, 7.5, 8.8) < 0.75 and 0.45 < seg(r_b, 7.5, 8.8) / seg(r_n, 7.5, 8.8) < 0.75

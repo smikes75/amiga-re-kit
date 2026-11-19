@@ -167,6 +167,7 @@ static volatile double E_GAIN[8][2];                     /* 1.0.93: engine_aud_g
 static volatile int E_GAIN_PEND = 0;
 static volatile double E_MIX[HOST_AUD_GROUPS];               /* 1.0.93: engine_aud_mix - the groups' levels, taken at the next frame's start */
 static volatile uint64_t E_MIX_PEND = 0;
+static volatile double E_BASE = 1; static volatile int E_BASE_PEND = 0;   /* 1.0.94: engine_aud_mix(-1, level) */
 static uint64_t G_AUDH = 1469598103934665603ULL; static long G_AUDS = 0; static int G_AUDHASH = 0;   /* 1.0.93: --audhash */
 static FILE *G_AUDOUT = 0;                                /* 1.0.93: --audout FILE - every sample, stereo int16 little-endian */
 static volatile int E_CPU_PEND = 0, E_DAC_PEND = 0, E_PIC_PEND = 0;   /* E_DAC_PEND: 1 = the Amiga's converter, 2 = the monitor; E_PIC_PEND: 1 = picture on, 2 = off */
@@ -174,7 +175,8 @@ static void e_frame_start(void) { e_apply_keys(); if (E_CPU_PEND) { H_CPU_NUM = 
     { int pend = __atomic_exchange_n(&E_GAIN_PEND, 0, __ATOMIC_SEQ_CST);   /* 1.0.93: the gains ramp across this frame */
       for (int c = 0; c < 8; c++) if (pend & (1 << c)) ara_gain_to(c, E_GAIN[c][0], E_GAIN[c][1]); }
     { uint64_t pend = __atomic_exchange_n(&E_MIX_PEND, 0, __ATOMIC_SEQ_CST);   /* 1.0.93: the mixer's groups */
-      for (int g = 0; g < HOST_AUD_GROUPS; g++) if (pend & (1ULL << g)) host_aud_mix(g, E_MIX[g]); }
+      for (int g = 0; g < HOST_AUD_GROUPS; g++) if (pend & (1ULL << g)) host_aud_mix(g, E_MIX[g]);
+      if (__atomic_exchange_n(&E_BASE_PEND, 0, __ATOMIC_SEQ_CST)) host_aud_base(E_BASE); }
     if (E_PIC_PEND) { ARD_PICTURE = E_PIC_PEND == 1; E_PIC_PEND = 0; } }   /* 1.0.86: a whole frame with or without its picture */
 /* the frame is drawn (ARD_PIX): its screenshot, its samples into the ring, its record; the page may now read them */
 static void e_frame_done(void) {
@@ -342,8 +344,10 @@ API double engine_aud_limit_min(void) { return ARA_LIMIT_MIN; }
 /* 1.0.93: the level of the game's sound kind `group` (0-63, arek_host.h host_aud_tag: the game's hook tags each sound at
  * its start) - 0 silences, 1 as the game, up to 4; taken at the next frame's start, also for the sounds of it playing now.
  * A level above 1 puts the limiter in. engine_aud_counts(): int32[64][3] - per group the sounds played on Paula, on the host's
- * voices, and dropped (counters since the start; the page lights a group when its counts move). */
+ * voices, and dropped (counters since the start; the page lights a group when its counts move). 1.0.94: group -1 = every
+ * channel's base level (tagged or not) - a page's headroom in Enhanced. */
 API void engine_aud_mix(int group, double level) {
+    if (group == -1) { E_BASE = level < 0 ? 0 : level > 4 ? 4 : level; __atomic_store_n(&E_BASE_PEND, 1, __ATOMIC_SEQ_CST); return; }
     if (group < 0 || group >= HOST_AUD_GROUPS) return;
     E_MIX[group] = level < 0 ? 0 : level > 4 ? 4 : level;
     __atomic_or_fetch(&E_MIX_PEND, 1ULL << group, __ATOMIC_SEQ_CST);
@@ -393,7 +397,7 @@ static uint8_t *rdall(const char *path, long *len) {
     fclose(f); return b;
 }
 int main(int argc, char **argv) {
-    if (argc < 3) { fprintf(stderr, "arek_host_engine STATE.bin FRAMES [--disk N FILE]... [--keys alt|none] [--shot OUT.raw] [--dump CHIP.bin] [--no-picture]\n"); return 2; }
+    if (argc < 3) { fprintf(stderr, "arek_host_engine STATE.bin FRAMES [--disk N FILE]... [--keys alt|none] [--shot OUT.raw] [--dump CHIP.bin] [--no-picture] [--audhash] [--audout FILE] [--audmix K=LEVEL,...]\n"); return 2; }
     long len; uint8_t *st = rdall(argv[1], &len);
     int r = engine_init(st, (int)len);
     if (r) { fprintf(stderr, "engine_init %d\n", r); return 2; }
@@ -411,6 +415,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--dump") && i + 1 < argc) dump = argv[++i];
         else if (!strcmp(argv[i], "--no-picture")) ARD_PICTURE = 0;   /* 1.0.86: engine_picture(0) from the first frame (the hash: chip RAM only) */
         else if (!strcmp(argv[i], "--audhash")) G_AUDHASH = 1;
+        else if (!strcmp(argv[i], "--audmix") && i + 1 < argc) {   /* 1.0.94: K=LEVEL,... - engine_aud_mix before the run (K -1 = the base), the page's mixer natively */
+            for (char *q = argv[++i]; q && *q; ) { int k; double lv; if (sscanf(q, "%d=%lf", &k, &lv) == 2) engine_aud_mix(k, lv); q = strchr(q, ','); if (q) q++; } }
         else if (!strcmp(argv[i], "--audout") && i + 1 < argc) { G_AUDOUT = fopen(argv[++i], "wb"); if (!G_AUDOUT) { fprintf(stderr, "--audout %s\n", argv[i]); return 2; } }   /* 1.0.93: a hash of every output sample (the sound bit for bit) */
     }
 #ifdef ENGINE_THREAD

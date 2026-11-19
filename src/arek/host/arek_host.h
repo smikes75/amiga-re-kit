@@ -120,11 +120,20 @@ static ArekPaula H_PAULA;
 static ArekPaula H_VOICES;
 static ArekBus H_VBUS;
 static uint8_t H_VOWN[HOST_MAXLINES * HOST_HPOS];
+/* 1.0.94 (SWIV KIT-GAP 22: 21 of its 23 sounds are made by the driver into the voice's own record): the voices' own memory -
+ * HOST_VMEM_SIZE bytes at the voices' address HOST_VMEM_BASE (AUDxLCH 0x0100), outside the machine; a game's hook writes
+ * a sample there (host_voice_mem()) and a voice plays it as Paula plays chip RAM. Below the base a voice reads chip RAM. */
+#define HOST_VMEM_BASE 0x01000000u
+#ifndef HOST_VMEM_SIZE
+#define HOST_VMEM_SIZE 0x10000u
+#endif
+static uint8_t H_VMEM[HOST_VMEM_SIZE];
 /* 1.0.93: the mixer's sound kinds (host_aud_tag below) */
 #define HOST_AUD_GROUPS 64
 static double H_MIXLVL[HOST_AUD_GROUPS]; static uint8_t H_MIXSET[HOST_AUD_GROUPS];   /* a group never set has level 1 */
 static int H_CHGRP[8];                                           /* channel -> group + 1 (0 = none) */
 static int32_t H_AUDCOUNT[HOST_AUD_GROUPS][3];                   /* played / extra / dropped */
+static double H_AUDBASE = 1;                                     /* 1.0.94: every channel's level times this (the page's headroom in Enhanced) */
 static char *H_SHOT_PREFIX = 0; static long H_SHOT_FIRST = 0, H_SHOT_LAST = -1;
 
 #ifndef FR_SET
@@ -274,10 +283,15 @@ static int h_cia_reg(uint32_t a, int *i) {           /* the CIA and register of 
 static void h_sample(void *ctx, int ch, double t, int value) { (void)ctx; ara_event(ch, t, value); if (h_sample_cb) h_sample_cb(ch, t, value); }
 static void h_vsample(void *ctx, int ch, double t, int value) { (void)ctx; ara_event(4 + ch, t, value); }   /* 1.0.93: the host's voices */
 static void h_vstate(void *ctx, int ch, double t, int st) { (void)ctx; if (st == AREK_PAULA_000) ara_event(4 + ch, t, 0); }   /* a stopped voice is silent (Paula would hold its last byte: a DC offset in the mix) */
+static uint16_t h_vrd16(void *ctx, uint32_t a) {                  /* 1.0.94: a voice's word - the host's memory from HOST_VMEM_BASE, else chip RAM */
+    (void)ctx;
+    if (a >= HOST_VMEM_BASE) { uint32_t o = ((a - HOST_VMEM_BASE) % HOST_VMEM_SIZE) & ~1u; return (uint16_t)(H_VMEM[o] << 8 | H_VMEM[(o + 1) % HOST_VMEM_SIZE]); }
+    const ArekBus *b = arek_glue_bus(); return b->rd16(b->ctx, a & b->chipmask);
+}
 static void h_voices_bus(void) {                                /* 1.0.93: the voices' own map, the machine's geometry and chip RAM */
     const ArekBus *b = arek_glue_bus();
     H_VBUS.hpos = b->hpos; H_VBUS.lines = b->lines; H_VBUS.maxlines = b->maxlines; H_VBUS.own = H_VOWN;
-    H_VBUS.rd16 = b->rd16; H_VBUS.ctx = b->ctx; H_VBUS.chipmask = b->chipmask;
+    H_VBUS.rd16 = h_vrd16; H_VBUS.ctx = 0; H_VBUS.chipmask = 0xfffffffeu;   /* 1.0.94: the whole address (chip RAM or the host's memory) */
     memset(H_VOWN, 0, sizeof H_VOWN);
 }
 static void h_audio_irq(void *ctx, int ch, double t) { (void)ctx; (void)t; H_INTREQ |= (uint16_t)(0x80 << ch); }   /* AUDx: level 4 (HOST_L4) */
@@ -328,10 +342,19 @@ static void host_init(double t0) {
     H_VOICES.state_cb = h_vstate;
     arek_paula_frame(&H_VOICES, H_PAULA.frame_base);
     ara_reset();
-    for (int c = 0; c < 8; c++) { H_CHGRP[c] = 0; ARA_LVL[c] = 1; }   /* 1.0.93: no sound tagged yet (the groups' levels stay: the page's) */
+    for (int c = 0; c < 8; c++) { H_CHGRP[c] = 0; ARA_LVL[c] = H_AUDBASE; }   /* 1.0.93: no sound tagged yet (the groups' levels and the base stay: the page's) */
 }
 /* 1.0.93: the host's voices (see H_VOICES) */
-static void host_voice_reg(int v, int reg, uint16_t value) { arek_paula_write(&H_VOICES, h_abs(), 0xa0 + 16u * (uint32_t)(v & 3) + (uint32_t)(reg & 0xe), value); }
+static void host_voice_reg(int v, int reg, uint16_t value) {
+    reg &= 0xe; v &= 3;
+    if (reg == 0 || reg == 2) {                                   /* 1.0.94: the whole address - chip RAM, or the host's memory from HOST_VMEM_BASE */
+        arek_paula_run(&H_VOICES, h_abs()); ArekPaulaChan *c = &H_VOICES.ch[v];
+        c->lc = reg == 0 ? (c->lc & 0xffffu) | ((uint32_t)value << 16) : (c->lc & 0xffff0000u) | (value & 0xfffeu);
+        return;
+    }
+    arek_paula_write(&H_VOICES, h_abs(), 0xa0 + 16u * (uint32_t)v + (uint32_t)reg, value);
+}
+static uint8_t *host_voice_mem(void) { return H_VMEM; }          /* 1.0.94: HOST_VMEM_SIZE bytes, a voice's address HOST_VMEM_BASE + offset */
 static void host_voice_dma(int v, int on) { arek_paula_write(&H_VOICES, h_abs(), 0x096, (uint16_t)((on ? 0x8000 : 0) | (1 << (v & 3)))); }
 static void host_voice_side(int v, double l, double r) { ara_gain(4 + (v & 3), l, r); }
 static int host_voice_busy(int v) { const ArekPaulaChan *c = &H_VOICES.ch[v & 3]; return c->on || c->st != AREK_PAULA_000; }
@@ -342,19 +365,23 @@ static int host_voice_busy(int v) { const ArekPaulaChan *c = &H_VOICES.ch[v & 3]
  * host_aud_dropped(group): a sound of that kind the game did not play. host_aud_mix(group, level) (the page through
  * engine_aud_mix, once a frame at most) sets a group's level, also for the sounds of it playing now. H_AUDCOUNT[group]
  * counts played (0-3) / extra voice (4-7) / dropped - the page's lights (engine_aud_counts). Nothing here touches the
- * machine; with every level at 1 the mix is the plain one. */
+ * machine; with every level at 1 the mix is the plain one. 1.0.94: host_aud_base(level) (the page through
+ * engine_aud_mix(-1, level)) multiplies every channel's level, tagged or not. */
 static double h_mixlvl(int g) { return g >= 0 && g < HOST_AUD_GROUPS && H_MIXSET[g] ? H_MIXLVL[g] : 1.0; }
+static void h_aud_level(int ch) { ara_level_at(ch, h_abs(), H_AUDBASE * h_mixlvl(H_CHGRP[ch] - 1)); }
 static void host_aud_tag(int ch, int group) {
     ch &= 7; int g = group >= 0 && group < HOST_AUD_GROUPS ? group : -1;
-    H_CHGRP[ch] = g + 1; ara_level_at(ch, h_abs(), h_mixlvl(g));
+    H_CHGRP[ch] = g + 1; h_aud_level(ch);
     if (g >= 0) H_AUDCOUNT[g][ch < 4 ? 0 : 1]++;
 }
 static void host_aud_dropped(int group) { if (group >= 0 && group < HOST_AUD_GROUPS) H_AUDCOUNT[group][2]++; }
 static void host_aud_mix(int group, double level) {
     if (group < 0 || group >= HOST_AUD_GROUPS) return;
     H_MIXLVL[group] = level < 0 ? 0 : level > 4 ? 4 : level; H_MIXSET[group] = 1;
-    for (int c = 0; c < 8; c++) if (H_CHGRP[c] == group + 1) ara_level_at(c, h_abs(), H_MIXLVL[group]);
+    for (int c = 0; c < 8; c++) if (H_CHGRP[c] == group + 1) h_aud_level(c);
 }
+/* 1.0.94: every channel's level times `level` - tagged or not (a page's headroom in Enhanced: SWIV plays it at vAmiga's level) */
+static void host_aud_base(double level) { H_AUDBASE = level < 0 ? 0 : level > 4 ? 4 : level; for (int c = 0; c < 8; c++) h_aud_level(c); }
 #define ARD_DMACON_KNOWN 1               /* 1.0.40: the host's DMACON is the machine's - 0 is all DMA off, not "unknown" */
 #include "arek_display.h"
 /* after CREG holds the capture's registers: the picture starts from them, drawn from the current line on */

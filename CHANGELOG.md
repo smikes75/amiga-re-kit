@@ -3,6 +3,22 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.94 (2026-11-19)
+
+- The host's voices get memory of their own and Enhanced a headroom (SWIV KIT-GAP 22 and the user's choice "only Enhanced
+  quieter"). 21 of SWIV's 23 sound kinds are made by its driver into the voice's own record in chip RAM (noise, waves, the
+  geyser's sine), so a dropped sound cannot be replayed from the game's data: `host_voice_mem()` - `HOST_VMEM_SIZE` (64 KB)
+  bytes at the voices' address `HOST_VMEM_BASE` (AUDxLCH 0x0100), outside the machine, where a game's port of its
+  generators writes what a voice plays (`host_voice_reg` takes the whole address; below the base a voice reads chip RAM as
+  before). The kit's Paula is 7.75 dB louder than vAmiga's (one channel at full volume 0.496 of full scale against
+  0.2032), so SWIV-projekt's defaults (shots 270 %) pressed the limiter to -10.3 dB on SCIFI: `engine_aud_mix(-1, level)`
+  / `host_aud_base` multiplies every channel's level, tagged or not, and `wb-mixer.js` 1.1 sends `spec.headroom` as that
+  base in Enhanced (1 in Original); `WBMIXER.VAMIGA` = 0.4096 is vAmiga's level, `forget()` resends everything to a new
+  engine. The native engine's `--audmix K=LEVEL,...`. Measured on SWIV 231b324 (its tags, a scratch build of its game code
+  on this kit, deleted): Original 9000 frames state 1d9c717cb9d076bc / audio 244549409091af6e as before; SWIV's
+  mix_limit.js with the Enhanced defaults on SCIFI c1_l5 6000 frames the limiter's lowest gain 0.304 (-10.3 dB) at base 1,
+  0.664 (-3.6 dB) at 0.4096, the FINAL arena 3000 frames the same two numbers, the sounds' counts the same in every run
+
 ## 1.0.93 (2026-11-18)
 
 - Enhanced sound for SWIV (the user: SWIV-projekt's "pretty good Enhanced sound - playing the channels that would be dropped
