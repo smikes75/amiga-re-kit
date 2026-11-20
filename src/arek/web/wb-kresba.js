@@ -1,5 +1,9 @@
-// wb-kresba.js 1.0 (kit 1.0.87) - wb-scene's composition drawn from the GAME'S STATE on a 2D canvas, not from the chips' picture
+// wb-kresba.js 1.1 (kit 1.0.100) - wb-scene's composition drawn from the GAME'S STATE on a 2D canvas, not from the chips' picture
 // (decision 2026-11-17: Enhanced = the exact translated logic + a renderer of its own; SWIV's web/sw_draw.js made general, docs/WB-KRESBA.md).
+// 1.1 (Turrican II KIT-GAP, kit 1.0.100): the view starts at c.cam (compose() gives the view's top-left; 1.0 took ext off it again,
+// so with margins the whole picture was ext px off - SWIV has none); the hardware sprites c.sprs are drawn as WBSCENE.reference
+// draws them (after the objects, lower k on top, on the screen or with the ground per axis, a sprite fixed on the screen with its
+// screen rows' palette); opt.window puts the game's own window picture into the terrain's indices in the world raster of frame B.
 //   const K = WBKRESBA.create(document);                 // or any object with createElement('canvas') (an OffscreenCanvas shim)
 //   const r = K.paint(ctx, c, S, game, opt);             // c = scene.compose(...) of wb-scene, S = device px per game px
 // game (the game's adapter; everything optional but terrain):
@@ -20,19 +24,23 @@
 //                                     ext, VW, VH, palRow, pal, p32, tidx, timg, tx0, ty0, c }: the terrain's rows top.. / columns left..,
 //                                     tidx / timg its indices / RGBA (cols x rows), tx0 / ty0 where its column / row 0 lands (device px)
 // opt: blend (true) - a fractional camera as two whole-pixel layers blended by the fraction (sharp pixels, even motion), else the
-//      nearest device pixel; subpixel (true) - objects at their fractional position (smoothed), else on whole device pixels;
-//      soft (0) - a shadow's blur in game px (0 = hard).
+//      nearest device pixel; subpixel (true) - objects and sprites at their fractional position (smoothed), else on whole device
+//      pixels; soft (0) - a shadow's blur in game px (0 = hard);
+//      window (false) - 1.1: 'over' = c.win.over (what the game drew that the state does not explain: a safety net, a transition
+//      grid, a boss without a hook) over the terrain where it is not 255; 'all' = c.win.idx (at window.origin, its rows) and then
+//      c.win.over, as WBSCENE.reference's playfield; both after game.indices and below the objects, not interpolated (frame B);
+//      sprites (true) - 1.1: draw c.sprs. Not drawn: c.back, c.win.or, c.hud.
 // Returns { pos, ms }: pos = [id, x, y] where each object was really drawn (world px, its logical anchor - websmooth's objs),
 // ms = the paint's time (WBLONGRUN.drawMs). Palette: c.win.pal rows (RGBA) from c.win.palTop; an object with the ground takes the
 // rows of the world rows it covers, an object fixed on the screen the rows of its screen rows (wb-scene 2.19). The view is
-// c.W x c.H game px from (cam - ext); a camera fraction on x and y.
+// c.W x c.H game px from c.cam (compose() gives the view's top-left, the window at ext inside it); a camera fraction on x and y.
 'use strict';
 (function (root) {
-    const VERSION = '1.0';
+    const VERSION = '1.1';
     const fnv = (a) => { let h = 0x811c9dc5; for (let i = 0; i < a.length; i++) h = Math.imul(h ^ a[i], 16777619); return h >>> 0; };
     const usedOf = (pix) => { let u = 0; for (let i = 0; i < pix.length; i++) if (pix[i] !== 255) u |= 1 << (pix[i] & 31); return u >>> 0; };
     function create(doc) {
-        const st = { cache: new Map(), used: new Map(), pos: [], ms: undefined, msMax: 0 };
+        const st = { cache: new Map(), used: new Map(), pos: [], ms: undefined, msMax: 0, sprs: 0 };
         const canvas = (w, h) => { const c = doc.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
         const keep = (key, cv) => { if (st.cache.size > 800) st.cache.delete(st.cache.keys().next().value); st.cache.set(key, cv); return cv; };
         // the colours an image uses, per its rows: the key changes only when one of ITS colours changes (a pulsing colour elsewhere
@@ -60,21 +68,31 @@
             g.drawImage(cv, 1, 1, w * k, h * k, p, p, dw, dh); b._p = p; return keep(bk, b);
         }
         let tcv = null, timg = null, tidx = null, trow = null, layer = null, mcv = null, mb = null, crow = null, w2 = null;
+        // 1.1: the game's window picture into the terrain's indices (top / left = the terrain's world row / column 0): idx at
+        // window.origin (default frame B's cam) with its rows, then over at frame B's cam - the world raster of frame B, as the reference
+        function windowInto(c, win, top, left, rows, cols, all) {
+            const put = (src, x0, y0, h) => { for (let y = 0; y < h; y++) { const ty = y0 + y - top; if (ty < 0 || ty >= rows) continue;
+                for (let x = 0; x < win.w; x++) { const tx = x0 + x - left; if (tx < 0 || tx >= cols) continue; const val = src[y * win.w + x]; if (val !== 255) tidx[ty * cols + tx] = val; } } };
+            const bx = Math.round(c.B.cam[0]), by = Math.round(c.B.cam[1]);
+            if (all && win.idx) { const org = c.winAt || [bx, by]; put(win.idx, Math.round(org[0]), Math.round(org[1]), c.winRows || Math.floor(win.idx.length / win.w)); }
+            if (win.over) put(win.over, bx, by, win.h);
+        }
         function paint(ctx, c, S, game, opt) {
             const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
-            const o = Object.assign({ blend: true, subpixel: true, soft: 0 }, opt || {}), G = game || {};
+            const o = Object.assign({ blend: true, subpixel: true, soft: 0, window: false, sprites: true }, opt || {}), G = game || {};
             const ext = c.ext || { x: 0, y: 0 }, VW = c.W, VH = c.H, Wd = Math.round(VW * S), Hd = Math.round(VH * S), k = Math.max(1, Math.floor(S));
             const win = c.win, pal = win.pal, prow = pal.length / 128, palTop = win.palTop | 0, winY = c.B.cam[1];
             const p32 = new Uint32Array(pal.buffer, pal.byteOffset, pal.length / 4);
             const palRow = (wy) => Math.min(Math.max(wy - winY + palTop, 0), prow - 1);
             const scr0 = c.palScreen != null ? c.palScreen : ext.y;          // the band row of the screen's row 0 (wb-scene 2.19)
-            const vx = c.cam[0] - ext.x, vy = c.cam[1] - ext.y;               // the view's top-left in the world (fractional)
+            const vx = c.cam[0], vy = c.cam[1];                               // the view's top-left in the world (fractional): compose()'s cam (1.1)
             const left = Math.floor(vx), top = Math.floor(vy), cols = VW + 2, rows = VH + 2;
             // the terrain: whole world rows / columns, coloured by the palette of their world row
             if (!tcv || tcv.width !== cols || tcv.height !== rows) { tcv = canvas(cols, rows); timg = tcv.getContext('2d').createImageData(cols, rows); tidx = new Uint8Array(cols * rows); trow = new Uint8Array(cols); }
             for (let y = 0; y < rows; y++) { if (G.terrain && G.terrain(top + y, left, cols, trow)) tidx.set(trow, y * cols); else tidx.fill(0, y * cols, (y + 1) * cols); }
             const v = { S, k, top, left, rows, cols, vx, vy, ext, VW, VH, palRow, pal, p32, tidx, timg, c };
             if (G.indices) G.indices(tidx, v);
+            if (o.window) windowInto(c, win, top, left, rows, cols, o.window === 'all');
             { const d32 = new Uint32Array(timg.data.buffer);
                 for (let y = 0; y < rows; y++) { const q = palRow(top + y) * 32; for (let x = y * cols, e = x + cols; x < e; x++) d32[x] = p32[q + (tidx[x] & 31)]; } }
             tcv.getContext('2d').putImageData(timg, 0, 0);
@@ -149,6 +167,24 @@
                 }
             }
             ctx.globalAlpha = 1;
+            if (o.sprites && c.sprs && c.sprs.length) {                         // 1.1: the hardware sprites as WBSCENE.reference: lower k on top
+                const sprs = c.sprs.slice().sort((p, q) => q.s.k - p.s.k), scam = c.spriteCam || c.cam;
+                for (const sp of sprs) {
+                    const s = sp.s, h = s.h | 0; if (!s.idx || h <= 0) continue;
+                    const X = sp.sx && !sp.screen ? sp.x + c.cam[0] - scam[0] : sp.x, Y = sp.sy && !sp.screen ? sp.y + c.cam[1] - scam[1] : sp.y;
+                    const gx = X - vx, gy = Y - vy;                              // in the view (game px)
+                    const sr0 = Math.floor(gy) - scr0 + palTop, wy0 = Math.floor(vy + gy);
+                    const rp = sp.screen ? (yy) => Math.min(Math.max(sr0 + yy, 0), prow - 1) : (yy) => palRow(wy0 + yy);
+                    const key = 's' + h + ':' + (s.key || fnv(s.idx)); let used = st.used.get(key);
+                    if (used === undefined) { if (st.used.size > 2000) st.used.clear(); st.used.set(key, used = usedOf(s.idx)); }
+                    const cv = image(key + '|' + sigOf(p32, used, h, rp) + '|' + k, s.idx, 16, h, k, rp, pal, 0, 0, 0);
+                    const px = gx * S, py = gy * S, dw = 16 * S, dh = h * S;
+                    if (!o.subpixel || (Math.abs(px - Math.round(px)) < 0.01 && Math.abs(py - Math.round(py)) < 0.01 && k === S)) {
+                        ctx.imageSmoothingEnabled = false; ctx.drawImage(cv, 1, 1, 16 * k, h * k, Math.round(px), Math.round(py), dw, dh); }
+                    else { ctx.imageSmoothingEnabled = true; ctx.drawImage(cv, 1, 1, 16 * k, h * k, px, py, dw, dh); }
+                    st.sprs++;
+                }
+            }
             if (G.top) G.top(ctx, v);
             ctx.restore();
             let ms;

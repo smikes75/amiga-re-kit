@@ -42,7 +42,8 @@ const { pos, ms } = K.paint(ctx, scene.compose(ts, view), S, game, { blend: true
 presenter.present({ source: ctx.canvas, rect: [0, 0, W, H] });
 ```
 
-- The view is `c.W x c.H` game px from `cam - ext`; the camera may be fractional on both axes (SWIV scrolls vertically,
+- The view is `c.W x c.H` game px from `c.cam` (compose() gives the view's top-left, the window at `ext` inside it; 1.0 took
+  `ext` off once more - with margins the picture was `ext` px off, 1.1 fixed it); the camera may be fractional on both axes (SWIV scrolls vertically,
   Turrican II both ways). With `blend` a fraction is two whole-pixel layers per axis mixed by the fraction - sharp
   pixels, even motion; without it the nearest device pixel.
 - The palette: `c.win.pal` rows from `c.win.palTop`. An object with the ground takes the rows of the world rows it
@@ -53,10 +54,22 @@ presenter.present({ source: ctx.canvas, rect: [0, 0, W, H] });
 - `pos` is where each object was really drawn (world px of its logical anchor) for `arek web smooth`'s objs, `ms` the
   paint's time for `WBLONGRUN.drawMs`.
 
+## 1.1 (kit 1.0.100): margins, sprites, the game's window
+
+- `c.cam` from `compose()` is the view's top-left (the window sits at `ext` inside it). 1.0 subtracted `ext` again; a page
+  with margins (Turrican II: 72 / 48 px) got the whole picture `ext` px off. SWIV has no margins and was not affected.
+- The hardware sprites `c.sprs` are drawn after the objects exactly as `WBSCENE.reference` draws them: lower `k` on top, on
+  the screen or with the ground per axis (wb-scene 2.4), a sprite fixed on the screen (`screen: true`, a HUD badge in a
+  corner) with the palette of its screen rows. `opt.sprites: false` leaves them out (a game that draws them as objects).
+- `opt.window`: `'over'` puts `c.win.over` (what the game drew that the state does not explain) into the terrain's indices,
+  `'all'` first `c.win.idx` (at `window.origin`, its rows) and then `c.win.over` - frame B's raster in the world grid, as the
+  reference's playfield; after `game.indices`, below the objects, not interpolated. A page drawing from the state keeps it
+  as its safety net and counts what it shows. Not drawn: `c.back`, `c.win.or`, `c.hud`.
+
 ## Checks
 
 - `tests/test_wb_kresba.py`: at a whole camera, alpha 1 and whole device pixels the drawing is wb-scene's reference
-  picture pixel for pixel (Chromium); the shadow and flash colours of the row, the cover, the extras with the object's
+  picture pixel for pixel (Chromium), also with margins, two sprites (one on the screen) and the window layer (1.1); the shadow and flash colours of the row, the cover, the extras with the object's
   rows, a fractional camera on y and on x (each device pixel the mean of its two rows / columns).
 - SWIV (kit session, its page read-only): every 10th paint of its `sw_draw.js` painted again by `wb-kresba.js` with an
   adapter made of `sw_draw`'s own rules - the numbers are in the CHANGELOG of 1.0.87.

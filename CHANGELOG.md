@@ -3,6 +3,20 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.100 (2026-11-20)
+
+- `wb-kresba` 1.1 (Turrican II KIT-GAP, its step 4 - Enhanced drawn from the game's state): the view starts at
+  compose()'s `cam`, which is already the view's top-left - 1.0 took `ext` off once more, so with margins the whole
+  picture was `ext` px off (SWIV draws without margins and never showed it); the hardware sprites `c.sprs` are drawn as
+  `WBSCENE.reference` draws them (after the objects, lower k on top, on the screen or with the ground per axis, a sprite
+  fixed on the screen with its screen rows' palette; `opt.sprites: false` leaves them out); `opt.window` 'over' / 'all'
+  puts the game's own window picture (`c.win.over`, with 'all' also `c.win.idx` at `window.origin`) into the terrain's
+  indices in frame B's raster, after `game.indices`, below the objects - the page's safety net for what the state does
+  not explain. Measured in Turrican II's own page (:8946, read only, kit module injected): 6 levels x 24 compositions
+  with 72 / 48 px margins, 152-233 sprite occurrences per level and the window's `over` in 1-1 / 2-1 - painted by 1.1
+  with a map adapter and `window: 'all'` they are `WBSCENE.reference` with 0 differing pixels; 1.0 differed in every
+  composition (1-1: 10.6 M pixels in 24). SWIV (no margins, no sprites, no window option) draws as before
+
 ## 1.0.99 (2026-11-20)
 
 - `arek roots`: a root that is an entry of a run of `bra.w` slots shorter than `--min-slots` brings the whole run
