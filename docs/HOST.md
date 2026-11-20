@@ -243,6 +243,10 @@ counter an interrupt bumps) sleeps in `js_wait()` until the page allows more and
 `js_wait`, so the game sleeps in wait loops only (as the Superfrog and Alien Breed II rebuilds).
 A run-time target the translation does not know (`-DUNKNOWN_HOOK`, an unknown overlay module)
 sets `engine_error` and the game sleeps at its next wait loop instead of exiting.
+With `--thread` the game runs in its own thread over shared memory (pthreads, no ASYNCIFY; the page needs
+COOP / COEP) and waits in the same wait loops. Its first frame needs no permission: right after `engine_run()`
+the thread computes frame 0 and `engine_done()` is 1 before the page has allowed anything, so a page counts its
+inputs from the engine's start, not from `engine_done()` read after it (JUMP-amiga, 1.1.0).
 
 ```
 arek host state cap/s0 state0 && arek host pack state0 state0.bin      # the state as one file (engine_init)

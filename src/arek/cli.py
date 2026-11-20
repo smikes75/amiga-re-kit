@@ -1307,8 +1307,8 @@ def build_parser():
     s.add_argument('--frame', type=int, help='bus: the slot map of this frame, one line per raster line')
     s.add_argument('--reglog-regs', metavar='SPEC', help='run: registers --reglog records, hex, e.g. 0e0-0f6,08e,090,180-1be')
     s.add_argument('--shots', metavar='PREFIX', help='run: the picture of every frame in --shot-frames (PREFIX_<frame>.png)')
-    s.add_argument('--shot-frames', metavar='FIRST:LAST[,N,...]', help='run: frames --shots covers; 1.0.36: several windows or single '
-                   'frames, e.g. 100:104,900,1500:1502 (needs vamiga-frames-899da5d.patch)')
+    s.add_argument('--shot-frames', metavar='FIRST:LAST[:STEP][,N,...]', help='run: frames --shots covers; 1.0.36: several windows or single '
+                   'frames, e.g. 100:104,900,1500:1502 (needs vamiga-frames-899da5d.patch); 1.1.0: 1000:5000:50 every 50th frame')
     s.add_argument('--capture-at', type=int, metavar='FRAME', help='run (1.0.55): stop at the first breakpoint hit in this frame or later and '
                    'dump the machine into --capture-dir as arek bpstate does - a state and a trace of ONE run (its inputs, its frame numbers); '
                    'needs a build with vamiga-stop-899da5d.patch')
@@ -1573,6 +1573,7 @@ def main(argv=None):
     a = build_parser().parse_args(argv)
     try:
         rc = a.fn(a)
+        sys.stdout.flush()                       # 1.1.0 (JUMP-amiga): a pipe closed early is caught here, not at the interpreter's last flush
     except Unsupported as e:
         print('arek %s: refused: %s' % (a.cmd, e), file=sys.stderr)
         return 2

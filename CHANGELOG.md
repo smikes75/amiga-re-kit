@@ -3,6 +3,25 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+Version numbers (from 1.1.0, Semantic Versioning): the last number for fixes only, the middle one for new features that
+break nothing (a new option, module or command), the first one for a change the games have to follow. Up to 1.0.101 every
+release raised the last number, features included.
+
+## 1.1.0 (2026-11-20)
+
+- The version numbers follow Semantic Versioning from here on (see above); 1.0.101 is followed by 1.1.0.
+- The parity tools, from JUMP-amiga's KIT-GAPs (the first game written for the kit, its browser page): `arek parity` /
+  `parity.compare_shots` compare two pictures by their bytes first and skip equal rows (JUMP-amiga: 665 pairs took 6 min
+  45 s; 256 of its pictures 19.6 s -> 0.3 s, the same result); `trace.fnv1a64` hashes long data in C through ctypes,
+  built once into `$AREK_CACHE` (default ~/.cache/arek) with `$CC`, the Python loop without a compiler - the same value,
+  55x faster on 512 KB (a full capture against `--range 0:80000h` hashes 512 KB a record); `compare_audio`: the
+  rebuild's frames after the frame of the original log's last record are not compared (`beyond`; the original's run
+  ended before the game wrote to Paula) and a scenario's `"until": N` leaves out the frames after N on both sides -
+  SWIV's six suites' logs unchanged, a Turrican II capture pair 127 frames beyond; `--shot-frames FIRST:LAST:STEP`
+  (every STEP-th frame; more than the build's 64 windows: the whole window, the frames between deleted); a pipe closed
+  early (`arek trace show | head`) printed BrokenPipeError at the interpreter's last flush; HOST.md: the threaded
+  engine computes frame 0 without a permission
+
 ## 1.0.101 (2026-11-20)
 
 - `wb-kresba` 1.2 (Turrican II KIT-GAP): a composition with `c.palScreen` (wb-scene `palAnchor: 'screen'`, Turrican II

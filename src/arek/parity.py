@@ -230,7 +230,7 @@ def _audio_rows(path, regs=AUDIO_REGS):
 EDGE_SLACK = 16      # colour clocks: a host without the timing model stamps a write a few clocks off
 
 
-def compare_audio(orig, rebuild, shifts=range(-60, 61)):
+def compare_audio(orig, rebuild, shifts=range(-60, 61), until=None):
     """Frames whose audio writes agree, with the one shift (rebuild frame = original + shift) that fits the whole
     scenario best: ``{'frames', 'equal', 'shift', 'first', 'original', 'rebuild'}``. ``frames`` counts the frames in
     which either side wrote, the rebuild's moved back by the shift - so a frame only one side wrote in is unequal
@@ -244,10 +244,14 @@ def compare_audio(orig, rebuild, shifts=range(-60, 61)):
     ``edge`` (1.0.57, SWIV): a rebuild that starts from a state in the middle of a frame has no writes before that
     point, and a log ends in the middle of its last frame. In the frame of a log's first record the other side's
     writes before that record are left out, in the frame of its last record those after it - when the log has beam
-    positions. ``edge`` counts the writes left out; whole frames only one side has stay unequal."""
+    positions. ``edge`` counts the writes left out; whole frames only one side has stay unequal.
+
+    ``beyond`` (1.1.0, JUMP-amiga): the rebuild's frames after the frame of the original log's last record are not
+    compared - the original's log never covered them (its run ended before the game wrote to Paula in its last frame).
+    ``until`` (the scenario's "until"): frames after it (the original's numbering) are left out on both sides."""
     (a, a0, a1, apos), (b, b0, b1, bpos) = _audio_rows(orig), _audio_rows(rebuild)
     if not a and not b:
-        return {'frames': 0, 'equal': 0, 'shift': 0, 'first': None, 'original': 0, 'rebuild': 0, 'short': 0, 'edge': 0}
+        return {'frames': 0, 'equal': 0, 'shift': 0, 'first': None, 'original': 0, 'rebuild': 0, 'short': 0, 'edge': 0, 'beyond': 0}
     b_end = b1[0] if b1 else None
 
     def trimmed(s):
@@ -266,21 +270,28 @@ def compare_audio(orig, rebuild, shifts=range(-60, 61)):
                         rows[edge[0]] = kept
                     else:
                         del rows[edge[0]]
+        beyond = [f for f in B if a1 and f > a1[0]]
+        for f in beyond:
+            del B[f]
+        if until is not None:
+            for rows in (A, B):
+                for f in [f for f in rows if f > until]:
+                    del rows[f]
         strip = lambda rows: {f: tuple((reg, value) for _, reg, value in v) for f, v in rows.items()}
-        return strip(A), strip(B), n
+        return strip(A), strip(B), n, len(beyond)
 
     best = None
     for s in shifts:
-        A, B, n = trimmed(s)
+        A, B, n, nb = trimmed(s)
         frames = set(A) | set(B)
         eq = sum(1 for f in frames if A.get(f, ()) == B.get(f, ()))
         score = (eq, -len(frames), -abs(s))
         if best is None or score > best[0]:
-            best = (score, s, eq, frames, A, B, n)
-    _, s, eq, frames, A, B, n = best
+            best = (score, s, eq, frames, A, B, n, nb)
+    _, s, eq, frames, A, B, n, nb = best
     first = next((f for f in sorted(frames) if A.get(f, ()) != B.get(f, ())), None)
-    short = 0 if b_end is None else sum(1 for f in a if f + s > b_end)
-    return {'frames': len(frames), 'equal': eq, 'shift': s, 'first': first, 'original': len(a), 'rebuild': len(b), 'short': short, 'edge': n}
+    short = 0 if b_end is None else sum(1 for f in a if f + s > b_end and (until is None or f <= until))
+    return {'frames': len(frames), 'equal': eq, 'shift': s, 'first': first, 'original': len(a), 'rebuild': len(b), 'short': short, 'edge': n, 'beyond': nb}
 
 
 def align_shot(a, b, width=716, max_shift=8, sample=4, step=1):
@@ -307,6 +318,8 @@ def diff_shots(da, db, tolerance=0, dx=0, dy=0, width=716):
     left out): ``(n, box)``, box = (x0, y0, x1, y1) or None. A buffer that is not ``width`` wide counts as one row."""
     if len(da) % (3 * width):
         width = len(da) // 3
+    if not dx and not dy and da == db:              # 1.1.0 (JUMP-amiga): equal bytes - no pixel walk (665 pairs took 6 min 45 s)
+        return 0, None
     h = len(da) // (3 * width)
     n, x0, y0, x1, y1 = 0, None, None, None, None
     for y in range(h):
@@ -314,6 +327,8 @@ def diff_shots(da, db, tolerance=0, dx=0, dy=0, width=716):
         if not 0 <= yb < h:
             continue
         ra, rb = y * width * 3, yb * width * 3
+        if not dx and da[ra:ra + 3 * width] == db[rb:rb + 3 * width]:   # an equal row
+            continue
         for x in range(width):
             xb = x + dx
             if not 0 <= xb < width:
@@ -346,7 +361,7 @@ def compare_shots(orig_prefix, rebuild_prefix, tolerance=0, shift=0, align=0, wi
             raise ValueError('shot %s is not an RGB24 picture (%d bytes)' % (a[f], len(da)))
         if len(da) != len(db):
             raise ValueError('shots %s and %s differ in size' % (a[f], b[f + shift]))
-        dx, dy = align_shot(da, db, width, align) if align else (0, 0)
+        dx, dy = align_shot(da, db, width, align) if align and da != db else (0, 0)
         n, box = diff_shots(da, db, tolerance, dx, dy, width)
         pairs += 1
         equal += n == 0
@@ -386,7 +401,8 @@ def suite(cfg, base='.', run=True):
          "original": {"trace": "build/l1.vtr", "shots": "build/l1_shot", "reglog": "build/l1.reg",
                       "make": "arek trace run ... --out build/l1.vtr"},
          "rebuild":  {"trace": "build/l1_native.vtr", "shots": "build/l1_native_shot", "reglog": "build/l1_native.reg"},
-         "ranges": ["c01776:300"], "ignore": ["c01978:4"], "shifts": 4, "tolerance": 8, "audio_shifts": 60}
+         "ranges": ["c01776:300"], "ignore": ["c01978:4"], "shifts": 4, "tolerance": 8, "audio_shifts": 60,
+         "until": 4300}                                  # 1.1.0: sound compared up to this frame (optional)
 
     Paths are relative to ``base``. ``make`` is run (shell) when the original's trace is
     missing and ``run`` is true - the emulator side is cached by its file. Shots and reglog are
@@ -443,7 +459,7 @@ def suite(cfg, base='.', run=True):
             prob.append('%s has no shots (the other side names them)' % ('rebuild' if path('shots', o) else 'original'))
         if path('reglog', o) and path('reglog', r) and os.path.exists(path('reglog', o)) and os.path.exists(path('reglog', r)):
             n = sc.get('audio_shifts', 60)
-            snd = row['sound'] = compare_audio(path('reglog', o), path('reglog', r), range(-n, n + 1))
+            snd = row['sound'] = compare_audio(path('reglog', o), path('reglog', r), range(-n, n + 1), sc.get('until'))
             if not snd['frames']:
                 prob.append('sound: neither side wrote to Paula (nothing compared)')
             elif not snd['original'] or not snd['rebuild']:

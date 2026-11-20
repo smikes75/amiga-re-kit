@@ -171,7 +171,8 @@ def test_the_edges_of_two_logs_are_compared_over_what_both_hold(tmp_path):
     with open(o, 'wb') as f:
         f.write(trace.encode_reglog([(16, 3, 3, 0x096, 0x7fff), (790, 138, 207, 0x096, 0x8200), (791, 5, 5, 0x0a6, 1)]))
     res = parity.compare_audio(o, r)
-    assert (res['frames'], res['equal']) == (4, 2), res                       # frame 16 only the original has: unequal
+    assert (res['frames'], res['equal'], res['beyond']) == (3, 2, 1), res     # frame 16 only the original has: unequal; 1.1.0: the
+                                                                              # rebuild's 792, after the original's log, not compared
     reglog(o, [(790, 0x096, 0x7fff), (790, 0x096, 0x8200)])                   # no positions: nothing is left out
     reglog(r, [(790, 0x096, 0x8200)])
     res = parity.compare_audio(o, r)

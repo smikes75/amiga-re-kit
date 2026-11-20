@@ -192,8 +192,46 @@ def read(rec, addr, fmt='H'):
     return None
 
 
-def fnv1a64(data):
-    """The hash a ``start:lenh`` range records."""
+_FNV_SRC = (b'#include <stdint.h>\n#include <stddef.h>\n'
+            b'uint64_t arek_fnv(const unsigned char *p, size_t n) { uint64_t h = 0xcbf29ce484222325ull;'
+            b' for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= 0x100000001b3ull; } return h; }\n')
+_FNV_C = None
+
+
+def _fnv_c():
+    """1.1.0 (JUMP-amiga): FNV-1a 64 in C through ctypes, built once into $AREK_CACHE (default ~/.cache/arek) with
+    $CC (default cc) - 512 KB per record in Python made a suite against host_trace --full take minutes. None when
+    there is no compiler: the Python loop then, the same hash."""
+    global _FNV_C
+    if _FNV_C is None:
+        _FNV_C = False
+        try:
+            import ctypes
+            import hashlib
+            import subprocess
+            d = os.environ.get('AREK_CACHE') or os.path.join(os.path.expanduser('~'), '.cache', 'arek')
+            os.makedirs(d, exist_ok=True)
+            so = os.path.join(d, 'fnv-%s.so' % hashlib.sha1(_FNV_SRC).hexdigest()[:12])
+            if not os.path.exists(so):
+                c = so[:-3] + '.c'
+                with open(c, 'wb') as f:
+                    f.write(_FNV_SRC)
+                subprocess.run([os.environ.get('CC', 'cc'), '-O2', '-shared', '-fPIC', '-o', so + '.tmp', c], check=True, capture_output=True, timeout=120)
+                os.replace(so + '.tmp', so)
+            fn = ctypes.CDLL(so).arek_fnv
+            fn.restype, fn.argtypes = ctypes.c_uint64, [ctypes.c_char_p, ctypes.c_size_t]
+            _FNV_C = fn
+        except Exception:
+            _FNV_C = False
+    return _FNV_C or None
+
+
+def fnv1a64(data, native=True):
+    """The hash a ``start:lenh`` range records (1.1.0: long data in C when a compiler is there, same value)."""
+    fn = _fnv_c() if native and len(data) >= 1024 else None
+    if fn:
+        b = bytes(data)
+        return fn(b, len(b))
     h = 0xcbf29ce484222325
     for b in data:
         h = ((h ^ b) * 0x100000001b3) & 0xffffffffffffffff
@@ -280,6 +318,8 @@ def env(path, ranges=None, length=None, inputs=None, reglog=None, audlog=None, s
             raise TraceError('shots need a frame window (first, last)')
         e['VAHL_SHOTS'] = os.path.abspath(shots)
         wins = shot_windows(shot_frames)
+        if len(wins) > 64:                                  # 1.1.0: a step makes single frames; the build takes 64 windows -
+            wins = shot_windows(shot_frames, step=False)    # the whole windows then, the frames between deleted after the run
         if len(wins) == 1:
             e['VAHL_SHOTS_FRAMES'] = '%d:%d' % wins[0]
         else:                                               # 1.0.36: several windows need vamiga-frames-899da5d.patch
@@ -289,13 +329,18 @@ def env(path, ranges=None, length=None, inputs=None, reglog=None, audlog=None, s
     return e
 
 
-def shot_windows(frames):
-    """(first, last), [(a, b), c, ...] or 'a:b,c' -> [(a, b), ...] (1.0.36)."""
+def shot_windows(frames, step=True):
+    """(first, last), [(a, b), c, ...] or 'a:b,c' -> [(a, b), ...] (1.0.36). 1.1.0 (JUMP-amiga): 'a:b:s' is every s-th
+    frame from a to b - single frames; ``step=False`` gives its whole window (a, b) instead."""
     if isinstance(frames, str):
         out = []
         for part in frames.split(','):
-            a, _, b = part.strip().partition(':')
-            out.append((int(a), int(b) if b else int(a)))
+            bits = part.strip().split(':')
+            a = int(bits[0]); b = int(bits[1]) if len(bits) > 1 and bits[1] else a
+            s = int(bits[2]) if len(bits) > 2 and bits[2] else 1
+            if s < 1:
+                raise ValueError('shot frames: a step must be 1 or more (%s)' % part)
+            out.extend([(f, f) for f in range(a, b + 1, s)] if s > 1 and step else [(a, b)])
         return out
     frames = list(frames)
     if len(frames) == 2 and all(isinstance(x, int) for x in frames):
@@ -592,11 +637,15 @@ def capture(conf, out, events, t_arm, t_end, breaks=(), watches=(), ranges=None,
             raise TraceError('no trace written - is VAHL a build with a trace patch? (see %s.log)' % out)
         open(out, 'wb').close()                      # only logs or pictures were wanted; no breakpoint was hit
     got = set()
+    want = [f for a, b in shot_windows(shot_frames) for f in range(a, b + 1)] if shots else []
+    keep = set(want)
     for frame, raw in shot_files(shots) if shots else ():
+        if frame not in keep:                        # 1.1.0: between the frames of a step
+            os.remove(raw)
+            continue
         shot.raw_to_png(raw, raw[:-4] + '.png')
         got.add(frame)
     if shots:                                        # 1.0.39: every asked picture must be there
-        want = [f for a, b in shot_windows(shot_frames) for f in range(a, b + 1)]
         lost = [f for f in want if f not in got]
         if lost:
             raise TraceError('%d of %d asked pictures were not written (frames %s%s): the run ended before them, or the '
