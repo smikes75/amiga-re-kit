@@ -3,6 +3,17 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.99 (2026-11-20)
+
+- `arek roots`: a root that is an entry of a run of `bra.w` slots shorter than `--min-slots` brings the whole run
+  (`--min-table`, default 3 - a pair of `6000 xxxx` also occurs in data; 0 turns it off); `roots.slot_table(data, base,
+  a)` gives the run of an address. Turrican II, boss 3-2: the state machine jumps into a table of three `bra.w` at
+  M02 $265a8 by a computed address; `lea` found the table's first entry only, the build stopped in that fight with
+  "unknown routine 265b0" - no bot route and none of the 66 parity runs ever reached it (found by the Turrican session
+  building the level at the boss; its own tools/modules.py had the same rule). Measured on all seven Turrican II modules
+  (read only): M02 1135 -> 1137 roots, exactly $265ac and $265b0; M00, M01, M03, M04, M05, M06 unchanged (no false
+  root from a `6000 xxxx` in data)
+
 ## 1.0.98 (2026-11-19)
 
 - `arek_bus_paula.h`: a DMACON write takes effect before the channels' events of its own colour clock (SWIV KIT-GAP 25).

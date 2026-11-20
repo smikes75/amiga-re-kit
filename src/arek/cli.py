@@ -311,7 +311,7 @@ def cmd_roots(a):
     from .m68k import roots
     data = rd(a.file)
     kinds = tuple(a.kinds or roots.KINDS)
-    r = roots.scan(data, a.base, a.lo, a.hi, min_slots=a.min_slots, min_run=a.min_run, kinds=kinds, min_ofs=a.min_ofs)
+    r = roots.scan(data, a.base, a.lo, a.hi, min_slots=a.min_slots, min_run=a.min_run, kinds=kinds, min_ofs=a.min_ofs, min_table=a.min_table)
     print(roots.format_roots(r))
     if a.json:
         with open(a.json, 'w') as f:
@@ -1363,6 +1363,7 @@ def build_parser():
     s.add_argument('--min-slots', type=int, default=4, help='bra.w slots in a row that make a table (4)')
     s.add_argument('--min-run', type=int, default=1, help='code pointers in a row that count (1: single pointers too)')
     s.add_argument('--min-ofs', type=int, default=4, help='offsets in a row that make an offset table (4)')
+    s.add_argument('--min-table', type=int, default=3, help='1.0.99: a root inside a run of at least this many bra.w slots brings the whole run (3; 0 = off)')
     s.add_argument('--kinds', nargs='*', choices=['slots', 'ptr', 'lea', 'imm', 'ofs'], help='which kinds (default all)')
     s.add_argument('--json', help='write {address: [kinds]} here')
     s.set_defaults(fn=cmd_roots)

@@ -169,3 +169,26 @@ def test_offset_tables_from_the_code_that_reads_them(tmp_path, capsys):
     assert cli.main(['roots', str(f), '--base', '0x2000', '--kinds', 'ofs']) == 0
     out = capsys.readouterr()
     assert '002100 ofs' in out.out and 'offset table 002040: base 002080, 4-byte entries, offset at +2, x2, added at 002014: 4 targets' in out.err
+
+
+def test_a_root_inside_a_short_bra_table_brings_the_table():
+    """1.0.99 (Turrican II, boss 3-2): `lea` finds the first entry of a table of three bra.w (shorter than min_slots 4);
+    the other entries the code reaches by a computed address become roots too. Two bra.w in a row next to a root are not
+    enough (a 6000 xxxx pair also occurs in data); min_table = 0 turns the rule off; slot_table follows a run both ways."""
+    import struct
+    img = bytearray(0x200)
+    img[0x00:0x06] = bytes.fromhex('41fa' '00fe' '4e75')                 # lea $100(pc),a0 ; rts  -> the table at $100
+    for k, t in enumerate((0x140, 0x140, 0x160)):                         # bra.w to $140, $140, $160
+        at = 0x100 + 4 * k
+        img[at:at + 4] = struct.pack('>Hh', 0x6000, t - (at + 2))
+    img[0x140:0x142] = bytes.fromhex('4e75'); img[0x160:0x162] = bytes.fromhex('4e75')
+    img[0x180:0x184] = struct.pack('>Hh', 0x6000, 0x140 - 0x182)         # a pair of bra.w after a code root at $17c
+    img[0x184:0x188] = struct.pack('>Hh', 0x6000, 0x160 - 0x186)
+    img[0x17c:0x180] = bytes.fromhex('4e71' '4e75')
+    r = roots.scan(bytes(img), 0, kinds=('slots', 'lea'))
+    assert {0x100, 0x104, 0x108} <= set(r) and 'slots' in r[0x104] and 'slots' in r[0x108]
+    off = roots.scan(bytes(img), 0, kinds=('slots', 'lea'), min_table=0)
+    assert 0x100 in off and 0x104 not in off and 0x108 not in off
+    assert roots.slot_table(bytes(img), 0, 0x108) == [0x100, 0x104, 0x108] and roots.slot_table(bytes(img), 0, 0x140) == []
+    assert roots.slot_table(bytes(img), 0, 0x184) == [0x180, 0x184]      # a pair: found, but below min_table 3
+    assert 0x184 not in r

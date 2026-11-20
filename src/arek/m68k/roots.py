@@ -17,6 +17,12 @@ which needed 1 929 of them for 17 levels):
   of the linear decode; it counts from ``min_ofs`` (4) entries. SWIV's behaviour table ($16422, base $16564: 73
   coroutines, 12 of them reached only at the end of the game) is one.
 
+- 1.0.99 (Turrican II, boss 3-2: ``unknown routine 265b0``): a root that is an entry of a run of ``bra.w`` slots shorter
+  than ``min_slots`` brings the whole run (``min_table`` entries, default 3 - a pair of ``6000 xxxx`` also occurs in
+  data). The boss's state machine jumps into a table of three ``bra.w`` at a computed address; ``lea`` found the table's
+  first entry, the other two were missing and the game stopped in that fight. :func:`slot_table` gives the run of an
+  address (a root known from a run - ``arek discover`` - needs only 2).
+
 A root that leads into data is harmless with ``arek recomp --auto-soft`` (it is dropped with a
 warning), so the scan can be generous.
 
@@ -59,7 +65,20 @@ def _slot_run(data, base, a, hi):
 KINDS = ('slots', 'ptr', 'lea', 'imm', 'ofs')
 
 
-def scan(data, base, lo=None, hi=None, min_slots=4, min_run=1, kinds=KINDS, min_ofs=4):
+def slot_table(data, base, a, lo=None, hi=None):
+    """1.0.99: the run of ``bra.w`` slots that address ``a`` is an entry of - ``[start, start + 4, ...]``, [] when a holds
+    no ``bra.w``. The run is followed back from a in steps of 4 and forward to its end."""
+    lo = base if lo is None else lo
+    hi = base + len(data) if hi is None else min(hi, base + len(data))
+    if not lo <= a < hi or _word(data, base, a) != 0x6000:
+        return []
+    s = a
+    while s - 4 >= lo and _word(data, base, s - 4) == 0x6000:
+        s -= 4
+    return [s + 4 * k for k in range(_slot_run(data, base, s, hi))]
+
+
+def scan(data, base, lo=None, hi=None, min_slots=4, min_run=1, kinds=KINDS, min_ofs=4, min_table=3):
     """``{address: set(kinds)}`` of the static roots in [lo, hi) (default: the whole image)."""
     lo = base if lo is None else lo
     hi = base + len(data) if hi is None else min(hi, base + len(data))
@@ -136,6 +155,13 @@ def scan(data, base, lo=None, hi=None, min_slots=4, min_run=1, kinds=KINDS, min_
         for t in offset_tables(data, base, lo, hi, ins, min_ofs):
             for v in t['targets']:
                 add(v, 'ofs')
+    if 'slots' in kinds and min_table:                   # 1.0.99: a root inside a short run of bra.w slots brings the run
+        for a in list(roots):
+            run = slot_table(data, base, a, lo, hi)
+            if len(run) >= min_table:
+                for t in run:
+                    if t != a:
+                        add(t, 'slots')
     return roots
 
 
