@@ -3,6 +3,18 @@
 One line per release, newest first: the subject of the release's commit. The reasons and the measurements are in
 the commit messages (`git show vX.Y.Z`) and in `docs/`. Before 1.0.41 this list did not exist; it is made from the history.
 
+## 1.0.101 (2026-11-20)
+
+- `wb-kresba` 1.2 (Turrican II KIT-GAP): a composition with `c.palScreen` (wb-scene `palAnchor: 'screen'`, Turrican II
+  KIT-GAP 27 - the Copper's colours belong to the screen's rows, the sky's gradient stands while the camera moves between
+  two frames) is coloured as `WBSCENE.reference` colours it: every device row by the palette of its SCREEN row - the terrain
+  at device rows (at a fractional camera one game row spans two screen rows), objects and sprites by the screen rows they
+  are drawn on (off the game-row grid by device row). 1.1 coloured the terrain by world rows of frame B, so between two
+  frames of a vertical scroll the sky's gradient sawed again. Without `palScreen` nothing changes (SWIV). Measured in
+  Turrican II's page (:8946, build fed51c6, read only, compositions at 1/4, 1/2, 3/4 between two frames that differ
+  vertically, on whole device pixels): 1-1 36 compositions, 1.1 off in 31 (2.27 M pixels), 1.2 in none; 2-1 24 and 5-1 53
+  (no gradient there) 0 in both
+
 ## 1.0.100 (2026-11-20)
 
 - `wb-kresba` 1.1 (Turrican II KIT-GAP, its step 4 - Enhanced drawn from the game's state): the view starts at

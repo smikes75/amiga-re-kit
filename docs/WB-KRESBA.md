@@ -66,10 +66,19 @@ presenter.present({ source: ctx.canvas, rect: [0, 0, W, H] });
   reference's playfield; after `game.indices`, below the objects, not interpolated. A page drawing from the state keeps it
   as its safety net and counts what it shows. Not drawn: `c.back`, `c.win.or`, `c.hud`.
 
+## 1.2 (kit 1.0.101): the palette on the screen's rows
+
+- With `c.palScreen` (wb-scene `palAnchor: 'screen'`: the Copper's colours belong to the screen's rows) every device row
+  takes the palette of its screen row, `floor(dy * H / Hd) - palScreen + palTop`, as the reference. The terrain is coloured
+  at device rows (at a fractional camera one game row spans two screen rows), objects and sprites by the screen rows they
+  are drawn on - one off the game-row grid by device row. Without `palScreen`, frame B's world rows as before.
+- Still approximate without `palScreen`: an object drawn off the game-row grid takes one palette row per image row (the
+  reference splits it by device row) - SWIV draws so, no change.
+
 ## Checks
 
 - `tests/test_wb_kresba.py`: at a whole camera, alpha 1 and whole device pixels the drawing is wb-scene's reference
-  picture pixel for pixel (Chromium), also with margins, two sprites (one on the screen) and the window layer (1.1); the shadow and flash colours of the row, the cover, the extras with the object's
+  picture pixel for pixel (Chromium), also with margins, two sprites (one on the screen) and the window layer (1.1), with `palAnchor: 'screen'` between two frames (1.2); the shadow and flash colours of the row, the cover, the extras with the object's
   rows, a fractional camera on y and on x (each device pixel the mean of its two rows / columns).
 - SWIV (kit session, its page read-only): every 10th paint of its `sw_draw.js` painted again by `wb-kresba.js` with an
   adapter made of `sw_draw`'s own rules - the numbers are in the CHANGELOG of 1.0.87.

@@ -1,9 +1,14 @@
-// wb-kresba.js 1.1 (kit 1.0.100) - wb-scene's composition drawn from the GAME'S STATE on a 2D canvas, not from the chips' picture
+// wb-kresba.js 1.2 (kit 1.0.101) - wb-scene's composition drawn from the GAME'S STATE on a 2D canvas, not from the chips' picture
 // (decision 2026-11-17: Enhanced = the exact translated logic + a renderer of its own; SWIV's web/sw_draw.js made general, docs/WB-KRESBA.md).
 // 1.1 (Turrican II KIT-GAP, kit 1.0.100): the view starts at c.cam (compose() gives the view's top-left; 1.0 took ext off it again,
 // so with margins the whole picture was ext px off - SWIV has none); the hardware sprites c.sprs are drawn as WBSCENE.reference
 // draws them (after the objects, lower k on top, on the screen or with the ground per axis, a sprite fixed on the screen with its
 // screen rows' palette); opt.window puts the game's own window picture into the terrain's indices in the world raster of frame B.
+// 1.2 (Turrican II KIT-GAP, kit 1.0.101): a composition with c.palScreen (wb-scene palAnchor: 'screen' - the Copper's colours belong
+// to the screen's rows, the sky's gradient stands while the camera moves between two frames) is coloured as WBSCENE.reference
+// colours it: every device row by the palette of its SCREEN row (floor(dy * H / Hd) - palScreen + palTop) - the terrain row by
+// device row (one game row can span two screen rows at a fractional camera), the objects and sprites by the screen rows they are
+// drawn on. Without palScreen nothing changes (world rows of frame B, as 1.1).
 //   const K = WBKRESBA.create(document);                 // or any object with createElement('canvas') (an OffscreenCanvas shim)
 //   const r = K.paint(ctx, c, S, game, opt);             // c = scene.compose(...) of wb-scene, S = device px per game px
 // game (the game's adapter; everything optional but terrain):
@@ -36,7 +41,7 @@
 // c.W x c.H game px from c.cam (compose() gives the view's top-left, the window at ext inside it); a camera fraction on x and y.
 'use strict';
 (function (root) {
-    const VERSION = '1.1';
+    const VERSION = '1.2';
     const fnv = (a) => { let h = 0x811c9dc5; for (let i = 0; i < a.length; i++) h = Math.imul(h ^ a[i], 16777619); return h >>> 0; };
     const usedOf = (pix) => { let u = 0; for (let i = 0; i < pix.length; i++) if (pix[i] !== 255) u |= 1 << (pix[i] & 31); return u >>> 0; };
     function create(doc) {
@@ -52,11 +57,13 @@
             return out;
         }
         // indices coloured by their rows' palettes, enlarged k x by the nearest neighbour, with a transparent border of 1 device px
-        function image(key, pix, w, h, k, rp, pal, op, sc, fc) {
+        // 1.2: rpd (optional) = the palette row per DEVICE row j of the k-times taller image - an image whose device rows straddle two
+        // screen rows (palScreen, its top off the game-row grid) takes each device row's own row, as the reference
+        function image(key, pix, w, h, k, rp, pal, op, sc, fc, rpd) {
             let cv = st.cache.get(key); if (cv) { st.cache.delete(key); st.cache.set(key, cv); return cv; }
-            const small = canvas(w, h), g0 = small.getContext('2d'), img = g0.createImageData(w, h), d = img.data;
-            for (let y = 0; y < h; y++) { const q0 = rp(y) * 128;
-                for (let x = 0; x < w; x++) { let c = pix[y * w + x]; if (c === 255) continue; if (op === 1) c = sc; else if (op === 2) c = fc;
+            const hh = rpd ? h * k : h, small = canvas(w, hh), g0 = small.getContext('2d'), img = g0.createImageData(w, hh), d = img.data;
+            for (let y = 0; y < hh; y++) { const q0 = (rpd ? rpd(y) : rp(y)) * 128, yr = rpd ? Math.floor(y / k) : y;
+                for (let x = 0; x < w; x++) { let c = pix[yr * w + x]; if (c === 255) continue; if (op === 1) c = sc; else if (op === 2) c = fc;
                     const q = q0 + (c & 31) * 4, o = (y * w + x) * 4; d[o] = pal[q]; d[o + 1] = pal[q + 1]; d[o + 2] = pal[q + 2]; d[o + 3] = 255; } }
             g0.putImageData(img, 0, 0);
             cv = canvas(w * k + 2, h * k + 2); const g = cv.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(small, 1, 1, w * k, h * k);
@@ -68,6 +75,20 @@
             g.drawImage(cv, 1, 1, w * k, h * k, p, p, dw, dh); b._p = p; return keep(bk, b);
         }
         let tcv = null, timg = null, tidx = null, trow = null, layer = null, mcv = null, mb = null, crow = null, w2 = null;
+        const dcv = [null, null], dimg = [null, null];
+        // 1.2: the terrain at device rows for palScreen: row r shows the world row floor((r + cd) * VH / Hd) (cd = the camera in device rows,
+        // as the reference's camd) coloured by the palette row of its screen row pr(r); rows with the same pair are copied
+        function devLayer(i, cd, cols, rows, Hd, VH, top, p32, pr) {
+            if (!dcv[i] || dcv[i].width !== cols || dcv[i].height !== Hd) { dcv[i] = canvas(cols, Hd); dimg[i] = dcv[i].getContext('2d').createImageData(cols, Hd); }
+            const d32 = new Uint32Array(dimg[i].data.buffer); let lt = -1, lp = -1;
+            for (let r = 0; r < Hd; r++) {
+                const tr = Math.min(Math.max(Math.floor((r + cd) * VH / Hd) - top, 0), rows - 1), q = pr(r), o0 = r * cols;
+                if (tr === lt && q === lp) { d32.copyWithin(o0, o0 - cols, o0); continue; }
+                lt = tr; lp = q; const q32 = q * 32, t0 = tr * cols;
+                for (let x = 0; x < cols; x++) d32[o0 + x] = p32[q32 + (tidx[t0 + x] & 31)];
+            }
+            dcv[i].getContext('2d').putImageData(dimg[i], 0, 0); return dcv[i];
+        }
         // 1.1: the game's window picture into the terrain's indices (top / left = the terrain's world row / column 0): idx at
         // window.origin (default frame B's cam) with its rows, then over at frame B's cam - the world raster of frame B, as the reference
         function windowInto(c, win, top, left, rows, cols, all) {
@@ -85,6 +106,11 @@
             const p32 = new Uint32Array(pal.buffer, pal.byteOffset, pal.length / 4);
             const palRow = (wy) => Math.min(Math.max(wy - winY + palTop, 0), prow - 1);
             const scr0 = c.palScreen != null ? c.palScreen : ext.y;          // the band row of the screen's row 0 (wb-scene 2.19)
+            const scrP = c.palScreen != null ? c.palScreen : null;            // 1.2: palAnchor 'screen' - every device row by its screen row
+            const devRow = (dy) => Math.min(Math.max(Math.floor(dy * VH / Hd) - scrP + palTop, 0), prow - 1);
+            const devRows = (gy) => { if (scrP === null || k !== S) return null; const d0 = Math.round(gy * S); if (((d0 % k) + k) % k === 0) return null;   // 1.2: off the game-row grid
+                return (j) => Math.min(Math.max(Math.floor((d0 + j) * VH / Hd) - scrP + palTop, 0), prow - 1); };
+            const bandRows = (gy) => { const b0 = Math.floor(Math.round(gy * S) * VH / Hd) - scrP + palTop; return (yy) => Math.min(Math.max(b0 + yy, 0), prow - 1); };
             const vx = c.cam[0], vy = c.cam[1];                               // the view's top-left in the world (fractional): compose()'s cam (1.1)
             const left = Math.floor(vx), top = Math.floor(vy), cols = VW + 2, rows = VH + 2;
             // the terrain: whole world rows / columns, coloured by the palette of their world row
@@ -99,7 +125,16 @@
             ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = false; ctx.globalAlpha = 1; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, Wd, Hd);
             const fx = (vx - left) * S, fy = (vy - top) * S;
             const tx0 = -Math.round(fx), ty0 = -Math.round(fy);              // where the terrain's column / row 0 lands (device px) for the masks
-            if (o.blend) {                                                     // two whole-pixel layers per axis, blended by the fraction
+            if (scrP !== null) {                                               // 1.2: the terrain at device rows, each with its screen row's palette
+                const lx = o.blend ? Math.floor(fx) : Math.round(fx), ax = o.blend ? fx - lx : 0, cy = o.blend ? Math.floor(vy * S) : Math.round(vy * S), ay = o.blend ? vy * S - cy : 0;
+                const L0 = devLayer(0, cy, cols, rows, Hd, VH, top, p32, devRow), L1 = ay > 0.002 ? devLayer(1, cy + 1, cols, rows, Hd, VH, top, p32, devRow) : null;
+                ctx.globalAlpha = 1; ctx.drawImage(L0, 0, 0, cols, Hd, -lx, 0, cols * S, Hd);
+                if (L1) { ctx.globalAlpha = ay; ctx.drawImage(L1, 0, 0, cols, Hd, -lx, 0, cols * S, Hd); }
+                if (ax > 0.002) { if (!w2 || w2.width !== Wd || w2.height !== Hd) w2 = canvas(Wd, Hd); const g2 = w2.getContext('2d'); g2.globalAlpha = 1; g2.clearRect(0, 0, Wd, Hd); g2.imageSmoothingEnabled = false; g2.drawImage(L0, 0, 0, cols, Hd, -lx - 1, 0, cols * S, Hd);
+                    if (L1) { g2.globalAlpha = ay; g2.drawImage(L1, 0, 0, cols, Hd, -lx - 1, 0, cols * S, Hd); }
+                    ctx.globalAlpha = ax; ctx.drawImage(w2, 0, 0); }
+                ctx.globalAlpha = 1;
+            } else if (o.blend) {                                              // two whole-pixel layers per axis, blended by the fraction
                 const lx = Math.floor(fx), ly = Math.floor(fy), ax = fx - lx, ay = fy - ly, put = (dx, dy, a) => { if (a <= 0.002) return; ctx.globalAlpha = a; ctx.drawImage(tcv, 0, 0, cols, rows, -lx - dx, -ly - dy, cols * S, rows * S); };
                 ctx.globalAlpha = 1; ctx.drawImage(tcv, 0, 0, cols, rows, -lx, -ly, cols * S, rows * S);
                 if (ay > 0.002) put(0, 1, ay);
@@ -123,8 +158,9 @@
                 const sx = !!e.sx || !!e.screen, sy = !!e.sy || !!e.screen;
                 const gx = sx ? ext.x + e.scr[0] + ox : e.x + ox - vx, gy = sy ? ext.y + e.scr[1] + oy : e.y + oy - vy;   // in the view (game px, fractions)
                 const wy0 = Math.floor(vy + gy), sr0 = Math.floor(gy) - scr0 + palTop;
-                const rp = sy ? (yy) => Math.min(Math.max(sr0 + yy, 0), prow - 1) : (yy) => palRow(wy0 + yy), sig = sigOf(p32, used, h, rp);
-                const cv = image(key + '|' + sig + '|' + k, pix, w, h, k, rp, pal, op, sc, flc);
+                const rp = scrP !== null ? bandRows(gy) : sy ? (yy) => Math.min(Math.max(sr0 + yy, 0), prow - 1) : (yy) => palRow(wy0 + yy);   // 1.2: palScreen - the screen rows it is drawn on
+                const rpd = devRows(gy), sig = rpd ? 'd' + sigOf(p32, used, h * k, rpd) : sigOf(p32, used, h, rp);
+                const cv = image(key + '|' + sig + '|' + k, pix, w, h, k, rp, pal, op, sc, flc, rpd);
                 const px = gx * S, py = gy * S, dw = w * S, dh = h * S;
                 ctx.globalAlpha = a / 256;
                 const anchor = [gx - ox + vx, gy - oy + vy];
@@ -174,10 +210,10 @@
                     const X = sp.sx && !sp.screen ? sp.x + c.cam[0] - scam[0] : sp.x, Y = sp.sy && !sp.screen ? sp.y + c.cam[1] - scam[1] : sp.y;
                     const gx = X - vx, gy = Y - vy;                              // in the view (game px)
                     const sr0 = Math.floor(gy) - scr0 + palTop, wy0 = Math.floor(vy + gy);
-                    const rp = sp.screen ? (yy) => Math.min(Math.max(sr0 + yy, 0), prow - 1) : (yy) => palRow(wy0 + yy);
+                    const rp = scrP !== null ? bandRows(gy) : sp.screen ? (yy) => Math.min(Math.max(sr0 + yy, 0), prow - 1) : (yy) => palRow(wy0 + yy);
                     const key = 's' + h + ':' + (s.key || fnv(s.idx)); let used = st.used.get(key);
                     if (used === undefined) { if (st.used.size > 2000) st.used.clear(); st.used.set(key, used = usedOf(s.idx)); }
-                    const cv = image(key + '|' + sigOf(p32, used, h, rp) + '|' + k, s.idx, 16, h, k, rp, pal, 0, 0, 0);
+                    const rpd = devRows(gy), cv = image(key + '|' + (rpd ? 'd' + sigOf(p32, used, h * k, rpd) : sigOf(p32, used, h, rp)) + '|' + k, s.idx, 16, h, k, rp, pal, 0, 0, 0, rpd);
                     const px = gx * S, py = gy * S, dw = 16 * S, dh = h * S;
                     if (!o.subpixel || (Math.abs(px - Math.round(px)) < 0.01 && Math.abs(py - Math.round(py)) < 0.01 && k === S)) {
                         ctx.imageSmoothingEnabled = false; ctx.drawImage(cv, 1, 1, 16 * k, h * k, Math.round(px), Math.round(py), dw, dh); }

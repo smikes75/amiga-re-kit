@@ -1,4 +1,4 @@
-"""wb-kresba.js 1.0 (kit 1.0.87), 1.1 (kit 1.0.100: the view at compose()'s cam with margins, hardware sprites, the window layer): wb-scene's composition drawn from the game's state (decision 2026-11-17, docs/WB-KRESBA.md).
+"""wb-kresba.js 1.0 (kit 1.0.87), 1.1 (kit 1.0.100: the view at compose()'s cam with margins, hardware sprites, the window layer), 1.2 (kit 1.0.101: palAnchor 'screen'): wb-scene's composition drawn from the game's state (decision 2026-11-17, docs/WB-KRESBA.md).
 At a whole camera, alpha 1 and whole device pixels it is wb-scene's reference picture pixel for pixel; the shadow / flash
 colours, the foreground cover, the extras after an object and a fractional camera are checked on their own pixels."""
 import json
@@ -65,7 +65,7 @@ def test_version_and_files():
         pytest.skip('no node')
     r = subprocess.run([node, '-e', "const K = require(%s); console.log(JSON.stringify([K.VERSION, typeof K.create, K.usedOf(new Uint8Array([1, 255, 3]))]))"
                         % json.dumps(str(WEB / 'wb-kresba.js'))], capture_output=True, text=True, check=True)
-    assert json.loads(r.stdout) == ['1.1', 'function', 10] and 'wb-kresba.js' in web.FILES
+    assert json.loads(r.stdout) == ['1.2', 'function', 10] and 'wb-kresba.js' in web.FILES
 
 
 def test_kresba_is_the_reference_and_its_colours_cover_and_blend():
@@ -156,3 +156,62 @@ def test_kresba_1_1_margins_sprites_and_the_window_are_the_reference():
     assert sp['bad'] == 0 and sp['sprs'] == 2 and sp['off'] > 0 and sp['drawn'] >= 2, sp   # both sprites as the reference; without them it differs
     ov = out['over']
     assert ov['on'] == 0 and ov['off'] > 0 and ov['all'] == 0 and ov['junkOver'] > 0, ov   # 'over' / 'all' = the reference's playfield; default off
+
+
+PAGE12 = r"""
+(() => {
+  // 1.2 (Turrican II KIT-GAP): palAnchor 'screen' - the camera between two frames, 1.5 game rows from frame B's; S = 2 puts it on a
+  // whole device row, so one game row spans two screen rows; the terrain, an object with the ground and a sprite - the reference pixel for pixel
+  const W = 48, H = 32, S = 2, CA = 100, CB = 103;
+  const f = (wx, wy) => 1 + ((wx * 3 + wy * 7) % 15);
+  const pal = new Uint8Array(H * 32 * 4);
+  for (let r = 0; r < H; r++) for (let c = 0; c < 32; c++) { const q = (r * 32 + c) * 4; pal[q] = c ? (c * 8 + r * 5) & 255 : 0; pal[q + 1] = c ? (r * 7 + 1) & 255 : 0; pal[q + 2] = c ? (c * 3 + 50) & 255 : 0; pal[q + 3] = 255; }
+  const win = (cy) => { const a = new Uint8Array(W * H); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) a[y * W + x] = f(x, cy + y); return a; };
+  const pic = (w, h, g) => { const a = new Uint8Array(w * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) a[y * w + x] = g(x, y); return a; };
+  const obi = pic(6, 5, (x, y) => 16 + ((x * 3 + y) % 15));
+  const spi = pic(16, 4, (x, y) => x < 5 ? 20 + y : 255);
+  // object 8 on the game-row grid (device row 20), object 9 off it (device row 21: each of its rows on two screen rows), the sprite off it too (15)
+  const frame = (cy, t, oy, sy, bare) => ({ n: t, t, cam: [0, cy], limits: { x0: 0, x1: 0, y0: 0, y1: 1000 }, window: { w: W, h: H, idx: win(cy), pal },
+    objects: bare ? [] : [{ id: 8, w: 6, h: 5, idx: obi, x: 10, y: oy, pass: t }, { id: 9, w: 6, h: 5, idx: obi, x: 20, y: oy + 1 + (t ? 1 : 0), pass: t }],
+    sprites: bare ? [] : [{ k: 0, h: 4, idx: spi, x: 30, y: sy }] });
+  const fr = [frame(CA, 0, 110, 7), frame(CB, 10, 113, 8)], bare = [frame(CA, 0, 0, 0, true), frame(CB, 10, 0, 0, true)];
+  const terrain = (wy, x0, w, out) => { if (wy < CB || wy >= CB + H) return false; for (let i = 0; i < w; i++) { const x = x0 + i; out[i] = x >= 0 && x < W ? f(x, wy) : 0; } return true; };
+  const K = WBKRESBA.create(document), cv = document.createElement('canvas');
+  const cmp = (c, opt) => { const ref = WBSCENE.reference(c); cv.width = Math.round(c.W * S); cv.height = Math.round(c.H * S); const g = cv.getContext('2d'); K.paint(g, c, S, { terrain }, Object.assign({ subpixel: false }, opt));
+    const px = g.getImageData(0, 0, cv.width, cv.height).data; let bad = 0; for (let i = 0; i < ref.length; i++) if (ref[i] !== px[i]) bad++; return bad; };
+  const out = {};
+  const cs = WBSCENE.compose(fr, 5, { S, extX: 0, extY: 0 }, { palAnchor: 'screen' }, null);
+  out.screen = { blend: cmp(cs, {}), plain: cmp(cs, { blend: false }), cam: cs.cam, palScreen: cs.palScreen, objs: cs.objs.length, sprs: cs.sprs.length,
+                 ys: cs.objs.map((e) => e.y).concat(cs.sprs.map((e) => e.y)) };
+  const cw = WBSCENE.compose(bare, 5, { S, extX: 0, extY: 0 }, {}, null);
+  out.world = { bad: cmp(cw, {}), palScreen: cw.palScreen };
+  out.differ = (() => { const a = WBSCENE.reference(cs), b = WBSCENE.reference(cw); let n = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++; return n; })();
+  return out;
+})()
+"""
+
+
+def test_kresba_1_2_pal_anchor_screen_is_the_reference():
+    pytest.importorskip('playwright')
+    from playwright.sync_api import sync_playwright
+    try:
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            p = b.new_page()
+            errs = []
+            p.on('pageerror', lambda e: errs.append(str(e)))
+            p.set_content('<!doctype html><html><body></body></html>')
+            p.add_script_tag(path=str(WEB / 'wb-scene.js'))
+            p.add_script_tag(path=str(WEB / 'wb-kresba.js'))
+            out = p.evaluate(PAGE12)
+            b.close()
+    except Exception as e:
+        if 'Executable doesn' in str(e) or 'playwright install' in str(e):
+            pytest.skip('no chromium for playwright')
+        raise
+    assert not errs, errs
+    s = out['screen']
+    assert s['cam'] == [0, 101.5] and s['palScreen'] == 0 and s['objs'] == 2 and s['sprs'] == 1 and s['ys'] == [111.5, 113, 109], s
+    assert s['blend'] == 0 and s['plain'] == 0, s                # screen rows: the terrain by device row, the objects and the sprite by the rows they are on
+    assert out['world']['bad'] == 0 and out['world']['palScreen'] is None, out['world']   # world rows (1.1): the terrain unchanged
+    assert out['differ'] > 0, out                                  # the two anchors really colour differently here
