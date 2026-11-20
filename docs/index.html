@@ -157,6 +157,7 @@
     <nav>
       <a href="#watch">Watch</a>
       <a href="#play">Play</a>
+      <a href="#new">New game</a>
       <a href="about.html">About</a>
       <a href="faq.html">FAQ</a>
       <a href="kit.html">The kit</a>
@@ -168,8 +169,8 @@
   <div class="hero">
     <h1>Old Amiga games, rebuilt to run in your browser.</h1>
     <p class="lede"><strong>AREK</strong> (Amiga Reverse Engineering Kit) is a free toolkit that lets an AI take a 1990s Amiga game apart, piece by piece, and build it again as a modern program. The rebuilt game plays like the original, moves smoothly on today's screens and can show more of the level than the old window did.</p>
-    <p>Two games so far: <strong>Alien Breed II</strong> and <strong>Superfrog</strong>. Both are playable in full at <a href="https://arek.fun/">arek.fun</a> with your own copy of the game.</p>
-    <p><a class="btn" href="#watch">Watch it run</a> <a class="btn quiet" href="#play">Play Alien Breed II</a> <a class="btn quiet" href="#next">Play Superfrog</a></p>
+    <p>Three games so far: <strong>Alien Breed II</strong>, <strong>Superfrog</strong> and <strong>SWIV</strong>, all playable in full at <a href="https://arek.fun/">arek.fun</a> with your own copy of the game. And the same tools now help the other way round, writing new games for the Amiga: the first one is <a href="#new"><strong>AmiBounce</strong></a>.</p>
+    <p><a class="btn" href="#watch">Watch it run</a> <a class="btn quiet" href="#play">Play Alien Breed II</a> <a class="btn quiet" href="#next">Play Superfrog</a> <a class="btn quiet" href="#swiv">Play SWIV</a> <a class="btn quiet" href="#new">New: AmiBounce</a></p>
   </div>
 
   <section id="watch">
@@ -215,12 +216,27 @@
     </div>
   </section>
 
+  <section id="swiv">
+    <h2>Play SWIV</h2>
+    <p>SWIV (Storm / Random Access, 1991). The whole game, one or two players: a helicopter and a jeep. Enhanced adds smooth motion, extra sound voices for the effects the original had to drop, and a sound mixer. You need your own disk image; the common dumps of the game are accepted.</p>
+    <p><a class="btn" href="https://arek.fun/swiv/">Play the whole game at arek.fun</a></p>
+  </section>
+
+  <section id="new">
+    <h2>A new game: AmiBounce</h2>
+    <p>AREK began as a way to take old games apart. The same tools turned out to help the other way round too: the emulator that measures every frame, the disk builder, and the translation that puts a finished game into a web page. AmiBounce is the first game made this way: an original game for the Amiga 500 (OCS, 512 KB, Kickstart 1.3), written in 68000 assembly. A ball bounces to the beat over floating tiles with parallax depth below, and you steer it in the air so that it lands on a tile.</p>
+    <p>Like the rest of AREK, it was written by an AI agent (Claude Code) using the kit, with a person setting the goals and testing. This is a demo with three levels, free to copy unmodified.</p>
+    <p><a class="btn" href="https://arek.fun/amibounce/">Play in the browser</a> <a class="btn quiet" href="https://arek.fun/amibounce/download/AmiBounce-demo.adf">Download the ADF</a></p>
+  </section>
+
   <section id="status">
     <h2>Status, November 2026</h2>
     <ul class="status">
       <li><strong>Alien Breed II:</strong> the whole game playable at <a href="https://arek.fun/alienbreed2/">arek.fun</a>, Original and Enhanced modes, one or two players. Measured against the original in an emulator (the published build on kit 0.8.4, level 1, four 30-second runs with random joystick input): 99.9 % of the pixels match, the sound chip writes match in 97–100 % of the frames, and the game state matches tick by tick for the whole run in one of the four; in the others small CPU timing differences make the runs drift apart after 1–3 seconds.</li>
       <li><strong>What is verified:</strong> the rebuild runs the whole game, and the whole game is what you get. The Enhanced view, though, is tuned and checked level by level: the wider window, the earlier activation of objects and the sound routing all depend on how each level is built. Levels 1 and 2 of each game are the measured ones; the later levels run and are being checked as I play through them. If something looks wrong there, <a href="about.html#feedback">tell me</a>.</li>
       <li><strong>Superfrog:</strong> the whole game playable at <a href="https://arek.fun/superfrog/">arek.fun</a>, Original and Enhanced modes; Magic Woods 1–2 verified against the original with a recorded run through both levels (13 245 frames); the page runs the game in its own thread with shared memory, which the earlier preview on GitHub Pages could not.</li>
+      <li><strong>SWIV:</strong> the whole game playable at <a href="https://arek.fun/swiv/">arek.fun</a>, Original and Enhanced modes, one or two players. Measured against the original in an emulator: the sound chip writes match in all 37 423 frames of a run to the end of the game, and the common disk versions (TOSEC, PNS) give the same game state frame by frame.</li>
+      <li><strong>AmiBounce:</strong> a demo with three levels, as an ADF and in the browser. The browser version matches the vAmiga emulator in game state and sound on the measured runs, and in the picture in all but one frame of 5 629. Tested in emulators (vAmiga as A500, A500 Plus and A1200).</li>
       <li><strong>Not supported:</strong> the AGA version of Alien Breed II; original retail disks are not verified yet (see the <a href="faq.html#disks">FAQ</a>).</li>
       <li><strong>Tested in:</strong> tested so far in Chromium and WebKit; more browsers after launch. Not tested on a phone yet.</li>
     </ul>
@@ -228,7 +244,7 @@
 
   <footer>
     <p>AREK is free and open source (MIT) and ships no disk images, no Kickstart ROM and no game data. It measures games through the <a href="https://github.com/dirkwhoffmann/vAmiga">vAmiga</a> emulator by Dirk W. Hoffmann; the kit carries small patches to it (MPL-2.0), not the emulator itself.</p>
-    <p>Alien Breed II and Superfrog belong to Team17. The playable page holds none of the game's data: you supply disk images of a game you own, and the code derived from the game opens only with them.</p>
+    <p>Alien Breed II and Superfrog belong to Team17, SWIV to its rights holders. The playable pages hold none of these games' data: you supply disk images of a game you own, and the code derived from the game opens only with them. AmiBounce is an original game made with AREK.</p>
     <p>Made with Claude Code and OpenAI Codex. <a href="about.html">About AREK</a>, <a href="faq.html">FAQ</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit on GitHub</a>, <a href="https://pypi.org/project/amiga-re-kit/">package on PyPI</a>.</p>
   </footer>
 </div>

@@ -157,6 +157,7 @@
     <nav>
       <a href="#watch">Video</a>
       <a href="#play">Hrát</a>
+      <a href="#new">Nová hra</a>
       <a href="about.cs.html">O projektu</a>
       <a href="faq.cs.html">Otázky</a>
       <a href="kit.cs.html">Kit</a>
@@ -168,8 +169,8 @@
   <div class="hero">
     <h1>Staré hry z Amigy, přestavěné pro váš prohlížeč.</h1>
     <p class="lede"><strong>AREK</strong> (Amiga Reverse Engineering Kit) je volně dostupná sada nástrojů, se kterou umělá inteligence rozebere hru z Amigy z devadesátých let kousek po kousku a postaví ji znovu jako moderní program. Přestavěná hra se hraje jako originál, na dnešních monitorech se hýbe plynule a umí ukázat víc z levelu, než se vešlo do starého okna.</p>
-    <p>Zatím dvě hry: <strong>Alien Breed II</strong> a <strong>Superfrog</strong>. Obě si zahrajete celé na <a href="https://arek.fun/">arek.fun</a> s vlastní kopií hry.</p>
-    <p><a class="btn" href="#watch">Podívat se na video</a> <a class="btn quiet" href="#play">Hrát Alien Breed II</a> <a class="btn quiet" href="#next">Hrát Superfrog</a></p>
+    <p>Zatím tři hry: <strong>Alien Breed II</strong>, <strong>Superfrog</strong> a <strong>SWIV</strong>, všechny si zahrajete celé na <a href="https://arek.fun/">arek.fun</a> s vlastní kopií hry. A stejné nástroje teď pomáhají i obráceně, při psaní nových her pro Amigu: první je <a href="#new"><strong>AmiBounce</strong></a>.</p>
+    <p><a class="btn" href="#watch">Podívat se na video</a> <a class="btn quiet" href="#play">Hrát Alien Breed II</a> <a class="btn quiet" href="#next">Hrát Superfrog</a> <a class="btn quiet" href="#swiv">Hrát SWIV</a> <a class="btn quiet" href="#new">Nová hra: AmiBounce</a></p>
   </div>
 
   <section id="watch">
@@ -215,12 +216,27 @@
     </div>
   </section>
 
+  <section id="swiv">
+    <h2>Hrát SWIV</h2>
+    <p>SWIV (Storm / Random Access, 1991). Celá hra, jeden nebo dva hráči: vrtulník a džíp. Režim Vylepšeno přidává plynulý pohyb, hlasy navíc pro zvuky, které originál musel zahodit, a mixér zvuku. Potřebujete vlastní obraz diskety; běžné verze hry se přijímají.</p>
+    <p><a class="btn" href="https://arek.fun/swiv/">Hrát celou hru na arek.fun</a></p>
+  </section>
+
+  <section id="new">
+    <h2>Nová hra: AmiBounce</h2>
+    <p>AREK vznikl, aby rozebíral staré hry. Ukázalo se, že stejné nástroje pomáhají i obráceně: emulátor, který měří každý snímek, stavba diskety a překlad, který hotovou hru dá do webové stránky. AmiBounce je první hra, která takhle vznikla: původní hra pro Amigu 500 (OCS, 512 KB, Kickstart 1.3) napsaná v assembleru 68000. Míč skáče do rytmu nad vznášejícími se dlaždicemi, pod nimi je paralaxa do hloubky, a vy ho ve vzduchu řídíte tak, aby dopadl na dlaždici.</p>
+    <p>Stejně jako zbytek AREKu ji napsal AI agent (Claude Code) s nástroji kitu; člověk zadával cíle a testoval. Je to ukázka se třemi úrovněmi, kopírovat ji smíte zdarma v nezměněné podobě.</p>
+    <p><a class="btn" href="https://arek.fun/amibounce/">Hrát v prohlížeči</a> <a class="btn quiet" href="https://arek.fun/amibounce/download/AmiBounce-demo.adf">Stáhnout ADF</a></p>
+  </section>
+
   <section id="status">
     <h2>Stav, listopad 2026</h2>
     <ul class="status">
       <li><strong>Alien Breed II:</strong> celá hra hratelná na <a href="https://arek.fun/alienbreed2/">arek.fun</a>, režimy Originál a Vylepšeno, jeden nebo dva hráči. Změřeno proti originálu v emulátoru (zveřejněné sestavení na kitu 0.8.4, level 1, čtyři třicetisekundové běhy s náhodným joystickem): shoduje se 99,9 % bodů obrazu, zápisy do zvukového čipu se shodují v 97–100 % snímků a stav hry se shoduje tik po tiku po celý běh v jednom ze čtyř; v ostatních se běhy po 1–3 sekundách rozejdou kvůli malým rozdílům v časování procesoru.</li>
       <li><strong>Co je ověřeno:</strong> v přestavbě běží celá hra a celou hru také dostanete. Režim Vylepšeno se ale ladí a ověřuje level po levelu: širší okno, dřívější aktivace objektů i směrování zvuku závisí na tom, jak je který level postavený. Změřené jsou levely 1 a 2 každé hry; další levely běží a ověřuju je postupně, jak je procházím. Když tam něco nevypadá dobře, <a href="about.cs.html#feedback">dejte mi vědět</a>.</li>
       <li><strong>Superfrog:</strong> celá hra hratelná na <a href="https://arek.fun/superfrog/">arek.fun</a>, režimy Originál i Vylepšeno; Magic Woods 1–2 ověřeny proti originálu nahraným průchodem oběma levely (13 245 snímků); stránka běží hru ve vlastním vlákně se sdílenou pamětí, což dřívější ukázka na GitHub Pages neuměla.</li>
+      <li><strong>SWIV:</strong> celá hra hratelná na <a href="https://arek.fun/swiv/">arek.fun</a>, režimy Originál i Vylepšeno, jeden nebo dva hráči. Změřeno proti originálu v emulátoru: zápisy do zvukového čipu se shodují ve všech 37 423 snímcích běhu až do konce hry a běžné verze diskety (TOSEC, PNS) dávají snímek po snímku stejný stav hry.</li>
+      <li><strong>AmiBounce:</strong> ukázka se třemi úrovněmi jako ADF i v prohlížeči. Verze v prohlížeči se v měřených bězích shoduje s emulátorem vAmiga ve stavu hry i ve zvuku a v obraze ve všech snímcích kromě jednoho z 5 629. Vyzkoušeno v emulátorech (vAmiga jako A500, A500 Plus a A1200).</li>
       <li><strong>Nepodporováno:</strong> verze AGA Alien Breed II; originální prodejní diskety zatím ověřené nejsou (viz <a href="faq.cs.html#disks">otázky a odpovědi</a>).</li>
       <li><strong>Vyzkoušeno v:</strong> zatím v Chromiu a WebKitu; další prohlížeče po spuštění. Na telefonu zatím nevyzkoušeno.</li>
     </ul>
@@ -228,7 +244,7 @@
 
   <footer>
     <p>AREK je zdarma a s otevřeným kódem (MIT) a neobsahuje žádné obrazy disket, žádný Kickstart ROM ani data her. Hry měří přes emulátor <a href="https://github.com/dirkwhoffmann/vAmiga">vAmiga</a> od Dirka W. Hoffmanna; kit nese jen jeho malé úpravy (MPL-2.0), ne emulátor samotný.</p>
-    <p>Alien Breed II a Superfrog patří společnosti Team17. Hratelná stránka žádná data hry neobsahuje: obrazy disket hry, kterou vlastníte, dodáte sami a kód odvozený ze hry se otevře jen s nimi.</p>
+    <p>Alien Breed II a Superfrog patří společnosti Team17, SWIV jejím držitelům práv. Hratelné stránky žádná data těchto her neobsahují: obrazy disket hry, kterou vlastníte, dodáte sami a kód odvozený ze hry se otevře jen s nimi. AmiBounce je původní hra vytvořená s AREKem.</p>
     <p>Vytvořeno s Claude Code a OpenAI Codex. <a href="about.cs.html">O AREKu</a>, <a href="faq.cs.html">otázky a odpovědi</a>, <a href="https://github.com/smikes75/amiga-re-kit">kit na GitHubu</a>, <a href="https://pypi.org/project/amiga-re-kit/">balíček na PyPI</a>.</p>
   </footer>
 </div>
